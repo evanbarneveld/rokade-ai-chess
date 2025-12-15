@@ -1,8 +1,8 @@
 mod game_state;
 mod pieces;
 mod board;
-mod castling_rights;
 mod game;
+mod piece_mover;
 
 use crate::game::Game;
 use std::io::{self, Write};
@@ -17,7 +17,7 @@ fn main() {
         return;
     }
 
-    println!("Welcome to chess. Type 'fen' to show FEN, 'quit' to quit.\n");
+    println!("Welcome to chess. Type 'fen' to show FEN, 'init <fen>' to init board, 'quit' to quit.\n");
 
     loop {
         println!("{}", game.board());

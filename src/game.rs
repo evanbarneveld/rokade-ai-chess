@@ -1,9 +1,11 @@
 use crate::game_state::GameState;
 use crate::board::Board;
+use crate::piece_mover::PieceMover;
+use crate::pieces::Color;
 
 #[derive(Debug)]
-pub struct Game {
-    game_state: GameState
+pub struct Game<> {
+    game_state: GameState,
 }
 
 impl Game {
@@ -67,47 +69,14 @@ impl Game {
     }
 
     fn move_piece(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
-        if self.is_valid_pawn_move(from, to) {
-            self.adjust_game_state(from, to); //for pawn move
-            self.game_state.move_piece(from, to);
-            //handle promotion
-        } else if self.is_valid_castling_move(from, to) {
-            self.adjust_game_state(from, to); //for casting move
-            self.game_state.move_piece(from, to);
-            //self.game_state.move_piece(from, to); //TODO hop the rook
-            return true
-        } else if self.is_valid_move(from, to) { //for regular move
-            self.adjust_game_state(from, to);
-            self.game_state.move_piece(from, to);
-            return true
+        if PieceMover::move_piece(&mut self.game_state, from, to) {
+            self.game_state.switch_color();
+            if self.game_state.active_color() == Color::White {
+                self.game_state.increment_full_move_number();
+            }
+            return true;
         }
         false
     }
-
-    fn is_valid_pawn_move(&self, from: (usize, usize), to: (usize, usize)) -> bool {
-        false
-    }
-
-    fn is_valid_castling_move(&self, from: (usize, usize), to: (usize, usize)) -> bool {
-        //check if the 'from' location is occupied with a piece and the right color
-        //determine if the position is in check
-        //check if the movement of the piece is correct
-        false
-    }
-
-    fn is_valid_move(&self, from: (usize, usize), to: (usize, usize)) -> bool {
-        //check if the 'from' location is occupied with a piece and the right color
-        //determine if the position is in check
-        //check if the movement of the piece is correct
-        true
-    }
-
-    fn adjust_game_state(&self, from: (usize, usize), to: (usize, usize)) {
-        //adjust the game_state:
-        // active_color
-        // castling_rights
-        // en_passant_target
-        // half_move_clock
-        // full_move_number
-    }
 }
+

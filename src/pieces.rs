@@ -25,6 +25,14 @@ impl Piece {
         Piece { piece_type, color }
     }
 
+    pub fn get_type(&self) -> PieceType {
+        self.piece_type
+    }
+    
+    pub fn get_color(&self) -> Color {
+        self.color
+    }
+    
     pub fn symbol(&self) -> char {
         match (self.color, self.piece_type) {
             (Color::White, PieceType::King) => '♚',

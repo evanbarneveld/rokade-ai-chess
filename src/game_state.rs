@@ -1,5 +1,4 @@
 use crate::board::Board;
-use crate::castling_rights::CastlingRights;
 use crate::pieces::{Piece, Color};
 
 #[derive(Debug)]
@@ -19,7 +18,7 @@ impl GameState {
             active_color: Color::White,
             castling_rights: CastlingRights::all(),
             en_passant_target: None,
-            half_move_clock: 0,
+            half_move_clock: 0, //for 50 move rule (since last pawn move or capture)
             full_move_number: 1,
         }
     }
@@ -30,6 +29,33 @@ impl GameState {
 
     pub fn move_piece(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
         self.board.move_piece(from, to)
+    }
+
+    pub fn set_en_passant_target(&mut self, target: Option<(usize, usize)>) {
+        self.en_passant_target = target;
+    }
+
+    pub fn active_color(&self) -> Color {
+        self.active_color
+    }
+
+    pub fn switch_color(&mut self) {
+        match self.active_color {
+            Color::White => self.active_color = Color::Black,
+            Color::Black => self.active_color = Color::White,
+        }
+    }
+
+    pub fn increment_full_move_number(&mut self) {
+        self.full_move_number += 1;
+    }
+
+    pub fn increment_half_move_clock(&mut self) {
+        self.half_move_clock += 1;
+    }
+
+    pub fn reset_half_move_clock(&mut self) {
+        self.half_move_clock = 0;
     }
 
     pub fn from_fen(fen: &str) -> Result<Self, String> {
@@ -178,3 +204,55 @@ impl GameState {
         fen
     }
 }
+
+#[derive(Debug)]
+struct CastlingRights {
+    white_kingside: bool,
+    white_queenside: bool,
+    black_kingside: bool,
+    black_queenside: bool,
+}
+
+impl CastlingRights {
+    pub fn all() -> Self {
+        CastlingRights {
+            white_kingside: true,
+            white_queenside: true,
+            black_kingside: true,
+            black_queenside: true,
+        }
+    }
+
+    pub fn none() -> Self {
+        CastlingRights {
+            white_kingside: false,
+            white_queenside: false,
+            black_kingside: false,
+            black_queenside: false,
+        }
+    }
+
+    pub fn from_fen(s: &str) -> Self {
+        if s == "-" {
+            return Self::none();
+        }
+
+        CastlingRights {
+            white_kingside: s.contains('K'),
+            white_queenside: s.contains('Q'),
+            black_kingside: s.contains('k'),
+            black_queenside: s.contains('q'),
+        }
+    }
+
+    pub fn to_fen(&self) -> String {
+        let mut result = String::new();
+        if self.white_kingside { result.push('K'); }
+        if self.white_queenside { result.push('Q'); }
+        if self.black_kingside { result.push('k'); }
+        if self.black_queenside { result.push('q'); }
+        if result.is_empty() { result.push('-'); }
+        result
+    }
+}
+
