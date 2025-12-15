@@ -61,18 +61,34 @@ impl Board {
 
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // ANSI escape sequences for background colors (light/dark) and reset
+        const RESET: &str = "\x1b[0m";
+        const BG_LIGHT: &str = "\x1b[48;5;244m"; // light gray
+        const BG_DARK: &str = "\x1b[48;5;239m";  // dark gray
+
         writeln!(f, "  a b c d e f g h")?;
         for row in (0..8).rev() {
+            // Rank label on the left
             write!(f, "{} ", row + 1)?;
             for col in 0..8 {
-                if let Some(piece) = self.squares[row][col] {
-                    write!(f, "{} ", piece.symbol())?;
+                // A1 (row 0, col 0) is dark; H1 (row 0, col 7) is light
+                let is_dark = (row + col) % 2 == 0;
+                let bg = if is_dark { BG_DARK } else { BG_LIGHT };
+
+                let ch = if let Some(piece) = self.squares[row][col] {
+                    piece.symbol()
                 } else {
-                    write!(f, "· ")?;
-                }
+                    ' '
+                };
+
+                // Print one cell: background color, symbol or space + padding space, then reset
+                // Foreground color is not changed to keep piece coloring intact
+                write!(f, "{}{} {}", bg, ch, RESET)?;
             }
+            // Rank label on the right
             writeln!(f, "{}", row + 1)?;
         }
+        // File labels at the bottom
         writeln!(f, "  a b c d e f g h")
     }
 }
