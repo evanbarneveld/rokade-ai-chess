@@ -68,6 +68,11 @@ impl Game {
         Ok(())
     }
 
+    pub fn init_state(&mut self) -> Result<(), String> {
+        self.game_state = GameState::new();
+        Ok(())
+    }
+
     fn move_piece(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
         if PieceMover::move_piece(&mut self.game_state, from, to) {
             self.game_state.switch_color();

@@ -17,7 +17,7 @@ fn main() {
         return;
     }
 
-    println!("Welcome to chess. Type 'fen' to show FEN, 'init <fen>' to init board, 'quit' to quit.\n");
+    println!("Welcome to chess. Type 'fen' to show FEN, 'init [<fen>]' to init board, 'quit' to quit.\n");
 
     loop {
         println!("{}", game.board());
@@ -43,7 +43,10 @@ fn main() {
             if cmd.eq_ignore_ascii_case("init") {
                 let fen = parts.next().unwrap_or("").trim();
                 if fen.is_empty() {
-                    println!("Usage: init <FEN>\n");
+                    match game.init_state() {
+                        Ok(()) => println!("Board reinitialized.\n"),
+                        Err(e) => println!("Error reinitializing board: {}\n", e),
+                    }
                 } else {
                     match game.init_state_from_fen(fen) {
                         Ok(()) => println!("Board reinitialized.\n"),
