@@ -36,6 +36,23 @@ fn main() {
             println!("{}\n", game.to_fen());
             continue;
         }
+        // Handle "init <fen>" to reinitialize the board from a FEN string
+        {
+            let mut parts = input.splitn(2, char::is_whitespace);
+            let cmd = parts.next().unwrap_or("");
+            if cmd.eq_ignore_ascii_case("init") {
+                let fen = parts.next().unwrap_or("").trim();
+                if fen.is_empty() {
+                    println!("Usage: init <FEN>\n");
+                } else {
+                    match game.init_state_from_fen(fen) {
+                        Ok(()) => println!("Board reinitialized.\n"),
+                        Err(e) => println!("Error parsing FEN: {}\n", e),
+                    }
+                }
+                continue;
+            }
+        }
         if input.is_empty() { continue; }
 
         if game.move_piece_str(input) {
