@@ -86,7 +86,7 @@ impl fmt::Display for Board {
                 write!(f, "{}{} {}", bg, ch, RESET)?;
             }
             // Rank label on the right
-            writeln!(f, "{}", row + 1)?;
+            writeln!(f, " {}", row + 1)?;
         }
         // File labels at the bottom
         writeln!(f, "  a b c d e f g h")
