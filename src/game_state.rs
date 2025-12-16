@@ -9,6 +9,16 @@ pub struct GameState {
     en_passant_target: Option<(usize, usize)>,
     half_move_clock: u32,
     full_move_number: u32,
+    outcome: Option<GameOutcome>
+}
+
+#[derive(Debug)]
+pub struct GameOutcome {
+    winner: Option<Color>,
+    is_stalemate: bool,
+    is_threefold_repetition: bool,
+    is_insufficient_material: bool,
+    is_draw: bool
 }
 
 impl GameState {
@@ -20,6 +30,7 @@ impl GameState {
             en_passant_target: None,
             half_move_clock: 0, //for 50 move rule (since last pawn move or capture)
             full_move_number: 1,
+            outcome: None
         }
     }
 
@@ -142,6 +153,7 @@ impl GameState {
             en_passant_target,
             half_move_clock,
             full_move_number,
+            outcome: None
         })
     }
 

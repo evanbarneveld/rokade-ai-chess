@@ -3,6 +3,7 @@ mod pieces;
 mod board;
 mod game;
 mod piece_mover;
+mod move_parser;
 
 use crate::game::Game;
 use std::io::{self, Write};
