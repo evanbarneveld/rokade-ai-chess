@@ -65,8 +65,17 @@ impl fmt::Display for Board {
         const RESET: &str = "\x1b[0m";
         const BG_LIGHT: &str = "\x1b[48;5;244m"; // light gray
         const BG_DARK: &str = "\x1b[48;5;239m";  // dark gray
+        // Foreground colors for pieces
+        const FG_WHITE: &str = "\x1b[97m"; // white pieces (white)
+        const FG_BLACK: &str = "\x1b[30m"; // black pieces (black)
 
-        writeln!(f, "  a b c d e f g h")?;
+        // File labels (top), spaced to match 3-character wide squares
+        write!(f, "  ")?; // left margin for rank labels
+        for file in 0..8 {
+            let c = (b'a' + file as u8) as char;
+            write!(f, " {} ", c)?;
+        }
+        writeln!(f)?;
         for row in (0..8).rev() {
             // Rank label on the left
             write!(f, "{} ", row + 1)?;
@@ -75,20 +84,28 @@ impl fmt::Display for Board {
                 let is_dark = (row + col) % 2 == 0;
                 let bg = if is_dark { BG_DARK } else { BG_LIGHT };
 
-                let ch = if let Some(piece) = self.squares[row][col] {
-                    piece.symbol()
+                if let Some(piece) = self.squares[row][col] {
+                    let ch = piece.symbol();
+                    let fg = match piece.get_color() {
+                        Color::White => FG_WHITE,
+                        Color::Black => FG_BLACK,
+                    };
+                    // Background + foreground + space + symbol + space + reset
+                    write!(f, "{}{} {} {}", bg, fg, ch, RESET)?;
                 } else {
-                    ' '
-                };
-
-                // Print one cell: background color, symbol or space + padding space, then reset
-                // Foreground color is not changed to keep piece coloring intact
-                write!(f, "{}{} {}", bg, ch, RESET)?;
+                    // Empty square: just background with spaces
+                    write!(f, "{}   {}", bg, RESET)?;
+                }
             }
             // Rank label on the right
             writeln!(f, " {}", row + 1)?;
         }
-        // File labels at the bottom
-        writeln!(f, "  a b c d e f g h")
+        // File labels at the bottom, spaced to match 3-character wide squares
+        write!(f, "  ")?;
+        for file in 0..8 {
+            let c = (b'a' + file as u8) as char;
+            write!(f, " {} ", c)?;
+        }
+        writeln!(f)
     }
 }

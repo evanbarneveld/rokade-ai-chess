@@ -23,6 +23,10 @@ impl Game {
         self.game_state.to_fen()
     }
 
+    pub fn active_color(&self) -> Color {
+        self.game_state.active_color()
+    }
+
     // Parse a simple coordinate move in the form "e2-e4" and delegate to the existing move_piece
     // Returns false if the input cannot be parsed or the move fails.
     pub fn move_piece_str(&mut self, mv: &str) -> bool {

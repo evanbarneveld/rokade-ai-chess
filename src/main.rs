@@ -21,7 +21,9 @@ fn main() {
 
     loop {
         println!("{}", game.board());
-        print!("Move> ");
+
+        if game.active_color() == pieces::Color::White { print!("White> "); } else { print!("Black> "); }
+
         if io::stdout().flush().is_err() { break; }
 
         let mut input = String::new();

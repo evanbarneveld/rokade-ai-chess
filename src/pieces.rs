@@ -34,19 +34,14 @@ impl Piece {
     }
     
     pub fn symbol(&self) -> char {
-        match (self.color, self.piece_type) {
-            (Color::White, PieceType::King) => '♚',
-            (Color::White, PieceType::Queen) => '♛',
-            (Color::White, PieceType::Rook) => '♜',
-            (Color::White, PieceType::Bishop) => '♝',
-            (Color::White, PieceType::Knight) => '♞',
-            (Color::White, PieceType::Pawn) => '♟',
-            (Color::Black, PieceType::King) => '♔',
-            (Color::Black, PieceType::Queen) => '♕',
-            (Color::Black, PieceType::Rook) => '♖',
-            (Color::Black, PieceType::Bishop) => '♗',
-            (Color::Black, PieceType::Knight) => '♘',
-            (Color::Black, PieceType::Pawn) => '♙',
+        // Use the white piece Unicode characters for both colors; colorization is handled in Board display
+        match self.piece_type {
+            PieceType::King => '♚',
+            PieceType::Queen => '♛',
+            PieceType::Rook => '♜',
+            PieceType::Bishop => '♝',
+            PieceType::Knight => '♞',
+            PieceType::Pawn => '♟',
         }
     }
 
