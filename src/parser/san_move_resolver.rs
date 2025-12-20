@@ -1,5 +1,5 @@
 use crate::board::Board;
-use crate::piece::pieces::{Color, PieceType};
+use crate::piece::pieces::{Color, Piece};
 use crate::parser::resolvers::pawn_resolver::resolve_pawn_move;
 
 pub struct ResolvedSanMove {
@@ -7,7 +7,7 @@ pub struct ResolvedSanMove {
     pub is_capture: bool,
     pub is_king_side_castle: bool,
     pub is_queen_side_castle: bool,
-    pub promotion_piece: Option<char>
+    pub promotion_piece: Option<Piece>
 }
 
 #[derive(Debug)]
@@ -15,7 +15,7 @@ pub struct SanMoveResolver {}
 
 impl SanMoveResolver {
 
-    pub fn resolve_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<char>, board: &Board, active_color:Color) -> Result<ResolvedSanMove, String> {
+    pub fn resolve_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<Piece>, board: &Board, active_color:Color) -> Result<ResolvedSanMove, String> {
 
         let from_col = Self::get_column_number_from_char(incomplete_move_part.chars().nth(0).unwrap());
         let from_row = Self::get_row_number_from_char(incomplete_move_part.chars().nth(1).unwrap());

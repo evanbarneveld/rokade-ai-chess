@@ -2,6 +2,7 @@ use regex::Regex;
 use crate::board::Board;
 use crate::parser::san_move_resolver::{ResolvedSanMove, SanMoveResolver};
 use crate::piece::pieces::Color;
+use crate::piece::pieces::Piece;
 
 pub struct ParsedMove {
     pub from: (usize, usize),
@@ -9,7 +10,7 @@ pub struct ParsedMove {
     pub is_capture: bool,
     pub is_king_side_castle: bool,
     pub is_queen_side_castle: bool,
-    pub promotion_piece: Option<char>
+    pub promotion_piece: Option<Piece>
 }
 
 #[derive(Debug)]
@@ -81,8 +82,14 @@ impl MoveParser {
 
         let piece_char = cap0.get(1).map(|m| m.as_str()).unwrap_or("P").chars().nth(0).unwrap();
 
-        let promotion_piece: Option<char> = if is_promotion {
-            cap0.get(6).map(|m|m.as_str().chars().nth(1)).unwrap()
+        let promotion_piece: Option<Piece> = if is_promotion {
+            let mut piece_char = cap0.get(6).map(|m|m.as_str().chars().nth(1)).unwrap().unwrap();
+            if (active_color == Color::White) {
+                piece_char = piece_char.to_ascii_uppercase();
+            } else {
+                piece_char = piece_char.to_ascii_uppercase();
+            }
+            Piece::from_fen_char(piece_char)
         } else {
             None
         };
@@ -96,7 +103,7 @@ impl MoveParser {
 
         let move_to = format!("{}", cap0.get(5).map(|m| m.as_str()).unwrap_or("?"));
 
-        println!("Piece: {}, Move from: {}, move to: {}, capture: {}, promotion: {}, king side castle: {}, queen side castle: {}", piece_char, move_from, move_to, is_capture, is_promotion, is_king_side_castle, is_queen_side_castle);
+        //println!("Piece: {}, Move from: {}, move to: {}, capture: {}, promotion: {}, king side castle: {}, queen side castle: {}", piece_char, move_from, move_to, is_capture, is_promotion, is_king_side_castle, is_queen_side_castle);
 
         if !is_king_side_castle && !is_queen_side_castle && move_from.contains("?") {
             self.san_move_resolver.resolve_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color)

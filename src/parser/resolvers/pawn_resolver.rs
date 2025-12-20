@@ -2,7 +2,7 @@ use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
 
 /*
- Given a pawn move and the target position on the board, return the source cell, or None if the move is invalid.
+ Given a pawn move and the target position on the board, return the source position, or None if the move is invalid.
  */
 pub fn resolve_pawn_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &Board, active_color:Color) -> Option<(u8, u8)> {
     // Convert destination to indexes
