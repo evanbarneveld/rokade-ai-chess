@@ -1,5 +1,5 @@
-use crate::game_state::GameState;
-use crate::pieces::{Piece, PieceType};
+use crate::state::game_state::GameState;
+use crate::piece::pieces::{Piece, PieceType};
 
 #[derive(Debug)]
 pub struct PieceMover {}

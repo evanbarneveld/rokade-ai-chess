@@ -1,19 +1,19 @@
-mod game_state;
-mod pieces;
 mod board;
-mod game;
-mod piece_mover;
-mod move_parser;
+mod chess;
+mod state;
+mod cli;
+mod piece;
 
-use crate::game::Game;
+use crate::chess::Chess;
+
 use std::io::{self, Write};
+use piece::pieces;
 
 fn main() {
     // Start a game from the initial position
-    let mut game = Game::new();
+    let mut game = Chess::new();
 
-    let starting_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    if let Err(e) = game.init_state_from_fen(starting_fen) {
+    if let Err(e) = game.reset() {
         eprintln!("Error parsing FEN: {}", e);
         return;
     }
@@ -46,12 +46,12 @@ fn main() {
             if cmd.eq_ignore_ascii_case("init") {
                 let fen = parts.next().unwrap_or("").trim();
                 if fen.is_empty() {
-                    match game.init_state() {
+                    match game.reset() {
                         Ok(()) => println!("Board reinitialized.\n"),
                         Err(e) => println!("Error reinitializing board: {}\n", e),
                     }
                 } else {
-                    match game.init_state_from_fen(fen) {
+                    match game.set_starting_fen(fen) {
                         Ok(()) => println!("Board reinitialized.\n"),
                         Err(e) => println!("Error parsing FEN: {}\n", e),
                     }
