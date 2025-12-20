@@ -1,6 +1,6 @@
 use crate::state::game_state::GameState;
 use crate::board::Board;
-use crate::cli::parser::MoveParser;
+use crate::parser::parser::MoveParser;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::Color;
 use crate::state::fen::reader::reset_from_fen;
@@ -28,10 +28,10 @@ impl Chess {
         }
     }
 
-    pub fn reset(&mut self) -> Result<(), String> {
-        self.game_state = reset_from_fen(&self.starting_fen)?;
-        Ok(())
+    pub fn reset(&mut self) -> Result<GameState, String> {
+        reset_from_fen(&self.starting_fen)
     }
+
     pub fn set_starting_fen(&mut self, fen: &str) -> Result<(), String> {
         self.starting_fen = String::from(fen);
         self.game_state = reset_from_fen(&self.starting_fen)?;
@@ -46,8 +46,8 @@ impl Chess {
         game_state_to_fen_string(self.game_state.clone())
     }
 
-    pub fn active_color(&self) -> Color {
-        self.game_state.active_color()
+    pub fn active_color_is_white(&self) -> bool {
+        self.game_state.active_color() == Color::White
     }
 
     pub fn move_piece_str(&mut self, mv: &str) -> bool {

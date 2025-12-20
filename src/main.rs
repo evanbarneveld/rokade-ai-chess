@@ -1,13 +1,5 @@
-mod board;
-mod chess;
-mod state;
-mod cli;
-mod piece;
-
-use crate::chess::Chess;
-
 use std::io::{self, Write};
-use piece::pieces;
+use chess::Chess;              // uses the re‑export from lib.rs
 
 fn main() {
     // Start a game from the initial position
@@ -23,7 +15,7 @@ fn main() {
     loop {
         println!("{}", game.board());
 
-        if game.active_color() == pieces::Color::White { print!("White> "); } else { print!("Black> "); }
+        if game.active_color_is_white() { print!("White> "); } else { print!("Black> "); }
 
         if io::stdout().flush().is_err() { break; }
 
@@ -47,7 +39,7 @@ fn main() {
                 let fen = parts.next().unwrap_or("").trim();
                 if fen.is_empty() {
                     match game.reset() {
-                        Ok(()) => println!("Board reinitialized.\n"),
+                        Ok(GameState) => println!("Board reinitialized.\n"),
                         Err(e) => println!("Error reinitializing board: {}\n", e),
                     }
                 } else {
