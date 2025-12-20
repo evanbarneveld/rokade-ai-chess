@@ -28,8 +28,12 @@ impl Chess {
         }
     }
 
-    pub fn reset(&mut self) -> Result<GameState, String> {
-        reset_from_fen(&self.starting_fen)
+    pub fn reset(&mut self) -> Result<(), String> {
+        match reset_from_fen(&self.starting_fen) {
+            Ok(state) => { Ok(self.game_state = state) },
+            Err(e) => Err(e)
+        }
+
     }
 
     pub fn set_starting_fen(&mut self, fen: &str) -> Result<(), String> {
@@ -51,10 +55,10 @@ impl Chess {
     }
 
     pub fn move_piece_str(&mut self, mv: &str) -> bool {
-        let parsed_move = self.move_parser.parse(mv);
+        let parsed_move = self.move_parser.parse(self.game_state.board(), self.game_state.active_color(), mv);
         match parsed_move {
-            Some(mv) => {self.move_piece(mv.from, mv.to) }
-            None => { return false }
+            Ok(v) => {self.move_piece(v.from, v.to) },
+            Err(e) => { println!("Error parsing move: {}", e); false}
         }
     }
 

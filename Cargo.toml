@@ -8,3 +8,4 @@ name = "chess"
 path = "src/lib.rs"
 
 [dependencies]
+regex = "1.12.2"

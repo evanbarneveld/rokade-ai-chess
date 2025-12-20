@@ -10,7 +10,7 @@ fn main() {
         return;
     }
 
-    println!("Welcome to chess. Type 'fen' to show FEN, 'init [<fen>]' to init board, 'quit' to quit.\n");
+    println!("Welcome to chess. Type 'fen' to show FEN, 'reset [<fen>] or reset standard' to reset the board, 'quit' to quit.\n");
 
     loop {
         println!("{}", game.board());
@@ -31,20 +31,22 @@ fn main() {
             println!("{}\n", game.to_fen());
             continue;
         }
-        // Handle "init <fen>" to reinitialize the board from a FEN string
+        // Handle "reset <fen>" to reinitialize the board from a FEN string
         {
             let mut parts = input.splitn(2, char::is_whitespace);
             let cmd = parts.next().unwrap_or("");
-            if cmd.eq_ignore_ascii_case("init") {
+            if cmd.eq_ignore_ascii_case("reset") {
                 let fen = parts.next().unwrap_or("").trim();
                 if fen.is_empty() {
                     match game.reset() {
-                        Ok(GameState) => println!("Board reinitialized.\n"),
-                        Err(e) => println!("Error reinitializing board: {}\n", e),
+                        Ok(GameState) => println!("Board reset.\n"),
+                        Err(e) => println!("Error resetting board: {}\n", e),
                     }
+                } else if fen.eq("standard") {
+                    game = Chess::new();
                 } else {
                     match game.set_starting_fen(fen) {
-                        Ok(()) => println!("Board reinitialized.\n"),
+                        Ok(()) => println!("Board was reset.\n"),
                         Err(e) => println!("Error parsing FEN: {}\n", e),
                     }
                 }
