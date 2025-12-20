@@ -1,5 +1,5 @@
 use crate::state::game_state::GameState;
-use crate::piece::pieces::{Piece, PieceType};
+use crate::piece::pieces::{Color, Piece, PieceType};
 
 #[derive(Debug)]
 pub struct PieceMover {}
@@ -63,6 +63,14 @@ impl PieceMover {
                 }
             }
         }
+    }
+
+    pub fn promote_pawn(game_state: &mut GameState, from: (usize, usize), to: (usize, usize), piece: Piece) -> bool {
+        if game_state.active_color() == Color::White && from.0 == 6 || game_state.active_color() == Color::Black && from.0 == 1 {
+            game_state.promote_pawn(from, to, piece);
+            return true
+        }
+        false
     }
 
     fn is_valid_pawn_move(game_state: &GameState, from: (usize, usize), to: (usize, usize)) -> bool {

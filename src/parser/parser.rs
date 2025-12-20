@@ -62,6 +62,8 @@ impl MoveParser {
         let re = Regex::new(r"^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(=[NBRQK])?(\+|#)?$|^(O-O-O)?$|^(O-O)?$").unwrap();
         let caps: Vec<_> = re.captures_iter(san_move).collect();
 
+        //println!("{:?}", caps);
+
         if caps.len() == 0 || caps.get(0).is_none() {
             return Err(String::from("Invalid move format"));
         }
@@ -78,7 +80,14 @@ impl MoveParser {
         let is_king_side_castle = cap0.get(0).map(|m| m.as_str()) == Some("O-O");
 
         let piece_char = cap0.get(1).map(|m| m.as_str()).unwrap_or("P").chars().nth(0).unwrap();
-        let promotion_piece: Option<char> = cap0.get(6).map(|m| m.as_str().chars().nth(0).unwrap());
+
+        let promotion_piece: Option<char> = if is_promotion {
+            cap0.get(6).map(|m|m.as_str().chars().nth(1)).unwrap()
+        } else {
+            None
+        };
+
+        //println!("{:?}", promotion_piece);
 
         let move_from = format!("{}{}",
                                cap0.get(2).map(|m| m.as_str()).unwrap_or("?"),
@@ -90,7 +99,7 @@ impl MoveParser {
         println!("Piece: {}, Move from: {}, move to: {}, capture: {}, promotion: {}, king side castle: {}, queen side castle: {}", piece_char, move_from, move_to, is_capture, is_promotion, is_king_side_castle, is_queen_side_castle);
 
         if !is_king_side_castle && !is_queen_side_castle && move_from.contains("?") {
-            self.san_move_resolver.resolve_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, board, active_color)
+            self.san_move_resolver.resolve_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color)
         } else {
             let san_move = format!("{}{}", move_from, move_to);
             Ok(ResolvedSanMove {

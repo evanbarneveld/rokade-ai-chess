@@ -56,7 +56,7 @@ fn main() {
         if input.is_empty() { continue; }
 
         if game.move_piece_str(input) {
-            println!("OK\n");
+            //println!("OK\n");
         } else {
             println!("Illegal or invalid move: '{}'. Try again.\n", input);
         }

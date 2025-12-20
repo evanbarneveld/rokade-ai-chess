@@ -2,7 +2,7 @@ use crate::state::game_state::GameState;
 use crate::board::Board;
 use crate::parser::parser::MoveParser;
 use crate::piece::piece_mover::PieceMover;
-use crate::piece::pieces::Color;
+use crate::piece::pieces::{Color, Piece };
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 
@@ -42,7 +42,7 @@ impl Chess {
         Ok(())
     }
 
-    pub fn board(&self) -> &Board {
+    pub fn board(&mut self) -> &Board {
         &self.game_state.board()
     }
 
@@ -55,9 +55,25 @@ impl Chess {
     }
 
     pub fn move_piece_str(&mut self, mv: &str) -> bool {
-        let parsed_move = self.move_parser.parse(self.game_state.board(), self.game_state.active_color(), mv);
+        let active_color = self.game_state.active_color();
+        let board = self.game_state.board();
+        let parsed_move = self.move_parser.parse(board, active_color, mv);
         match parsed_move {
-            Ok(v) => {self.move_piece(v.from, v.to) },
+            Ok(v) => {
+                let mut ok: bool = true;
+
+                if v.promotion_piece.is_some() {
+                    if !self.promote_piece(v.from, v.to, v.promotion_piece.unwrap()) {
+                        ok = false
+                    }
+                    ok
+                } else {
+                    if !self.move_piece(v.from, v.to) {
+                        ok = false
+                    }
+                    ok
+                }
+            },
             Err(e) => { println!("Error parsing move: {}", e); false}
         }
     }
@@ -72,5 +88,20 @@ impl Chess {
         }
         false
     }
+
+    fn promote_piece(&mut self, from:(usize, usize), to: (usize, usize), promotion_piece: char) -> bool {
+        let piece = if self.game_state.active_color() == Color::White {
+            Piece::from_fen_char(promotion_piece.to_ascii_uppercase())
+        } else {
+            Piece::from_fen_char(promotion_piece.to_ascii_lowercase())
+        };
+
+        if (piece.is_none()) {
+            false;
+        }
+
+        PieceMover::promote_pawn(&mut self.game_state, from, to, piece.unwrap())
+    }
+
 }
 

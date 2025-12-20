@@ -64,6 +64,11 @@ impl GameState {
         self.board.move_piece(from, to)
     }
 
+    pub fn promote_pawn(&mut self, from: (usize, usize), to: (usize, usize), piece: Piece) {
+        self.board.set(to.0, to.1, Some(piece));
+        self.board.set(from.0, from.1, None);
+    }
+
     pub fn set_en_passant_target(&mut self, target: Option<(usize, usize)>) {
         self.en_passant_target = target;
     }
