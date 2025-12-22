@@ -25,9 +25,9 @@ impl MoveParser {
         }
     }
 
-    pub fn parse(&mut self, board: &Board, active_color:Color, move_san: &str) -> Result<ParsedMove, String> {
+    pub fn parse(&mut self, board: &Board, active_color:Color, move_san: &str, en_passant_target: Option<(usize,usize)>) -> Result<ParsedMove, String> {
 
-        let conversion_result = self.convert_and_validate_san_move(board, active_color, move_san);
+        let conversion_result = self.convert_and_validate_san_move(board, active_color, move_san, en_passant_target);
 
         if conversion_result.is_err() { return Err(conversion_result.err().unwrap()); }
 
@@ -59,7 +59,7 @@ impl MoveParser {
         })
     }
 
-    fn convert_and_validate_san_move(&mut self, board: &Board, active_color: Color, san_move: &str) -> Result<CompletedSanMove, String> {
+    fn convert_and_validate_san_move(&mut self, board: &Board, active_color: Color, san_move: &str, en_passant_target:Option<(usize,usize)>) -> Result<CompletedSanMove, String> {
         let re = Regex::new(r"^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(=[NBRQK])?(\+|#)?$|^(O-O-O)?$|^(O-O)?$").unwrap();
         let caps: Vec<_> = re.captures_iter(san_move).collect();
 
@@ -124,7 +124,7 @@ impl MoveParser {
                promotion_piece
             })
         } else if move_from.contains("?") {
-            self.san_move_resolver.solve_ambiguous_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color)
+            self.san_move_resolver.solve_ambiguous_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color, en_passant_target)
         } else {
             let san_move = format!("{}{}", move_from, move_to);
             Ok(CompletedSanMove {

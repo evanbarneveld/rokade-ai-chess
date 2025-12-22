@@ -91,7 +91,7 @@ impl Chess {
     pub fn move_piece_san(&mut self, mv: &str) -> bool {
         let active_color = self.game_state.active_color();
         let board = self.game_state.board();
-        let parsed_move = self.move_parser.parse(board, active_color, mv);
+        let parsed_move = self.move_parser.parse(board, active_color, mv, self.game_state.en_passant_target());
         match parsed_move {
             Ok(v) => {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {

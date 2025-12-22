@@ -21,7 +21,7 @@ pub struct SanMoveCompleter {}
 
 impl SanMoveCompleter {
 
-    pub fn solve_ambiguous_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<Piece>, board: &Board, active_color:Color) -> Result<CompletedSanMove, String> {
+    pub fn solve_ambiguous_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<Piece>, board: &Board, active_color:Color, en_passant_target:Option<(usize,usize)>) -> Result<CompletedSanMove, String> {
 
         let from_col = Self::get_column_number_from_char(incomplete_move_part.chars().nth(0).unwrap());
         let from_row = Self::get_row_number_from_char(incomplete_move_part.chars().nth(1).unwrap());
@@ -30,7 +30,7 @@ impl SanMoveCompleter {
         let to_row = Self::get_row_number_from_char(move_to.chars().nth(1).unwrap());
 
         let resolved_from_move = match piece {
-            'P' => { solve_ambiguous_pawn_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
+            'P' => { solve_ambiguous_pawn_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color, en_passant_target)},
             'N' => { solve_ambiguous_knight_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
             'B' => { solve_ambiguous_bishop_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
             'Q' => { solve_ambiguous_queen_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
