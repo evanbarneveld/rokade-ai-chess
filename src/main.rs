@@ -10,7 +10,7 @@ fn main() {
         return;
     }
 
-    println!("Welcome to chess. Type 'fen' to show FEN, 'reset [<fen>] or reset standard' to reset the board, 'quit' to quit.\n");
+    println!("Welcome to chess. Type 'fen' to show FEN, 'reset [<fen>] or reset standard' to reset the board, 'exit' to exit.\n");
 
     loop {
         println!("{}", game.board());
@@ -23,7 +23,7 @@ fn main() {
         if io::stdin().read_line(&mut input).is_err() { break; }
         let input = input.trim();
 
-        if input.eq_ignore_ascii_case("quit") {
+        if input.eq_ignore_ascii_case("exit") {
             println!("Bye!");
             break;
         }
@@ -39,7 +39,7 @@ fn main() {
                 let fen = parts.next().unwrap_or("").trim();
                 if fen.is_empty() {
                     match game.reset() {
-                        Ok(GameState) => println!("Board reset.\n"),
+                        Ok(_) => println!("Board reset.\n"),
                         Err(e) => println!("Error resetting board: {}\n", e),
                     }
                 } else if fen.eq("standard") {
@@ -55,9 +55,7 @@ fn main() {
         }
         if input.is_empty() { continue; }
 
-        if game.move_piece_san(input) {
-            println!("\nFen: {}", game.to_fen());
-        } else {
+        if !game.move_piece_san(input) {
             println!("Illegal or invalid move: '{}'. Try again.\n", input);
         }
     }

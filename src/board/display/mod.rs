@@ -36,8 +36,8 @@ impl fmt::Display for Board {
                     // Background + foreground + space + symbol + space + reset
                     write!(f, "{}{} {} {}", bg, fg, ch, RESET)?;
                 } else {
-                    // Empty square: just background with spaces
-                    write!(f, "{}   {}", bg, RESET)?;
+                    let ch = '\u{2003}';
+                    write!(f, "{}{} {} {}", bg, bg, ch, RESET)?;
                 }
             }
             // Rank label on the right

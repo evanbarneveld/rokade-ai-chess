@@ -2,7 +2,7 @@ use crate::state::game_state::GameState;
 use crate::board::Board;
 use crate::parser::parser::MoveParser;
 use crate::piece::piece_mover::PieceMover;
-use crate::piece::pieces::{Color, Piece };
+use crate::piece::pieces::{Color };
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 

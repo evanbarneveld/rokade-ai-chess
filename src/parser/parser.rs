@@ -84,7 +84,7 @@ impl MoveParser {
 
         let promotion_piece: Option<Piece> = if is_promotion {
             let mut piece_char = cap0.get(6).map(|m|m.as_str().chars().nth(1)).unwrap().unwrap();
-            if (active_color == Color::White) {
+            if active_color == Color::White {
                 piece_char = piece_char.to_ascii_uppercase();
             } else {
                 piece_char = piece_char.to_ascii_uppercase();

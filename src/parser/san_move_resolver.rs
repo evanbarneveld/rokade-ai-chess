@@ -39,7 +39,7 @@ impl SanMoveResolver {
 
         Ok(ResolvedSanMove{
             resolved_san_move: resolved_move,
-            is_capture: false,
+            is_capture: is_capture,
             is_king_side_castle: false,
             is_queen_side_castle:false,
             promotion_piece

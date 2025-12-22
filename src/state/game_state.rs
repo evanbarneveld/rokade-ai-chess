@@ -22,7 +22,7 @@ impl GameState {
             active_color: Color::White,
             castling_rights: CastlingRights::all(),
             en_passant_target: None,
-            half_move_clock: 0, //for 50 move rule (since last pawn move or capture)
+            half_move_clock: 0, //for 50 move rule (since last move_validators move or capture)
             full_move_number: 1,
             outcome: None
         }
@@ -60,8 +60,8 @@ impl GameState {
         self.full_move_number
     }
 
-    pub fn is_valid_board_move(&self, from: (usize, usize), to: (usize, usize), active_color:Color, is_capture:bool) -> bool {
-        self.board.is_valid_board_move(from, to, active_color, is_capture)
+    pub fn move_from_and_to_validation_check(&self, from: (usize, usize), to: (usize, usize), active_color:Color, is_capture:bool, is_pawn_move:bool, en_passant_target:Option<(usize, usize)>) -> bool {
+        self.board.move_from_and_to_validation_check(from, to, active_color, is_capture, is_pawn_move, en_passant_target)
     }
 
     pub fn board_square_has_piece_of_opposite_color(&self, to: (usize, usize), active_color:Color) -> bool {
@@ -76,12 +76,12 @@ impl GameState {
         self.board.clear(row, col);
     }
 
-    pub fn move_piece(&mut self, from: (usize, usize), to: (usize, usize), is_capture:bool) -> bool {
-        self.board.move_piece(from, to, is_capture)
+    pub fn move_piece(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
+        self.board.move_piece(from, to)
     }
 
-    pub fn move_pawn(&mut self, from: (usize, usize), to: (usize, usize), is_capture:bool, promotion_piece: Option<Piece>) -> bool {
-        self.board.move_pawn(from, to, is_capture, promotion_piece)
+    pub fn move_pawn(&mut self, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {
+        self.board.move_pawn(from, to, promotion_piece)
     }
 
     pub fn set_en_passant_target(&mut self, target: Option<(usize, usize)>) {

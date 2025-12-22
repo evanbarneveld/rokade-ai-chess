@@ -2,7 +2,7 @@ use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
 
 /*
- Given a pawn move and the target position on the board, return the source position, or None if the move is invalid.
+ Given a move_validators move and the target position on the board, return the source position, or None if the move is invalid.
  */
 pub fn resolve_pawn_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &Board, active_color:Color) -> Option<(u8, u8)> {
     // Convert destination to indexes
@@ -22,7 +22,7 @@ pub fn resolve_pawn_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_
 
     let mut candidates: Vec<(usize, usize)> = Vec::new(); // (row, col)
 
-    // Helper to check if a board square has our pawn
+    // Helper to check if a board square has our move_validators
     let has_our_pawn = |r: i8, c: i8| -> bool {
         if r < 0 || c < 0 || r > 7 || c > 7 { return false; }
         if let Some(p) = board.get(r as usize, c as usize) {
