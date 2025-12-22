@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use chess::Chess;              // uses the re‑export from lib.rs
+use chess::parser::pgn_document::PGNDocument;
 
 fn main() {
     // Start a game from the initial position
@@ -54,6 +55,34 @@ fn main() {
             }
         }
         if input.is_empty() { continue; }
+
+        // Handle "pgn <file>" to feed moves from a PGN file
+        {
+            let mut parts = input.splitn(2, char::is_whitespace);
+            let cmd = parts.next().unwrap_or("");
+            if cmd.eq_ignore_ascii_case("pgn") {
+                let path = parts.next().unwrap_or("").trim();
+                if path.is_empty() {
+                    println!("Usage: PGN <file>\n");
+                    continue;
+                }
+                match PGNDocument::from_file(path) {
+                    Ok(mut doc) => {
+                        let mut applied = 0usize;
+                        while let Some(mv) = doc.next_move() {
+                            if !game.move_piece_san(&mv) {
+                                println!("Illegal or invalid move from PGN: '{}'. Stopping.\n", mv);
+                                break;
+                            }
+                            applied += 1;
+                        }
+                        println!("Applied {} move(s) from '{}'.\n", applied, path);
+                    }
+                    Err(e) => println!("{}\n", e),
+                }
+                continue;
+            }
+        }
 
         if !game.move_piece_san(input) {
             println!("Illegal or invalid move: '{}'. Try again.\n", input);
