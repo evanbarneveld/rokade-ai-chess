@@ -1,6 +1,6 @@
 use regex::Regex;
 use crate::board::Board;
-use crate::parser::san_move_resolver::{ResolvedSanMove, SanMoveResolver};
+use crate::parser::ambigous_san_move_solver::{CompletedSanMove, SanMoveCompleter};
 use crate::piece::pieces::Color;
 use crate::piece::pieces::Piece;
 
@@ -15,13 +15,13 @@ pub struct ParsedMove {
 
 #[derive(Debug)]
 pub struct MoveParser {
-    san_move_resolver: SanMoveResolver
+    san_move_resolver: SanMoveCompleter
 }
 
 impl MoveParser {
     pub fn new() -> Self {
         MoveParser {
-            san_move_resolver: SanMoveResolver {}
+            san_move_resolver: SanMoveCompleter {}
         }
     }
 
@@ -59,7 +59,7 @@ impl MoveParser {
         })
     }
 
-    fn convert_and_validate_san_move(&mut self, board: &Board, active_color: Color, san_move: &str) -> Result<ResolvedSanMove, String> {
+    fn convert_and_validate_san_move(&mut self, board: &Board, active_color: Color, san_move: &str) -> Result<CompletedSanMove, String> {
         let re = Regex::new(r"^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(=[NBRQK])?(\+|#)?$|^(O-O-O)?$|^(O-O)?$").unwrap();
         let caps: Vec<_> = re.captures_iter(san_move).collect();
 
@@ -106,10 +106,10 @@ impl MoveParser {
         //println!("Piece: {}, Move from: {}, move to: {}, capture: {}, promotion: {}, king side castle: {}, queen side castle: {}", piece_char, move_from, move_to, is_capture, is_promotion, is_king_side_castle, is_queen_side_castle);
 
         if !is_king_side_castle && !is_queen_side_castle && move_from.contains("?") {
-            self.san_move_resolver.resolve_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color)
+            self.san_move_resolver.solve_ambiguous_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color)
         } else {
             let san_move = format!("{}{}", move_from, move_to);
-            Ok(ResolvedSanMove {
+            Ok(CompletedSanMove {
                resolved_san_move:san_move,
                is_capture,
                is_king_side_castle,

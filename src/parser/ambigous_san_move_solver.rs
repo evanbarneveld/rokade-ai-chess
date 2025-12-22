@@ -1,8 +1,8 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, Piece};
-use crate::parser::resolvers::pawn_resolver::resolve_pawn_move;
+use crate::parser::ambiguous_move_solvers::ambiguous_pawn_san_move_solver::solve_ambiguous_pawn_san_move;
 
-pub struct ResolvedSanMove {
+pub struct CompletedSanMove {
     pub resolved_san_move: String,
     pub is_capture: bool,
     pub is_king_side_castle: bool,
@@ -11,11 +11,11 @@ pub struct ResolvedSanMove {
 }
 
 #[derive(Debug)]
-pub struct SanMoveResolver {}
+pub struct SanMoveCompleter {}
 
-impl SanMoveResolver {
+impl SanMoveCompleter {
 
-    pub fn resolve_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<Piece>, board: &Board, active_color:Color) -> Result<ResolvedSanMove, String> {
+    pub fn solve_ambiguous_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<Piece>, board: &Board, active_color:Color) -> Result<CompletedSanMove, String> {
 
         let from_col = Self::get_column_number_from_char(incomplete_move_part.chars().nth(0).unwrap());
         let from_row = Self::get_row_number_from_char(incomplete_move_part.chars().nth(1).unwrap());
@@ -24,7 +24,7 @@ impl SanMoveResolver {
         let to_row = Self::get_row_number_from_char(move_to.chars().nth(1).unwrap());
 
         let resolved_from_move = match piece {
-            'P' => { resolve_pawn_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
+            'P' => { solve_ambiguous_pawn_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
             /*'N' => {  }
             'B' => { self.revolve_bishop_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
             'R' => { self.revolve_rook_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
@@ -37,7 +37,7 @@ impl SanMoveResolver {
 
         let resolved_move = Self::move_to_string(resolved_from_move.unwrap()) + &move_to;
 
-        Ok(ResolvedSanMove{
+        Ok(CompletedSanMove {
             resolved_san_move: resolved_move,
             is_capture: is_capture,
             is_king_side_castle: false,

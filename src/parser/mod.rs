@@ -1,3 +1,3 @@
 pub mod parser;
-mod san_move_resolver;
-mod resolvers;
+mod ambigous_san_move_solver;
+mod ambiguous_move_solvers;
