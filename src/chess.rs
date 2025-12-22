@@ -33,16 +33,21 @@ impl Chess {
     }
 
     pub fn reset(&mut self) -> Result<(), String> {
+        self.history.reset();
         match reset_from_fen(&self.starting_fen) {
             Ok(state) => { Ok(self.game_state = state) },
             Err(e) => Err(e)
         }
-
     }
 
     pub fn set_starting_fen(&mut self, fen: &str) -> Result<(), String> {
         self.starting_fen = String::from(fen);
         self.game_state = reset_from_fen(&self.starting_fen)?;
+        Ok(())
+    }
+
+    pub fn reset_board_to_fen(&mut self, fen: &str) -> Result<(), String> {
+        self.game_state = reset_from_fen(fen)?;
         Ok(())
     }
 
@@ -61,7 +66,7 @@ impl Chess {
     pub fn list(&self) {
         println!("{}", self.history.show_history());
     }
-    
+
     pub fn undo_move(&mut self) -> Option<String> {
         // Pop the last move from history
         let undone = self.history.undo_move();
@@ -69,27 +74,18 @@ impl Chess {
             return None;
         }
 
-        // Collect remaining moves in order
-        let mut remaining: Vec<String> = Vec::new();
-        for i in 0..self.history.len() {
-            if let Some(mv) = self.history.get_move(i) {
-                remaining.push(mv.clone());
-            }
-        }
-
         // Reset the game to the starting position
-        // Safe to unwrap here since starting FEN was validated on set
-        self.reset().unwrap();
+        let removed_move = undone.unwrap();
 
-        // Clear and rebuild history by replaying all remaining moves
-        self.history.reset();
-        for mv in remaining {
-            // If a move fails to replay, we stop replaying further moves.
-            // This keeps state consistent with what could be legally reapplied.
-            if !self.move_piece_san(&mv) { break; }
+        if self.history.len() > 0 {
+            let last_index = self.history.len() - 1;
+            let last_move = self.history.get_move(last_index);
+            let last_fen = last_move.map(|mv| mv.1.clone());
+            self.reset_board_to_fen(last_fen.unwrap().as_str());
+        } else {
+            self.reset().unwrap();
         }
-
-        undone
+        Some(removed_move.0)
     }
 
     pub fn move_piece_san(&mut self, mv: &str) -> bool {
@@ -100,7 +96,7 @@ impl Chess {
             Ok(v) => {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
-                    self.history.add_move(mv.to_string());
+                    self.history.add_move(mv.to_string(), game_state_to_fen_string(self.game_state.clone()));
                     true
                 } else {
                     false

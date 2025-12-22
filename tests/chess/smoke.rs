@@ -35,6 +35,14 @@ fn test_en_passant_pawn_capture() {
 }
 
 #[test]
+fn test_en_passant_capture_black() {
+    let mut game = Chess::new();
+    game.set_starting_fen("rn2k1nr/ppp2ppp/8/2bqpb2/2Pp4/1K3P2/PP1PP1PP/RNBQ1BNR b kq c3 0 7");
+    println!("{}", game.board());
+    assert!(game.move_piece_san("dxc3"));
+}
+
+#[test]
 fn test_pawn_move_over_piece() {
     let mut game = Chess::new();
     game.set_starting_fen("rnbqkbn1/ppppppp1/3r4/7p/7P/3R4/PPPPPPP1/RNBQKBN1 w KQkq h6 4 4");

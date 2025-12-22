@@ -1,51 +1,57 @@
 #[derive(Debug, Default, Clone)]
 pub struct History {
-    moves: Vec<String>,
+    plies: Vec<(String, String)>,
 }
 
 impl History {
     pub fn new() -> Self {
-        Self { moves: Vec::new() }
+        Self {
+            plies: (Vec::new()),
+        }
     }
 
     // Clears all recorded moves
     pub fn reset(&mut self) {
-        self.moves.clear();
+        self.plies.clear();
     }
 
     // Returns a reference to the move at the given index, if it exists
-    pub fn get_move(&self, index: usize) -> Option<&String> {
-        self.moves.get(index)
+    pub fn get_move(&self, index: usize) -> Option<&(String, String)> {
+        self.plies.get(index)
     }
 
     // Adds a move to the history (SAN or other chosen notation)
-    pub fn add_move<S: Into<String>>(&mut self, mv: S) {
-        self.moves.push(mv.into());
+    pub fn add_move(&mut self, mv: String, fen: String) {
+        self.plies.push((mv, fen));
     }
 
     // Undoes the last move and returns it, if any
-    pub fn undo_move(&mut self) -> Option<String> {
-        self.moves.pop()
+    pub fn undo_move(&mut self) -> Option<(String, String)> {
+        self.plies.pop()
     }
 
     // Optional helpers
-    pub fn len(&self) -> usize { self.moves.len() }
-    pub fn is_empty(&self) -> bool { self.moves.is_empty() }
+    pub fn len(&self) -> usize {
+        self.plies.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.plies.is_empty()
+    }
 
     // Returns a human-readable list of moves in standard move-pair notation,
     // e.g.: "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"
     pub fn show_history(&self) -> String {
-        if self.moves.is_empty() {
+        if self.plies.is_empty() {
             return String::from("<no moves>");
         }
 
         let mut parts: Vec<String> = Vec::new();
         let mut move_number = 1;
         let mut i = 0;
-        while i < self.moves.len() {
-            let white = &self.moves[i];
-            let segment = if i + 1 < self.moves.len() {
-                let black = &self.moves[i + 1];
+        while i < self.plies.len() {
+            let white = &self.plies[i].0;
+            let segment = if i + 1 < self.plies.len() {
+                let black = &self.plies[i + 1].0;
                 format!("{}. {} {}", move_number, white, black)
             } else {
                 // No black move yet
@@ -57,15 +63,11 @@ impl History {
             i += 2; // advance by a move pair
         }
 
-        parts.join(" ")
+        parts.join(" ") + "\n"
     }
 
     // Returns a read-only view of the raw move list
-    pub fn moves(&self) -> &[String] { &self.moves }
-
-    // CamelCase aliases in case external code expects these names
-    pub fn getMove(&self, index: usize) -> Option<&String> { self.get_move(index) }
-    pub fn addMove<S: Into<String>>(&mut self, mv: S) { self.add_move(mv) }
-    pub fn undoMove(&mut self) -> Option<String> { self.undo_move() }
-    pub fn showHistory(&self) -> String { self.show_history() }
+    pub fn moves(&self) -> &[(String,String)] {
+        &self.plies
+    }
 }

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::fmt;
 
 /// A very lightweight PGN reader that extracts SAN-like move tokens in order.
 ///
@@ -137,5 +138,31 @@ impl PGNDocument {
             break;
         }
         &tok[..end]
+    }
+}
+
+impl fmt::Display for PGNDocument {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Emit a minimal, valid PGN movetext with result.
+        // Example: "1. e4 e5 2. Nf3 Nc6 *"
+        if self.moves.is_empty() {
+            return write!(f, "*");
+        }
+
+        let mut first_pair = true;
+        for (i, mv) in self.moves.iter().enumerate() {
+            if i % 2 == 0 {
+                // White move: start a new move number
+                if !first_pair { write!(f, " ")?; }
+                let num = i / 2 + 1;
+                write!(f, "{}. {}", num, mv)?;
+                first_pair = false;
+            } else {
+                // Black move
+                write!(f, " {}", mv)?;
+            }
+        }
+
+        write!(f, " *")
     }
 }
