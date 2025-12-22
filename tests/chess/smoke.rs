@@ -43,3 +43,13 @@ fn test_pawn_move_over_piece() {
     assert!(game.move_piece_san("a2a4"));
     assert!( !game.move_piece_san("d7d5"));
 }
+
+//r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4
+#[test]
+fn test_castling() {
+    let mut game = Chess::new();
+    game.set_starting_fen("r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4");
+    println!("{}", game.board());
+    assert!(game.move_piece_san("O-O"));
+    println!("{}", game.board());
+}
