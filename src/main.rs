@@ -34,6 +34,11 @@ fn main() {
         }
         if input.eq_ignore_ascii_case("undo") {
             game.undo_move();
+            continue;
+        }
+        if input.eq_ignore_ascii_case("list") {
+            game.list();
+            continue;
         }
 
         // Handle "reset <fen>" to reinitialize the board from a FEN string

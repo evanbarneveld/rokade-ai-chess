@@ -58,6 +58,10 @@ impl Chess {
         self.game_state.active_color() == Color::White
     }
 
+    pub fn list(&self) {
+        println!("{}", self.history.show_history());
+    }
+    
     pub fn undo_move(&mut self) -> Option<String> {
         // Pop the last move from history
         let undone = self.history.undo_move();
