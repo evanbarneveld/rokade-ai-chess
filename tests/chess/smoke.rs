@@ -44,7 +44,6 @@ fn test_pawn_move_over_piece() {
     assert!( !game.move_piece_san("d7d5"));
 }
 
-//r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4
 #[test]
 fn test_castling() {
     let mut game = Chess::new();
@@ -52,5 +51,15 @@ fn test_castling() {
     println!("{}", game.board());
     assert!(game.move_piece_san("O-O"));
     println!("{}", game.board());
-    assert_eq!(game.to_fen(), "r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b KQkq - 1 4");
+    assert_eq!(game.to_fen(), "r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 1 4");
+}
+
+#[test]
+fn test_castling_black() {
+    let mut game = Chess::new();
+    game.set_starting_fen("r3kbnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 b kq - 0 7");
+    println!("{}", game.board());
+    assert!(game.move_piece_san("O-O-O"));
+    println!("{}", game.board());
+    assert_eq!(game.to_fen(), "2kr1bnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 w - - 1 8");
 }

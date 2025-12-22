@@ -117,6 +117,13 @@ impl GameState {
     pub fn reset_half_move_clock(&mut self) {
         self.half_move_clock = 0;
     }
+
+    pub fn revoke_castling_rights_for_color(&mut self, color: Color) {
+        match color {
+            Color::White => self.castling_rights.revoke_white_castling(),
+            Color::Black => self.castling_rights.revoke_black_castling(),
+        }
+    }
 }
 
 

@@ -26,6 +26,17 @@ impl CastlingRights {
         }
     }
 
+    // Mutators
+    pub fn revoke_white_castling(&mut self) {
+        self.white_kingside = false;
+        self.white_queenside = false;
+    }
+
+    pub fn revoke_black_castling(&mut self) {
+        self.black_kingside = false;
+        self.black_queenside = false;
+    }
+
     pub fn from_fen(s: &str) -> Self {
         if s == "-" {
             return Self::none();

@@ -6,6 +6,9 @@ pub fn move_king(game_state: &mut GameState, piece: Piece, from: (usize, usize),
     let moved = game_state.move_piece(from, to);
     if !moved { return false; }
 
+    // Any king move revokes both castling rights for that color
+    game_state.revoke_castling_rights_for_color(piece.get_color());
+
     // Handle castling: if king moves two files horizontally on same rank
     let same_rank = from.0 == to.0;
     let file_diff = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
