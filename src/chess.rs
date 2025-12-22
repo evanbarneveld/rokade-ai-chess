@@ -3,6 +3,7 @@ use crate::board::Board;
 use crate::parser::parser::MoveParser;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{Color };
+use crate::history::history::History;
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 
@@ -11,6 +12,7 @@ pub struct Chess<> {
     game_state: GameState,
     move_parser: MoveParser,
     starting_fen: String,
+    history: History
 }
 
 impl Chess {
@@ -26,6 +28,7 @@ impl Chess {
                     Err(e) => panic!("Error parsing FEN: {}", e)
                 },
             move_parser: MoveParser::new(),
+            history: History::new()
         }
     }
 
@@ -63,6 +66,7 @@ impl Chess {
             Ok(v) => {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
+                    self.history.add_move(mv.to_string());
                     true
                 } else {
                     false
