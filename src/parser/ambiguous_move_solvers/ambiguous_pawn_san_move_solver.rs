@@ -7,6 +7,7 @@ use crate::piece::pieces::{Color, PieceType};
 pub fn solve_ambiguous_pawn_san_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &Board, active_color:Color) -> Option<(u8, u8)> {
     // Convert destination to indexes
     if to_col < 0 || to_row < 0 { return None; }
+
     let to_col_u = to_col as usize;
     let to_row_u = to_row as usize;
 

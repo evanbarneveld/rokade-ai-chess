@@ -1,6 +1,12 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, Piece};
+
+use crate::parser::ambiguous_move_solvers::ambiguous_knight_san_move_solver::solve_ambiguous_knight_san_move;
+use crate::parser::ambiguous_move_solvers::ambiguous_bishop_san_move_solver::solve_ambiguous_bishop_san_move;
 use crate::parser::ambiguous_move_solvers::ambiguous_pawn_san_move_solver::solve_ambiguous_pawn_san_move;
+use crate::parser::ambiguous_move_solvers::ambiguous_queen_san_move_solver::solve_ambiguous_queen_san_move;
+use crate::parser::ambiguous_move_solvers::ambiguous_king_san_move_solver::solve_ambiguous_king_san_move;
+use crate::parser::ambiguous_move_solvers::ambiguous_rook_san_move_solver::solve_ambiguous_rook_san_move;
 
 pub struct CompletedSanMove {
     pub resolved_san_move: String,
@@ -25,11 +31,11 @@ impl SanMoveCompleter {
 
         let resolved_from_move = match piece {
             'P' => { solve_ambiguous_pawn_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
-            /*'N' => {  }
-            'B' => { self.revolve_bishop_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
-            'R' => { self.revolve_rook_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
-            'Q' => { self.revolve_queen_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},
-            'K' => { self.revolve_king_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)},*/
+            'N' => { solve_ambiguous_knight_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
+            'B' => { solve_ambiguous_bishop_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
+            'Q' => { solve_ambiguous_queen_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
+            'K' => { solve_ambiguous_king_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
+            'R' => { solve_ambiguous_rook_san_move(from_col, from_row, to_col, to_row, is_capture, board, active_color)}
             _ => return Err(String::from("Invalid piece type"))
         };
 
