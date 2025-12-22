@@ -38,32 +38,32 @@ impl PieceMover {
                 false
             }
             PieceType::Knight => {
-                if is_valid_knight_move(game_state, from, to, is_capture, game_state.active_color()) {
-                    return move_knight(game_state, piece, from, to, is_capture, promotion_piece);
+                if is_valid_knight_move(game_state, from, to) {
+                    return move_knight(game_state, piece, from, to, is_capture);
                 }
                 false
             }
             PieceType::Bishop => {
-                if is_valid_bishop_move(game_state, from, to, is_capture, game_state.active_color()) {
-                    return move_bishop(game_state, piece, from, to, is_capture, promotion_piece);
+                if is_valid_bishop_move(game_state, from, to) {
+                    return move_bishop(game_state, piece, from, to, is_capture);
                 }
                 false
             }
             PieceType::Rook => {
-                if is_valid_rook_move(game_state, from, to, is_capture, game_state.active_color()) {
-                    return move_rook(game_state, piece, from, to, is_capture, promotion_piece);
+                if is_valid_rook_move(game_state, from, to) {
+                    return move_rook(game_state, piece, from, to, is_capture);
                 }
                 false
             }
             PieceType::Queen => {
-                if is_valid_queen_move(game_state, from, to, is_capture, game_state.active_color()) {
-                    return move_queen(game_state, piece, from, to, is_capture, promotion_piece);
+                if is_valid_queen_move(game_state, from, to) {
+                    return move_queen(game_state, piece, from, to, is_capture);
                 }
                 false
             }
             PieceType::King => {
-                if is_valid_king_move(game_state, from, to, is_capture, game_state.active_color()) {
-                    return move_king(game_state, piece, from, to, is_capture, promotion_piece);
+                if is_valid_king_move(game_state, from, to) {
+                    return move_king(game_state, piece, from, to, is_capture);
                 }
                 false
             }

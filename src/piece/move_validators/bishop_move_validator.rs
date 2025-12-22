@@ -1,7 +1,7 @@
 use crate::piece::pieces::{Color, Piece};
 use crate::state::game_state::GameState;
 
-pub fn is_valid_bishop_move(game_state: &GameState, from: (usize, usize), to: (usize, usize), is_capture:bool, active_color:Color) -> bool {
+pub fn is_valid_bishop_move(game_state: &GameState, from: (usize, usize), to: (usize, usize)) -> bool {
     // Bishop must move diagonally: absolute delta row equals absolute delta col
     let d_row = if to.0 > from.0 { to.0 - from.0 } else { from.0 - to.0 };
     let d_col = if to.1 > from.1 { to.1 - from.1 } else { from.1 - to.1 };
