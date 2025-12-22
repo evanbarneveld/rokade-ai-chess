@@ -1,7 +1,18 @@
 use crate::state::game_state::GameState;
 use crate::piece::pieces::{ Piece, PieceType};
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
-use crate::piece::piece_movers::pawn::move_pawn;
+use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
+use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
+use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
+use crate::piece::move_validators::king_move_validator::is_valid_king_move;
+use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
+
+use crate::piece::piece_movers::move_pawn::move_pawn;
+use crate::piece::piece_movers::move_knight::move_knight;
+use crate::piece::piece_movers::move_bishop::move_bishop;
+use crate::piece::piece_movers::move_rook::move_rook;
+use crate::piece::piece_movers::move_queen::move_queen;
+use crate::piece::piece_movers::move_king::move_king;
 
 #[derive(Debug)]
 pub struct PieceMover {}
@@ -27,35 +38,34 @@ impl PieceMover {
                 false
             }
             PieceType::Knight => {
-                game_state.increment_half_move_clock(); //only if valid move
-                return game_state.move_piece(from, to);
+                if is_valid_knight_move(game_state, from, to, is_capture, game_state.active_color()) {
+                    return move_knight(game_state, piece, from, to, is_capture, promotion_piece);
+                }
+                false
             }
             PieceType::Bishop => {
-                game_state.increment_half_move_clock(); //only if valid move
-                return game_state.move_piece(from, to);
+                if is_valid_bishop_move(game_state, from, to, is_capture, game_state.active_color()) {
+                    return move_bishop(game_state, piece, from, to, is_capture, promotion_piece);
+                }
+                false
             }
             PieceType::Rook => {
-                game_state.increment_half_move_clock(); //only if valid move
-                return game_state.move_piece(from, to);
+                if is_valid_rook_move(game_state, from, to, is_capture, game_state.active_color()) {
+                    return move_rook(game_state, piece, from, to, is_capture, promotion_piece);
+                }
+                false
             }
             PieceType::Queen => {
-                game_state.increment_half_move_clock(); //only if valid move
-                return game_state.move_piece(from, to);
+                if is_valid_queen_move(game_state, from, to, is_capture, game_state.active_color()) {
+                    return move_queen(game_state, piece, from, to, is_capture, promotion_piece);
+                }
+                false
             }
             PieceType::King => {
-                if Self::is_valid_castling_move(game_state, from, to) {
-                    game_state.increment_half_move_clock();
-                    //adjust_game_state(from, to); //for casting move
-                    game_state.move_piece(from, to);
-                    //self.game_state.move_piece(from, to); //TODO hop the rook
-                    return true
-                } else {
-                    if Self::is_valid_king_move(game_state, from, to) {
-                       game_state.increment_half_move_clock();
-                       return game_state.move_piece(from, to);
-                    }
-                    true
+                if is_valid_king_move(game_state, from, to, is_capture, game_state.active_color()) {
+                    return move_king(game_state, piece, from, to, is_capture, promotion_piece);
                 }
+                false
             }
         }
     }
