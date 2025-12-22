@@ -48,4 +48,10 @@ impl CastlingRights {
         if result.is_empty() { result.push('-'); }
         result
     }
+
+    // Accessors used by move validators
+    pub fn white_kingside(&self) -> bool { self.white_kingside }
+    pub fn white_queenside(&self) -> bool { self.white_queenside }
+    pub fn black_kingside(&self) -> bool { self.black_kingside }
+    pub fn black_queenside(&self) -> bool { self.black_queenside }
 }

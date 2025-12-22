@@ -105,7 +105,25 @@ impl MoveParser {
 
         //println!("Piece: {}, Move from: {}, move to: {}, capture: {}, promotion: {}, king side castle: {}, queen side castle: {}", piece_char, move_from, move_to, is_capture, is_promotion, is_king_side_castle, is_queen_side_castle);
 
-        if !is_king_side_castle && !is_queen_side_castle && move_from.contains("?") {
+        if is_king_side_castle || is_queen_side_castle {
+            // Resolve castling into explicit from/to squares based on active color
+            let (from_sq, to_sq) = match active_color {
+                Color::White => {
+                    if is_king_side_castle { ("e1", "g1") } else { ("e1", "c1") }
+                }
+                Color::Black => {
+                    if is_king_side_castle { ("e8", "g8") } else { ("e8", "c8") }
+                }
+            };
+            let san_move = format!("{}{}", from_sq, to_sq);
+            Ok(CompletedSanMove {
+               resolved_san_move:san_move,
+               is_capture,
+               is_king_side_castle,
+               is_queen_side_castle,
+               promotion_piece
+            })
+        } else if move_from.contains("?") {
             self.san_move_resolver.solve_ambiguous_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color)
         } else {
             let san_move = format!("{}{}", move_from, move_to);

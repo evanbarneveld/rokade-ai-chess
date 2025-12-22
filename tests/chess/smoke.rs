@@ -52,4 +52,5 @@ fn test_castling() {
     println!("{}", game.board());
     assert!(game.move_piece_san("O-O"));
     println!("{}", game.board());
+    assert_eq!(game.to_fen(), "r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b KQkq - 1 4");
 }
