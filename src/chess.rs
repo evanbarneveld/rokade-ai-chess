@@ -58,6 +58,36 @@ impl Chess {
         self.game_state.active_color() == Color::White
     }
 
+    pub fn undo_move(&mut self) -> Option<String> {
+        // Pop the last move from history
+        let undone = self.history.undo_move();
+        if undone.is_none() {
+            return None;
+        }
+
+        // Collect remaining moves in order
+        let mut remaining: Vec<String> = Vec::new();
+        for i in 0..self.history.len() {
+            if let Some(mv) = self.history.get_move(i) {
+                remaining.push(mv.clone());
+            }
+        }
+
+        // Reset the game to the starting position
+        // Safe to unwrap here since starting FEN was validated on set
+        self.reset().unwrap();
+
+        // Clear and rebuild history by replaying all remaining moves
+        self.history.reset();
+        for mv in remaining {
+            // If a move fails to replay, we stop replaying further moves.
+            // This keeps state consistent with what could be legally reapplied.
+            if !self.move_piece_san(&mv) { break; }
+        }
+
+        undone
+    }
+
     pub fn move_piece_san(&mut self, mv: &str) -> bool {
         let active_color = self.game_state.active_color();
         let board = self.game_state.board();

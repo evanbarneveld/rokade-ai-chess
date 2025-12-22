@@ -32,6 +32,10 @@ fn main() {
             println!("{}\n", game.to_fen());
             continue;
         }
+        if input.eq_ignore_ascii_case("undo") {
+            game.undo_move();
+        }
+
         // Handle "reset <fen>" to reinitialize the board from a FEN string
         {
             let mut parts = input.splitn(2, char::is_whitespace);
@@ -66,10 +70,16 @@ fn main() {
                     println!("Use command 'pgn <file>\n");
                     continue;
                 }
-                match PgnPlayer::play(path, &mut game) {
-                    Ok(_) => println!("PGN replay finished.\n"),
-                    Err(e) => println!("Error replaying PGN: {}\n", e),
+                match game.reset() {
+                    Ok(_) => {
+                        match PgnPlayer::play(path, &mut game) {
+                            Ok(_) => println!("PGN replay finished.\n"),
+                            Err(e) => println!("Error replaying PGN: {}\n", e),
+                        }
+                    },
+                    Err(e) => println!("Error resetting board: {}\n", e),
                 }
+                continue;
             }
         }
 
