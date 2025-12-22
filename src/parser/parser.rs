@@ -87,7 +87,7 @@ impl MoveParser {
             if active_color == Color::White {
                 piece_char = piece_char.to_ascii_uppercase();
             } else {
-                piece_char = piece_char.to_ascii_uppercase();
+                piece_char = piece_char.to_ascii_lowercase();
             }
             Piece::from_fen_char(piece_char)
         } else {
