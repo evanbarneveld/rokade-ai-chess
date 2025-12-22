@@ -23,7 +23,7 @@ pub fn solve_ambiguous_pawn_san_move(from_col: i8, from_row: i8, to_col: i8, to_
 
     let mut candidates: Vec<(usize, usize)> = Vec::new(); // (row, col)
 
-    // Helper to check if a board square has our move_validators
+    // Helper to check if a board square has a pawn of our color, that could be a valid from square
     let has_our_pawn = |r: i8, c: i8| -> bool {
         if r < 0 || c < 0 || r > 7 || c > 7 { return false; }
         if let Some(p) = board.get(r as usize, c as usize) {
@@ -45,11 +45,13 @@ pub fn solve_ambiguous_pawn_san_move(from_col: i8, from_row: i8, to_col: i8, to_
             if !col_matches(from_c) || !row_matches(from_r) { continue; }
 
             if has_our_pawn(from_r, from_c) {
-                // target must have opponent piece (ignoring en passant for now)
+                // Normal capture: target must have opponent piece
                 if let Some(target_piece) = board.get(to_row_u, to_col_u) {
                     if target_piece.get_color() != active_color {
                         candidates.push((from_r as usize, from_c as usize));
                     }
+                } else if en_passant_target.is_some() {
+                    candidates.push((from_r as usize, from_c as usize));
                 }
             }
         }

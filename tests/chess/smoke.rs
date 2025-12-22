@@ -71,3 +71,15 @@ fn test_castling_black() {
     println!("{}", game.board());
     assert_eq!(game.to_fen(), "2kr1bnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 w - - 1 8");
 }
+
+#[test]
+fn test_unknown_error() {
+    let fen = "r3k2r/pp3ppp/4p3/1q1p4/1b1NnB2/2N1P3/PP3PPP/2R1K2R w KQkq - 0 15";
+    let mv = "Nxb5";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    println!("Fen: {}", fen);
+    println!("Move: {}", mv);
+    println!("{}", game.board());
+    assert!(game.move_piece_san(mv));
+}
