@@ -2,7 +2,7 @@ use chess::Chess;
 
 #[test]
 fn initial_fen() {
-    let mut g = Chess::new();
+    let g = Chess::new();
     let fen = g.to_fen();
     assert_eq!(fen, Chess::DEFAULT_CHESS_STARTING_FEN);
 }

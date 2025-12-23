@@ -1,5 +1,6 @@
 use crate::board::Board;
-use crate::board::checks::king_in_check::move_piece_is_pinned;
+use crate::board::checks::king_in_check::move_leads_to_check;
+use crate::piece::as_square_str;
 
 pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize, usize), do_pin_check: bool) -> bool {
 
@@ -28,9 +29,11 @@ pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize,
         c += step_col;
     }
 
-    if do_pin_check && move_piece_is_pinned(board, from, to, None) {
+    if do_pin_check && move_leads_to_check(board, from, to, None) {
         return false;
     }
+
+    println!("bishop move: {}", as_square_str(from,to));
 
     true
 }

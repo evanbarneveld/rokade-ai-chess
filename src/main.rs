@@ -59,7 +59,10 @@ fn main() {
                 let fen = parts.next().unwrap_or("").trim();
                 if fen.is_empty() {
                     match game.reset() {
-                        Ok(_) => println!("Board reset.\n"),
+                        Ok(_) => {
+                            println!("Board was reset.\n");
+                            println!("{}", game.board());
+                        },
                         Err(e) => println!("Error resetting board: {}\n", e),
                     }
                 } else if fen.eq("standard") {
@@ -105,7 +108,7 @@ fn main() {
 
         println!("{}", game.board());
 
-        game.get_game_state().recompute_outcome();
+        //game.get_game_state().recompute_outcome();
     }
 }
 

@@ -17,7 +17,7 @@ fn test_games_of_pgn_library() {
     //   PGN_LIBRARY_TEST_LIMIT to a custom integer.
 
     const FIRST_TEST:i32 = 1; //starts at #1
-    const LAST_TEST:i32 = 25; // reasonable default for CI speed
+    const LAST_TEST:i32 = 100; // reasonable default for CI speed
 
     // Games to skip from the PGN library (by game index starting at 1) because they have been checked and are invalid
     let skip_list: Vec<i32> = vec![
@@ -45,7 +45,7 @@ fn test_games_of_pgn_library() {
             break;
         }
 
-        if (game_number < FIRST_TEST) {
+        if game_number < FIRST_TEST {
             game_number += 1;
             continue;
         }

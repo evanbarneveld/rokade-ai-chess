@@ -104,7 +104,6 @@ impl Chess {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
                     self.history.add_move(mv.to_string(), game_state_to_fen_string(self.game_state.clone()));
-                    self.game_state.recompute_outcome();
                     true
                 } else {
                     false
