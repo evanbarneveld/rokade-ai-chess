@@ -71,7 +71,6 @@ fn test_castling_black() {
     println!("{}", game.board());
     assert_eq!(game.to_fen(), "2kr1bnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 w - - 1 8");
 }
-
 #[test]
 fn test_ambiguous_move_due_to_pinned_pieces() {
     let fen = "r2qkb1r/ppp2ppp/2n5/1B1npb2/8/2N1PN2/PP1P1PPP/R1BQK2R b KQkq - 5 7";
@@ -82,4 +81,31 @@ fn test_ambiguous_move_due_to_pinned_pieces() {
     println!("Move: {}", mv);
     println!("{}", game.board());
     assert!(game.move_piece_san(mv));
+}
+
+#[test]
+fn test_ambigous_rook_error() {
+    let fen = "2r2bk1/ppp3pp/4rq2/8/2BQ4/2P5/PP3PPP/R3R1K1 b - - 0 21";
+    let mv = "Re8";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    println!("Fen: {}", fen);
+    println!("Move: {}", mv);
+    println!("{}", game.board());
+    assert!(game.move_piece_san(mv));
+    println!("{}", game.board());
+}
+
+#[test]
+fn some_error() {
+    //1. Nc3 d5 2. e4 dxe4 3. Nxe4 Nd7 4. d4 Nf3
+    let fen = "r1bqkbnr/pppnpppp/8/8/3PN3/8/PPP2PPP/R1BQKBNR b KQkq d3 0 4";
+    let mv = "Nf3";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    println!("Fen: {}", fen);
+    println!("Move: {}", mv);
+    println!("{}", game.board());
+    assert!(game.move_piece_san(mv));
+    println!("{}", game.board());
 }

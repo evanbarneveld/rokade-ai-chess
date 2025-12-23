@@ -6,7 +6,8 @@ use std::fmt;
 ///
 /// Supported features:
 /// - Skips headers like `[Event "..."]`
-/// - Strips comments `{ ... }` and `;` to end of line
+/// - Strips comments `{ ... }` (including time comments like `{[%clk 1:30:55]}`)
+///   and `;` to end of line
 /// - Removes NAGs like `$1`
 /// - Ignores move numbers like `12.` and `12...`
 /// - Stops at result tokens: `1-0`, `0-1`, `1/2-1/2`, `*`
@@ -80,6 +81,10 @@ impl PGNDocument {
 
             // Skip move numbers like "12." or "12..."
             if Self::looks_like_move_number(tok) { continue; }
+
+            // Some PGN exports place black's ellipsis as a standalone token: "1. ... d5".
+            // Ignore a bare ellipsis token so it doesn't get treated as a move.
+            if tok == "..." { continue; }
 
             // Strip trailing check/mate/annotation symbols from token edge (we keep basic SAN core)
             let clean = Self::strip_trailing_symbols(tok);

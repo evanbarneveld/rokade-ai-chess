@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::board::checks::king_in_check::move_piece_is_pinned;
 use crate::piece::pieces::{Color, PieceType};
 
 /*
@@ -45,7 +46,9 @@ pub fn solve_ambiguous_queen_san_move(from_col: i8, from_row: i8, to_col: i8, to
                 // First piece on the ray determines if a candidate exists
                 if p.get_type() == PieceType::Queen && p.get_color() == active_color {
                     if col_matches(c) && row_matches(r) {
-                        candidates.push((ru, cu));
+                        if !move_piece_is_pinned(board, (ru, cu), (to_row_u, to_col_u)) {
+                            candidates.push((ru, cu));
+                        }
                     }
                 }
                 break; // blocked beyond first piece

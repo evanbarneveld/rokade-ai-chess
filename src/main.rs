@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use chess::Chess;              // uses the re‑export from lib.rs
-use chess::png_player::pgn_player::PgnPlayer;
+use chess::pgn_player::pgn_player::PgnPlayer;
 
 fn main() {
     // Start a game from the initial position

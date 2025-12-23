@@ -3,7 +3,7 @@ pub mod chess;
 pub mod state;
 pub mod piece;
 pub mod parser;
-pub mod png_player;
+pub mod pgn_player;
 
 mod history;
 

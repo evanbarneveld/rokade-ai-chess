@@ -34,10 +34,11 @@ fn test_games_of_pgn_library() {
 
     // Games to skip from the PGN library (by game index starting at 1) because they have been checked and are invalid
     let skip_list: Vec<i32> = vec![
+        1145
     ];
 
     //let first_test = *skip_list.last().unwrap();
-    let first_test = 0;
+    let first_test = 1;
 
     let limit = if enable_all {
         None
@@ -69,12 +70,12 @@ fn test_games_of_pgn_library() {
 
         // Skip selected games
         if skip_list.contains(&game_number) {
-            eprintln!("Skipping PGN #{} (in skip list)", game_number);
+            println!("Skipping PGN #{} (in skip list)", game_number);
             game_number += 1;
             continue;
         }
 
-        print!("Testing PGN #{}: {}\n", game_number, doc.to_string());
+        println!("Testing PGN #{}: {}", game_number, doc.to_string());
 
         let mut game = Chess::new();
         let mut ply: usize = 0;

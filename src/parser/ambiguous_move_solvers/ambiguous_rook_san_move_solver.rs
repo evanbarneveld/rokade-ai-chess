@@ -1,10 +1,11 @@
 use crate::board::Board;
+use crate::board::checks::king_in_check::move_piece_is_pinned;
 use crate::piece::pieces::{Color, PieceType};
 
 /*
  Given a incomplete SAN move and the target position on the board, return the source position, or None if the move is invalid.
  */
-pub fn solve_ambiguous_rook_san_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &Board, active_color:Color) -> Option<(u8, u8)> {
+pub fn solve_ambiguous_rook_san_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &mut Board, active_color:Color) -> Option<(u8, u8)> {
     // Validate destination bounds
     if to_col < 0 || to_row < 0 { return None; }
     if to_col > 7 || to_row > 7 { return None; }
@@ -42,7 +43,9 @@ pub fn solve_ambiguous_rook_san_move(from_col: i8, from_row: i8, to_col: i8, to_
                 // First piece on the ray determines if a candidate exists
                 if p.get_type() == PieceType::Rook && p.get_color() == active_color {
                     if col_matches(c) && row_matches(r) {
-                        candidates.push((ru, cu));
+                        if !move_piece_is_pinned(board, (ru, cu), (to_row_u, to_col_u)) {
+                            candidates.push((ru, cu));
+                        }
                     }
                 }
                 break; // blocked beyond first piece
