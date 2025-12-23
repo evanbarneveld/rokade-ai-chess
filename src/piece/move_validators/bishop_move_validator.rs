@@ -25,7 +25,7 @@ pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize,
         c += step_col;
     }
 
-    if move_piece_is_pinned(board, from, to) {
+    if move_piece_is_pinned(board, from, to, None) {
         return false;
     }
 

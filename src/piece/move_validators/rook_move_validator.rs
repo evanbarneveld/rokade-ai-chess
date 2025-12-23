@@ -26,7 +26,7 @@ pub fn is_valid_rook_move(board: &mut Board, from: (usize, usize), to: (usize, u
         }
     }
 
-    if move_piece_is_pinned(board, from, to) {
+    if move_piece_is_pinned(board, from, to, None) {
         return false;
     }
 

@@ -40,6 +40,7 @@ fn test_en_passant_capture_black() {
     game.set_starting_fen("rn2k1nr/ppp2ppp/8/2bqpb2/2Pp4/1K3P2/PP1PP1PP/RNBQ1BNR b kq c3 0 7");
     println!("{}", game.board());
     assert!(game.move_piece_san("dxc3"));
+    println!("{}", game.board());
 }
 
 #[test]
@@ -97,10 +98,9 @@ fn test_ambigous_rook_error() {
 }
 
 #[test]
-fn some_error() {
-    //1. Nc3 d5 2. e4 dxe4 3. Nxe4 Nd7 4. d4 Nf3
-    let fen = "r1bqkbnr/pppnpppp/8/8/3PN3/8/PPP2PPP/R1BQKBNR b KQkq d3 0 4";
-    let mv = "Nf3";
+fn black_en_passant_error() {
+    let fen = "3r4/pp5p/5k2/5ppP/2P2N1K/4r1P1/PP5R/8 w - g6 0 29";
+    let mv = "hxg6";
     let mut game = Chess::new();
     game.set_starting_fen(fen);
     println!("Fen: {}", fen);
@@ -109,3 +109,10 @@ fn some_error() {
     assert!(game.move_piece_san(mv));
     println!("{}", game.board());
 }
+
+/*
+Invalid move at game #1982, ply #57: 'hxg6'. FEN before move: 3r4/pp5p/5k2/5ppP/2P2N1K/4r1P1/PP5R/8 w - g6 0 29
+PGN: 1. f3 e5 2. Kf2 d5 3. e3 Bd6 4. g3 Ne7 5. d4 exd4 6. exd4 O-O 7. c3 c5 8. Kg2 Nbc6 9. dxc5 Bxc5 10. Bd3 Ne5 11. Nh3 Nxd3 12. Qxd3 Bf5 13. Qd1 Ng6 14. Nf4 Qd7 15. h4 Rfe8 16. Nxd5 Ne5 17. Nf4 Nxf3 18. Qxd7 Bxd7 19. Nd2 Nxd2 20. Bxd2 Bc6 21. Kh3 Bxh1 22. Rxh1 Rad8 23. Bc1 Be3 24. Bxe3 Rxe3 25. Rh2 f5 26. h5 Kf7 27. Kh4 Kf6 28. c4 g5 29. hxg6 hxg6 30. Nd5 Rxd5 31. cxd5 Re8 32. Kh3 Rh8 33. Kg2 Rxh2 34. Kxh2 Ke5 35. Kh3 g5 *
+
+
+ */

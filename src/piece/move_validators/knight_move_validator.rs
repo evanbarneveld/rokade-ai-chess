@@ -8,7 +8,7 @@ pub fn is_valid_knight_move(board: &mut Board, from: (usize, usize), to: (usize,
     let dr = if to.0 > from.0 { to.0 - from.0 } else { from.0 - to.0 };
     let dc = if to.1 > from.1 { to.1 - from.1 } else { from.1 - to.1 };
 
-    if move_piece_is_pinned(board, from, to) {
+    if move_piece_is_pinned(board, from, to, None) {
         return false;
     }
 

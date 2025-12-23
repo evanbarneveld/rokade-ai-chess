@@ -43,7 +43,7 @@ pub fn solve_ambiguous_knight_san_move(from_col: i8, from_row: i8, to_col: i8, t
 
         if has_our_knight(from_r as usize, from_c as usize, board, active_color) {
             // would this move check the king? if so, its no valid move and not a candidate
-            if !move_piece_is_pinned(board, (from_r as usize, from_c as usize), (to_row_u, to_col_u)) {
+            if !move_piece_is_pinned(board, (from_r as usize, from_c as usize), (to_row_u, to_col_u), None) {
                 candidates.push((from_r as usize, from_c as usize));
             }
         }

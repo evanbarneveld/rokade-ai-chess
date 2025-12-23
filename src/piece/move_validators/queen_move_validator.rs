@@ -10,7 +10,7 @@ pub fn is_valid_queen_move(board: &mut Board, from: (usize, usize), to: (usize, 
     let result = is_valid_rook_move(board, from, to) ||
     is_valid_bishop_move(board, from, to);
 
-    if move_piece_is_pinned(board, from, to) {
+    if move_piece_is_pinned(board, from, to, None) {
         return false;
     }
 

@@ -34,7 +34,8 @@ impl PieceMover {
 
         match piece.get_type() {
             PieceType::Pawn => {
-                if is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, active_color, promotion_piece) {
+                let en_passant_target : Option<(usize,usize)> = game_state.en_passant_target();
+                if is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, en_passant_target, active_color, promotion_piece) {
                     return move_pawn(game_state, piece, from, to, is_capture, promotion_piece);
                 }
                 false

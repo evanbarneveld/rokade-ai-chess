@@ -43,7 +43,7 @@ pub fn solve_ambiguous_rook_san_move(from_col: i8, from_row: i8, to_col: i8, to_
                 // First piece on the ray determines if a candidate exists
                 if p.get_type() == PieceType::Rook && p.get_color() == active_color {
                     if col_matches(c) && row_matches(r) {
-                        if !move_piece_is_pinned(board, (ru, cu), (to_row_u, to_col_u)) {
+                        if !move_piece_is_pinned(board, (ru, cu), (to_row_u, to_col_u), None) {
                             candidates.push((ru, cu));
                         }
                     }

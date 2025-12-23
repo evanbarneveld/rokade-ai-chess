@@ -1,5 +1,12 @@
+use std::cmp::PartialEq;
 use crate::board::Board;
-use crate::piece::pieces::Color;
+use crate::piece::pieces::{Color, Piece, PieceType};
+
+impl PartialEq for Piece {
+    fn eq(&self, other: &Self) -> bool {
+        todo!()
+    }
+}
 
 /// Basic check to see if a move is invalid, regardless of the type of the piece.
 /// A move is invalid when:
