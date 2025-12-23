@@ -14,10 +14,8 @@ pub struct Chess<> {
     starting_fen: String,
     history: History
 }
-
 impl Chess {
     pub const DEFAULT_CHESS_STARTING_FEN: &'static str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
     pub fn new() -> Self {
 
         Chess {
@@ -32,6 +30,10 @@ impl Chess {
         }
     }
 
+    pub fn get_history(&self) -> &History {
+        &self.history
+    }
+    
     pub fn reset(&mut self) -> Result<(), String> {
         self.history.reset();
         match reset_from_fen(&self.starting_fen) {

@@ -19,12 +19,17 @@ fn main() {
     loop {
 
         let game_outcome = game.get_game_state().get_outcome();
+        let move_number = game.get_game_state().full_move_number();
 
         if game_outcome != Some(OutcomeType::Ongoing) && game_outcome != Some(OutcomeType::InCheck){
             print!("Game over: {:?}\nCommand> ", game_outcome.unwrap());
         } else {
             if game_outcome == Some(OutcomeType::InCheck) { print!("Check! "); }
-            if game.active_color_is_white() { print!("White> "); } else { print!("Black> "); }
+            if game.active_color_is_white() {
+                print!("White move {} > ", move_number);
+            } else {
+                print!("Black move {} > ", move_number);
+            }
         }
 
         if io::stdout().flush().is_err() { break; }
