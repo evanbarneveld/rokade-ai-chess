@@ -79,6 +79,9 @@ fn test_games_of_pgn_library() {
             }
         }
 
+        game.get_game_state().recompute_outcome();
+        let outcome = game.get_game_state().get_outcome();
+        println!("Outcome: {:?}", outcome.unwrap());
         game_number += 1;
     }
 

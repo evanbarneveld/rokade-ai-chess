@@ -23,6 +23,7 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
     if active_color == Color::White {
         if from.0 == 1 {
             //move starts from rank#2, 1 step or 2 steps possible, not > 2
+            if to.0 < from.0 { return false }
             if to.0 - from.0 > 2 { return false };
             if to.0 - from.0 == 2 {
                 //2 steps only possible if the path is clear
@@ -35,6 +36,7 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
         //black
         if from.0 == 6 {
             //move starts from rank#6, 1 step or 2 steps possible, not > 2
+            if to.0 > from.0 { return false }
             if from.0 - to.0 > 2 { return false }
             if from.0 - to.0 == 2 {
                 //2 steps only possible if the path is clear

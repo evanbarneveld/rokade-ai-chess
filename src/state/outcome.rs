@@ -11,6 +11,7 @@ use crate::state::game_state::GameState;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutcomeType {
     Ongoing,
+    InCheck,
     Checkmate { winner: Color },
     Stalemate,
     DrawByInsufficientMaterial,
@@ -38,7 +39,10 @@ pub enum OutcomeType {
         if in_check {
             // Checkmate: no move to get the king out of check
             if !any_strict_legal_escape_exists(game_state, active_color) {
-                let winner = match active_color { Color::White => Color::Black, Color::Black => Color::White };
+                let winner = match active_color {
+                    Color::White => Color::Black,
+                    Color::Black => Color::White
+                };
                 return OutcomeType::Checkmate { winner };
             }
         }
@@ -48,7 +52,11 @@ pub enum OutcomeType {
             return OutcomeType::Stalemate
         }
 
-        OutcomeType::Ongoing
+        if in_check {
+            OutcomeType::InCheck
+        } else {
+            OutcomeType::Ongoing
+        }
     }
 
     fn is_in_check(game_state: &mut GameState, color: Color) -> bool {
