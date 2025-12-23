@@ -87,7 +87,8 @@ impl PGNDocument {
             if tok == "..." { continue; }
 
             // Strip trailing check/mate/annotation symbols from token edge (we keep basic SAN core)
-            let clean = Self::strip_trailing_symbols(tok);
+            //let clean = Self::strip_trailing_symbols(tok);
+            let clean = tok.to_string();
             if clean.is_empty() { continue; }
 
             moves.push(clean.to_string());

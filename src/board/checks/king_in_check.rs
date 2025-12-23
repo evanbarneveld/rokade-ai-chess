@@ -4,7 +4,7 @@ use crate::piece::pieces::{Color, Piece, PieceType};
 
 /// Given the move (from->to) would be executed, would the king be in check?
 /// if so, 'the move is pinned' so that means the move cannot be made
-pub fn move_leads_to_check(board: &mut Board, move_from:(usize, usize), move_to:(usize, usize), en_passant_target: Option<(usize, usize)>) -> bool {
+pub fn is_king_in_check_after_move(board: &mut Board, move_from:(usize, usize), move_to:(usize, usize), en_passant_target: Option<(usize, usize)>) -> bool {
     let from_piece = board.get(move_from.0, move_from.1);
     let to_piece = board.get(move_to.0, move_to.1);
 

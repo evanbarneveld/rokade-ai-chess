@@ -1,14 +1,11 @@
 use crate::board::Board;
-use crate::board::checks::king_in_check::move_leads_to_check;
-use crate::piece::as_square_str;
+use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::piece::pieces::{Color, Piece};
 
 pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, usize), is_capture:bool, en_passant_target:Option<(usize,usize)>, active_color:Color, promotion_piece:Option<Piece>, do_pin_check:bool) -> bool {
 
     if from == to { return false; }
-
-    // from (rank, col)
-    // to (rank, col)
+    if (from.0 == to.0) { return false; } //move generators may create the weirdest moves
 
     // check horizontal movement
     if is_capture {
@@ -55,10 +52,10 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
         }
     }
 
-    if do_pin_check &&  move_leads_to_check(board, (from.0, from.1), (to.0, to.1), en_passant_target) {
+    if do_pin_check && is_king_in_check_after_move(board, (from.0, from.1), (to.0, to.1), en_passant_target) {
         return false;
     }
 
-    //println!("valid pawn move: {}", as_square_str(from, to));
+    //println!("pawn move: {:?} is valid", as_square_str(from, to));
     true
 }

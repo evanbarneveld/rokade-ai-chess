@@ -1,4 +1,5 @@
 use chess::Chess;
+use chess::piece::pieces::Color;
 use chess::state::outcome::OutcomeType;
 
 #[test]
@@ -125,4 +126,5 @@ fn test_check_mate() {
     game.get_game_state().recompute_outcome();
     let outcome = game.get_game_state().get_outcome().unwrap();
     println!("Outcome: {:?}", outcome);
+    assert_eq!(outcome, OutcomeType::Checkmate { winner: Color::Black})
 }

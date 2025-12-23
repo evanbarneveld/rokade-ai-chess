@@ -1,5 +1,5 @@
 use crate::board::Board;
-use crate::board::checks::king_in_check::move_leads_to_check;
+use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::piece::pieces::{Color, PieceType};
 
 /*
@@ -43,7 +43,7 @@ pub fn solve_ambiguous_bishop_san_move(from_col: i8, from_row: i8, to_col: i8, t
                 // First piece on the ray determines if a candidate exists
                 if p.get_type() == PieceType::Bishop && p.get_color() == active_color {
                     if col_matches(c) && row_matches(r) {
-                        if !move_leads_to_check(board, (ru, cu), (to_row_u, to_col_u), None) {
+                        if !is_king_in_check_after_move(board, (ru, cu), (to_row_u, to_col_u), None) {
                             candidates.push((ru, cu));
                         }
                     }

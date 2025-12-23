@@ -1,10 +1,12 @@
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+use crate::piece::as_square_str;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::king_move_validator::is_valid_king_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
 use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
+use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::piece::pieces::{Color, PieceType};
 use crate::state::game_state::GameState;
 
@@ -139,12 +141,13 @@ pub enum OutcomeType {
                                 // Additional safety: ensure resulting position leaves own king not in check for non-king moves
                                 // For king moves, validator already ensures safety.
                                 if matches!(p.get_type(), PieceType::King) {
+                                    print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
                                     return true;
                                 }
 
                                 // Simulate the move to verify king safety (covers en passant as well via pin logic already, but be thorough)
-                                use crate::board::checks::king_in_check::move_leads_to_check;
-                                if !move_leads_to_check(game_state.mutable_board(), from, to, ep) {
+                                if !is_king_in_check_after_move(game_state.mutable_board(), from, to, ep) {
+                                    print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
                                     return true;
                                 }
                             }
