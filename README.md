@@ -1,13 +1,13 @@
 TODO
 
-- add 'in-check' check 
-- add pinned pieces check
-- ambiguous knight moves in PGN library -> ignore pinned pieces!
-
-- make PGN library test work 100% if possible 
-- add redo feature
-- add UCI protocol
-
+- make PGN library test work for the first 10000 games
+- add checks for game outcome
+  - add win detection (stalemate detection)
+  - add draw detection (not enough material),
+  - 50 moves detection
+  - 3 repetition detection
 - add valid moves finder (search)
-- add draw detection
-- find best moves (elo? strategies?)
+- implement 'perft' test
+- search best moves (low depth, low elo)
+- play against engine
+- implement UCI protocol
