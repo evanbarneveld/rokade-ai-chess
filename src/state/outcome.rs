@@ -141,13 +141,13 @@ pub enum OutcomeType {
                                 // Additional safety: ensure resulting position leaves own king not in check for non-king moves
                                 // For king moves, validator already ensures safety.
                                 if matches!(p.get_type(), PieceType::King) {
-                                    print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
+                                    //print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
                                     return true;
                                 }
 
                                 // Simulate the move to verify king safety (covers en passant as well via pin logic already, but be thorough)
                                 if !is_king_in_check_after_move(game_state.mutable_board(), from, to, ep) {
-                                    print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
+                                    //print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
                                     return true;
                                 }
                             }

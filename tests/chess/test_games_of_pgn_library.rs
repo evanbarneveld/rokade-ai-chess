@@ -1,6 +1,8 @@
 use chess::parser::pgn_library_reader::PGNLibraryReader;
 use chess::Chess;
 use std::path::PathBuf;
+use chess::piece::pieces::Color;
+use chess::state::outcome::OutcomeType;
 
 #[test]
 fn test_games_of_pgn_library() {
@@ -61,7 +63,12 @@ fn test_games_of_pgn_library() {
 
         let mut game = Chess::new();
         let mut ply: usize = 0;
+        let mut last_move: String;
+
+        last_move = "".to_string();
+
         while let Some(mv) = doc.next_move() {
+            last_move = mv.clone();
             ply += 1;
             let ok = game.move_piece_san(&mv);
             if !ok {
@@ -80,8 +87,20 @@ fn test_games_of_pgn_library() {
         }
 
         game.get_game_state().recompute_outcome();
-        let outcome = game.get_game_state().get_outcome();
-        println!("Outcome: {:?}", outcome.unwrap());
+        let outcome = game.get_game_state().get_outcome().unwrap();
+
+        if last_move.ends_with('+') && outcome != OutcomeType::InCheck {
+            panic!("InCheck expected");
+        }
+        if ply % 2 == 0 {
+            if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::Black }) {
+                panic!("Checkmate black expected");
+            }
+        } else {
+            if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::White }) {
+                panic!("Checkmate white expected");
+            }
+        }
         game_number += 1;
     }
 
