@@ -42,7 +42,7 @@ impl PieceMover {
             }
             PieceType::Knight => {
                 if is_valid_knight_move(game_state.mutable_board(), from, to) {
-                    return move_knight(game_state, piece, from, to, is_capture);
+                    return move_knight(game_state, from, to, is_capture);
                 }
                 false
             }

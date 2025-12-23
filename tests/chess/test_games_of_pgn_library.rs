@@ -38,7 +38,7 @@ fn test_games_of_pgn_library() {
     ];
 
     //let first_test = *skip_list.last().unwrap();
-    let first_test = 1;
+    let first_test = 0;
 
     let limit = if enable_all {
         None
