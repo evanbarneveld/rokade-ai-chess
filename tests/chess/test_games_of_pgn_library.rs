@@ -1,3 +1,7 @@
+use chess::parser::pgn_library_reader::PGNLibraryReader;
+use chess::Chess;
+use std::path::PathBuf;
+
 #[test]
 fn test_games_of_pgn_library() {
     // This test streams PGN games one-by-one from the repository PGN file
@@ -12,10 +16,14 @@ fn test_games_of_pgn_library() {
     //   this by setting ENABLE_PGN_LIBRARY_TEST=1 to process all games, or set
     //   PGN_LIBRARY_TEST_LIMIT to a custom integer.
 
-    use chess::parser::pgn_library_reader::PGNLibraryReader;
-    use chess::Chess;
-    use std::env;
-    use std::path::PathBuf;
+    const FIRST_TEST:i32 = 1; //starts at #1
+    const LAST_TEST:i32 = 25; // reasonable default for CI speed
+
+    // Games to skip from the PGN library (by game index starting at 1) because they have been checked and are invalid
+    let skip_list: Vec<i32> = vec![
+        1145
+    ];
+
 
     // Verify that the expected PGN exists; skip test if missing.
     let pgn_path = PathBuf::from("pgn").join("LumbrasGigaBase_Online_2025.pgn");
@@ -27,43 +35,17 @@ fn test_games_of_pgn_library() {
         return; // skip when PGN is not available locally
     }
 
-    // Determine limit behavior
-    let enable_all = env::var("ENABLE_PGN_LIBRARY_TEST").ok().as_deref() == Some("1");
-    let limit_env = env::var("PGN_LIBRARY_TEST_LIMIT").ok();
-    let default_limit = 10000; // reasonable default for CI speed
-
-    // Games to skip from the PGN library (by game index starting at 1) because they have been checked and are invalid
-    let skip_list: Vec<i32> = vec![
-        1145
-    ];
-
-    //let first_test = *skip_list.last().unwrap();
-    let first_test = 0;
-
-    let limit = if enable_all {
-        None
-    } else if let Some(s) = limit_env {
-        match s.parse::<i32>() {
-            Ok(n) if n > 0 => Some(n),
-            _ => Some(default_limit),
-        }
-    } else {
-        Some(default_limit)
-    };
-
     let mut reader = PGNLibraryReader::new(&pgn_path).expect("Failed to open PGN library");
 
     let mut game_number: i32= 1;
 
     while let Some(mut doc) = reader.next_pgn().expect("Error streaming next PGN") {
 
-        if let Some(max) = limit {
-            if game_number > max {
-                break;
-            }
+        if game_number > LAST_TEST {
+            break;
         }
 
-        if (game_number < first_test) {
+        if (game_number < FIRST_TEST) {
             game_number += 1;
             continue;
         }

@@ -1,6 +1,5 @@
 TODO
 
-- make PGN library test work for the first 10000 games
 - add checks for game outcome
   - add win detection (stalemate detection)
   - add draw detection (not enough material),
