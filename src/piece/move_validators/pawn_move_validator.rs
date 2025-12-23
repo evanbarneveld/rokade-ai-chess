@@ -57,6 +57,6 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
         return false;
     }
 
-    println!("valid pawn move: {}", as_square_str(from, to));
+    //println!("valid pawn move: {}", as_square_str(from, to));
     true
 }

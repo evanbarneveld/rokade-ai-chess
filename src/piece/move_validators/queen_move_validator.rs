@@ -15,7 +15,7 @@ pub fn is_valid_queen_move(board: &mut Board, from: (usize, usize), to: (usize, 
     }
 
     if result {
-        println!("queen move: {}", as_square_str(from,to));
+        //println!("queen move: {}", as_square_str(from,to));
     }
 
     result

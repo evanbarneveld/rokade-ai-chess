@@ -16,7 +16,7 @@ pub fn is_valid_knight_move(board: &mut Board, from: (usize, usize), to: (usize,
     }
 
     if ok {
-        println!("valid knight move: {}", as_square_str(from, to));
+        //println!("valid knight move: {}", as_square_str(from, to));
     }
 
     ok

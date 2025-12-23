@@ -21,7 +21,7 @@ fn main() {
         let game_outcome = game.get_game_state().get_outcome();
 
         if game_outcome != Some(OutcomeType::Ongoing) {
-            print!("Game over.\nCommand> ");
+            print!("Game over: {:?}, \nCommand> ", game_outcome.unwrap());
         } else {
             if game.active_color_is_white() { print!("White> "); } else { print!("Black> "); }
         }
@@ -108,7 +108,7 @@ fn main() {
 
         println!("{}", game.board());
 
-        //game.get_game_state().recompute_outcome();
+        game.get_game_state().recompute_outcome();
     }
 }
 
