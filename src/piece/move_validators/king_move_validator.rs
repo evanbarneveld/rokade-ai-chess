@@ -3,6 +3,7 @@ use crate::state::game_state::GameState;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 
 pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: (usize, usize)) -> bool {
+
     if from == to { return false; }
 
     // standard king move: one square any direction

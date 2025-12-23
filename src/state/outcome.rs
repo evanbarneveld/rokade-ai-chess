@@ -32,14 +32,15 @@ pub enum OutcomeType {
 
         // Stalemate: side to move not in check and has no legal move
         let active_color = game_state.active_color();
-        if !is_in_check(game_state, active_color) && !any_legal_move_exists(game_state, active_color) {
+        if !is_in_check(game_state, active_color) &&
+            !any_legal_move_exists(game_state, active_color) {
             return OutcomeType::Stalemate
         }
 
         OutcomeType::Ongoing
     }
 
-    fn is_in_check(mut game_state: &mut GameState, color: Color) -> bool {
+    fn is_in_check(game_state: &mut GameState, color: Color) -> bool {
         let king_sq = game_state.board().get_king_location(color);
         is_square_attacked_by_opponent(game_state.mutable_board(), king_sq, color)
     }
@@ -66,11 +67,11 @@ pub enum OutcomeType {
 
                             let ep = game_state.en_passant_target(); // copy to avoid borrow conflict
                             let legal = match p.get_type() {
-                                PieceType::Pawn => is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, ep, color, None),
-                                PieceType::Knight => is_valid_knight_move(game_state.mutable_board(), from, to),
-                                PieceType::Bishop => is_valid_bishop_move(game_state.mutable_board(), from, to),
-                                PieceType::Rook => is_valid_rook_move(game_state.mutable_board(), from, to),
-                                PieceType::Queen => is_valid_queen_move(game_state.mutable_board(), from, to),
+                                PieceType::Pawn => is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, ep, color, None, false),
+                                PieceType::Knight => is_valid_knight_move(game_state.mutable_board(), from, to, false),
+                                PieceType::Bishop => is_valid_bishop_move(game_state.mutable_board(), from, to, false),
+                                PieceType::Rook => is_valid_rook_move(game_state.mutable_board(), from, to, false),
+                                PieceType::Queen => is_valid_queen_move(game_state.mutable_board(), from, to, false),
                                 PieceType::King => is_valid_king_move(game_state, from, to),
                             };
                             if legal { return true; }

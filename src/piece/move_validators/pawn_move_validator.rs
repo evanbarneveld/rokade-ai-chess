@@ -2,7 +2,10 @@ use crate::board::Board;
 use crate::board::checks::king_in_check::move_piece_is_pinned;
 use crate::piece::pieces::{Color, Piece};
 
-pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, usize), is_capture:bool, en_passant_target:Option<(usize,usize)>, active_color:Color, promotion_piece:Option<Piece>) -> bool {
+pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, usize), is_capture:bool, en_passant_target:Option<(usize,usize)>, active_color:Color, promotion_piece:Option<Piece>, do_pin_check:bool) -> bool {
+
+    if from == to { return false; }
+
     // from (rank, col)
     // to (rank, col)
 
@@ -49,7 +52,7 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
         }
     }
 
-    if move_piece_is_pinned(board, (from.0, from.1), (to.0, to.1), en_passant_target) {
+    if do_pin_check &&  move_piece_is_pinned(board, (from.0, from.1), (to.0, to.1), en_passant_target) {
         return false;
     }
 

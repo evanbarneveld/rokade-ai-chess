@@ -1,9 +1,10 @@
 use crate::board::Board;
 use crate::board::checks::king_in_check::move_piece_is_pinned;
 
-pub fn is_valid_rook_move(board: &mut Board, from: (usize, usize), to: (usize, usize)) -> bool {
-    // Rook moves must be strictly horizontal or vertical
+pub fn is_valid_rook_move(board: &mut Board, from: (usize, usize), to: (usize, usize), do_pin_check:bool) -> bool {
     if from == to { return false; }
+
+    // Rook moves must be strictly horizontal or vertical
 
     let same_row = from.0 == to.0;
     let same_col = from.1 == to.1;
@@ -26,7 +27,7 @@ pub fn is_valid_rook_move(board: &mut Board, from: (usize, usize), to: (usize, u
         }
     }
 
-    if move_piece_is_pinned(board, from, to, None) {
+    if do_pin_check && move_piece_is_pinned(board, from, to, None) {
         return false;
     }
 

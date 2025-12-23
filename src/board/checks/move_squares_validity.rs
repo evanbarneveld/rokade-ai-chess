@@ -14,6 +14,8 @@ use crate::piece::pieces::{Color};
 /// - the target square is empty (use the en-passant target if needed)
     pub fn move_from_and_to_validation_check(board: &Board, from: (usize, usize), to: (usize, usize), active_color:Color, is_capture:bool, is_pawn_move:bool, en_passant_target:Option<(usize, usize)>) -> bool {
 
+    if from == to { return false; }
+
     if from.0 > 7 || from.1 > 7 || to.0 > 7 || to.1 > 7 { return false; }
 
     let source_piece = board.get(from.0, from.1);

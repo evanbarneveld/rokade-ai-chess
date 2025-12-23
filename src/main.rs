@@ -14,10 +14,10 @@ fn main() {
 
     println!("Welcome to chess. Type 'fen' to show FEN, 'reset [<fen>] or reset standard' to reset the board, 'exit' to exit.\n");
 
-    loop {
-        println!("{}", game.board());
+    println!("{}", game.board());
 
-        game.get_game_state().recompute_outcome();
+    loop {
+
         let game_outcome = game.get_game_state().get_outcome();
 
         if game_outcome != Some(OutcomeType::Ongoing) {
@@ -38,10 +38,12 @@ fn main() {
         }
         if input.eq_ignore_ascii_case("fen") {
             println!("{}\n", game.to_fen());
+            println!("{}", game.board());
             continue;
         }
         if input.eq_ignore_ascii_case("undo") {
             game.undo_move();
+            println!("{}", game.board());
             continue;
         }
         if input.eq_ignore_ascii_case("list") {
@@ -96,9 +98,14 @@ fn main() {
             }
         }
 
+
         if !game.move_piece_san(input) {
             println!("Illegal or invalid move: '{}'. Try again.\n", input);
         }
+
+        println!("{}", game.board());
+
+        game.get_game_state().recompute_outcome();
     }
 }
 

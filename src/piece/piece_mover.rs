@@ -35,31 +35,31 @@ impl PieceMover {
         match piece.get_type() {
             PieceType::Pawn => {
                 let en_passant_target : Option<(usize,usize)> = game_state.en_passant_target();
-                if is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, en_passant_target, active_color, promotion_piece) {
+                if is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, en_passant_target, active_color, promotion_piece, true) {
                     return move_pawn(game_state, piece, from, to, is_capture, promotion_piece);
                 }
                 false
             }
             PieceType::Knight => {
-                if is_valid_knight_move(game_state.mutable_board(), from, to) {
+                if is_valid_knight_move(game_state.mutable_board(), from, to, true) {
                     return move_knight(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Bishop => {
-                if is_valid_bishop_move(game_state.mutable_board(), from, to) {
+                if is_valid_bishop_move(game_state.mutable_board(), from, to, true) {
                     return move_bishop(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Rook => {
-                if is_valid_rook_move(game_state.mutable_board(), from, to) {
+                if is_valid_rook_move(game_state.mutable_board(), from, to, true) {
                     return move_rook(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Queen => {
-                if is_valid_queen_move(game_state.mutable_board(), from, to) {
+                if is_valid_queen_move(game_state.mutable_board(), from, to, true) {
                     return move_queen(game_state, from, to, is_capture);
                 }
                 false
