@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 use chess::Chess;              // uses the re‑export from lib.rs
 use chess::pgn_player::pgn_player::PgnPlayer;
+use chess::state::outcome::OutcomeType;
 
 fn main() {
     // Start a game from the initial position
@@ -16,7 +17,14 @@ fn main() {
     loop {
         println!("{}", game.board());
 
-        if game.active_color_is_white() { print!("White> "); } else { print!("Black> "); }
+        game.get_game_state().recompute_outcome();
+        let game_outcome = game.get_game_state().get_outcome();
+
+        if game_outcome != Some(OutcomeType::Ongoing) {
+            print!("Game over.\nCommand> ");
+        } else {
+            if game.active_color_is_white() { print!("White> "); } else { print!("Black> "); }
+        }
 
         if io::stdout().flush().is_err() { break; }
 

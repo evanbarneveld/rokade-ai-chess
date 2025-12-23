@@ -61,7 +61,7 @@ pub fn solve_ambiguous_knight_san_move(from_col: i8, from_row: i8, to_col: i8, t
 }
 
 fn has_our_knight(row : usize, col:usize, board:&mut Board, active_color:Color ) -> bool {
-    if row < 0 || col < 0 || row > 7 || col > 7 { return false; }
+    if row > 7 || col > 7 { return false; }
     if let Some(p) = board.get(row, col) {
         p.get_type() == PieceType::Knight && p.get_color() == active_color
     } else {

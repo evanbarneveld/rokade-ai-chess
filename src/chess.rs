@@ -35,7 +35,10 @@ impl Chess {
     pub fn reset(&mut self) -> Result<(), String> {
         self.history.reset();
         match reset_from_fen(&self.starting_fen) {
-            Ok(state) => { Ok(self.game_state = state) },
+            Ok(mut state) => {
+                state.recompute_outcome();
+                Ok(self.game_state = state)
+            },
             Err(e) => Err(e)
         }
     }
@@ -43,11 +46,13 @@ impl Chess {
     pub fn set_starting_fen(&mut self, fen: &str) -> Result<(), String> {
         self.starting_fen = String::from(fen);
         self.game_state = reset_from_fen(&self.starting_fen)?;
+        self.game_state.recompute_outcome();
         Ok(())
     }
 
     pub fn reset_board_to_fen(&mut self, fen: &str) -> Result<(), String> {
         self.game_state = reset_from_fen(fen)?;
+        self.game_state.recompute_outcome();
         Ok(())
     }
 
@@ -99,6 +104,7 @@ impl Chess {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
                     self.history.add_move(mv.to_string(), game_state_to_fen_string(self.game_state.clone()));
+                    self.game_state.recompute_outcome();
                     true
                 } else {
                     false
@@ -108,5 +114,8 @@ impl Chess {
         }
     }
 
+    pub fn get_game_state(&mut self) -> &mut GameState {
+        &mut self.game_state
+    }
 }
 

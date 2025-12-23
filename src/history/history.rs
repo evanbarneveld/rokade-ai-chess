@@ -34,9 +34,6 @@ impl History {
     pub fn len(&self) -> usize {
         self.plies.len()
     }
-    pub fn is_empty(&self) -> bool {
-        self.plies.is_empty()
-    }
 
     // Returns a human-readable list of moves in standard move-pair notation,
     // e.g.: "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"
@@ -64,10 +61,5 @@ impl History {
         }
 
         parts.join(" ") + "\n"
-    }
-
-    // Returns a read-only view of the raw move list
-    pub fn moves(&self) -> &[(String,String)] {
-        &self.plies
     }
 }

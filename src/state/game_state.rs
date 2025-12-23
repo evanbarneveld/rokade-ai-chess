@@ -1,6 +1,6 @@
 use crate::board::Board;
 use crate::piece::pieces::{Piece, Color};
-use crate::state::outcome::GameOutcome;
+use crate::state::outcome::{recompute_outcome, OutcomeType};
 use crate::state::castling::CastlingRights;
 
 #[derive(Debug, Clone)]
@@ -11,9 +11,8 @@ pub struct GameState {
     en_passant_target: Option<(usize, usize)>,
     half_move_clock: u32,
     full_move_number: u32,
-    outcome: Option<GameOutcome>
+    outcome: Option<OutcomeType>
 }
-
 
 impl GameState {
     pub fn new() -> Self {
@@ -28,7 +27,7 @@ impl GameState {
         }
     }
 
-    pub fn new_from_existing_state(board: Board, active_color:Color, castling_rights: CastlingRights, en_passant_target: Option<(usize, usize)>, half_move_clock: u32, full_move_number: u32, outcome: Option<GameOutcome>) -> Self {
+    pub fn new_from_existing_state(board: Board, active_color: Color, castling_rights: CastlingRights, en_passant_target: Option<(usize, usize)>, half_move_clock: u32, full_move_number: u32) -> Self {
         GameState {
             board,
             active_color,
@@ -36,7 +35,7 @@ impl GameState {
             en_passant_target,
             half_move_clock,
             full_move_number,
-            outcome
+            outcome: None
         }
     }
 
@@ -64,11 +63,11 @@ impl GameState {
         self.full_move_number
     }
 
-    pub fn move_from_and_to_validation_check(&self, from: (usize, usize), to: (usize, usize), active_color:Color, is_capture:bool, is_pawn_move:bool, en_passant_target:Option<(usize, usize)>) -> bool {
+    pub fn move_from_and_to_validation_check(&self, from: (usize, usize), to: (usize, usize), active_color: Color, is_capture: bool, is_pawn_move: bool, en_passant_target: Option<(usize, usize)>) -> bool {
         self.board.move_from_and_to_validation_check(from, to, active_color, is_capture, is_pawn_move, en_passant_target)
     }
 
-    pub fn board_square_has_piece_of_opposite_color(&self, to: (usize, usize), active_color:Color) -> bool {
+    pub fn board_square_has_piece_of_opposite_color(&self, to: (usize, usize), active_color: Color) -> bool {
         self.board.board_square_has_piece_of_opposite_color(to, active_color)
     }
 
@@ -118,7 +117,7 @@ impl GameState {
         self.half_move_clock += 1;
     }
 
-    pub fn update_king_location(&mut self, color:Color, location: (usize, usize)) {
+    pub fn update_king_location(&mut self, color: Color, location: (usize, usize)) {
         self.board.set_king_location(color, location);
     }
 
@@ -132,6 +131,14 @@ impl GameState {
             Color::Black => self.castling_rights.revoke_black_castling(),
         }
     }
+
+    pub fn get_half_move_clock(&self) -> u32 { self.half_move_clock }
+
+    pub fn recompute_outcome(&mut self) {
+        self.outcome = Some(recompute_outcome(self));
+    }
+
+    pub fn get_outcome(&self) -> Option<OutcomeType> { self.outcome.clone() }
 }
 
 
