@@ -1,14 +1,19 @@
 use crate::piece::pieces::{Piece, PieceType, Color};
+use crate::board::checks::move_squares_validity::move_from_and_to_validation_check;
 
 #[derive(Debug, Clone)]
 pub struct Board {
     squares: [[Option<Piece>; 8]; 8],
+    white_king_location: (usize, usize),
+    black_king_location: (usize, usize),
 }
 
 impl Board {
     pub fn new() -> Self {
         let mut board = Board {
             squares: [[None; 8]; 8],
+            white_king_location: (0, 0),
+            black_king_location: (0, 0)
         };
         board.setup_initial_position();
         board
@@ -17,6 +22,8 @@ impl Board {
     pub fn empty() -> Self {
         Board {
             squares: [[None; 8]; 8],
+            white_king_location: (0, 0),
+            black_king_location: (0, 0)
         }
     }
 
@@ -24,6 +31,19 @@ impl Board {
         &self.squares
     }
 
+    pub fn get_king_location(&self, color:Color) -> (usize, usize) {
+        if color == Color::White { self.white_king_location } else { self.black_king_location }
+    }
+
+    pub fn set_king_location(&mut self, color:Color, location: (usize, usize)) {
+        if color == Color::White { self.white_king_location = location } else { self.black_king_location = location }
+    }
+
+    pub fn set_location_of_kings(&mut self) {
+        self.set_king_location(Color::White, self.find_king_location(Color::White).unwrap());
+        self.set_king_location(Color::Black, self.find_king_location(Color::Black).unwrap());
+    }
+    
     fn setup_initial_position(&mut self) {
         // Setup pawns
         for col in 0..8 {
@@ -41,6 +61,8 @@ impl Board {
             self.squares[0][col] = Some(Piece::new(piece_type, Color::White));
             self.squares[7][col] = Some(Piece::new(piece_type, Color::Black));
         }
+
+        self.set_location_of_kings()
     }
 
     pub fn get(&self, row: usize, col: usize) -> Option<Piece> {
@@ -55,42 +77,8 @@ impl Board {
         self.squares[row][col] = None;
     }
 
-    /// Basic check to see if a move is invalid, regardless of the type of the piece.
-    /// A move is invalid when:
-    ///
-    /// - the coordinates are out of range
-    /// - the source square is empty, there is nothing to move
-    /// - the source square is occupied by a piece of the other player
-    /// - the target square is occupied by a piece of the other player, but the move is not a capture move
-    /// - the target square is occupied by a piece of the current player
-    /// - the target square is occupied but the move is not a capture
-    /// - the target square is empty (use the en-passant target if needed)
     pub fn move_from_and_to_validation_check(&self, from: (usize, usize), to: (usize, usize), active_color:Color, is_capture:bool, is_pawn_move:bool, en_passant_target:Option<(usize, usize)>) -> bool {
-
-        if from.0 > 7 || from.1 > 7 || to.0 > 7 || to.1 > 7 { return false; }
-
-        let source_piece = self.get(from.0, from.1);
-        if source_piece.is_none() { return false; }
-        if source_piece.unwrap().get_color() != active_color { return false; }
-
-        let target_piece = self.get(to.0, to.1);
-
-        if target_piece.is_some() {
-            if !is_capture { return false; }
-            if target_piece.unwrap().get_color() == active_color { return false; }
-        } else {
-            // no piece on 'to' square
-            if is_capture {
-                // if the move is an en-passant capture, then check the en-passant target square
-                if is_pawn_move && en_passant_target.is_some() {
-                    // is the to square the en-passant target square? that square must be empty for a valid en-passant capture
-                    let ep_target = en_passant_target.unwrap();
-                    if to == ep_target { return true; }
-                }
-                return false;
-            }
-        }
-        true
+        move_from_and_to_validation_check(self, from, to, active_color, is_capture, is_pawn_move, en_passant_target)
     }
 
     pub fn board_square_has_piece_of_opposite_color(&self, to: (usize, usize), active_color:Color) -> bool {
@@ -124,5 +112,18 @@ impl Board {
         self.set(to.0, to.1, piece);
         self.set(from.0, from.1, None);
         true
+    }
+
+    pub fn find_king_location(&self, color:Color) -> Option<(usize, usize)> {
+        //iterate the squares and find the king location
+        //iterate ranks
+        for row in 0..8 {
+            for col in 0 .. 8 {
+                if let Some(piece) = self.get(row, col) {
+                    if piece.get_type() == PieceType::King && piece.get_color() == color { return Some((row, col)); }
+                }
+            }
+        }
+        None
     }
 }

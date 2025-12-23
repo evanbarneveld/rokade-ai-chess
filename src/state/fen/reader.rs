@@ -41,6 +41,8 @@ pub fn reset_from_fen(fen: &str) -> Result<GameState, String> {
         }
     }
 
+    board.set_location_of_kings();
+    
     // Parse active color (field 2)
     let active_color = match parts[1] {
         "w" => Color::White,
@@ -80,6 +82,8 @@ pub fn reset_from_fen(fen: &str) -> Result<GameState, String> {
         return Err("Invalid FEN: fullmove number must be at least 1".to_string());
     }
 
+
+    
     Ok(GameState::new_from_existing_state(
             board,
             active_color,

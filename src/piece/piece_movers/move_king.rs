@@ -36,5 +36,7 @@ pub fn move_king(game_state: &mut GameState, piece: Piece, from: (usize, usize),
         game_state.increment_half_move_clock();
     }
 
+    game_state.update_king_location(piece.get_color(), to);
+
     true
 }

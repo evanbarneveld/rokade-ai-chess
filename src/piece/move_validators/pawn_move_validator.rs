@@ -1,7 +1,8 @@
+use crate::board::Board;
+use crate::board::checks::king_in_check::is_king_in_check;
 use crate::piece::pieces::{Color, Piece};
-use crate::state::game_state::GameState;
 
-pub fn is_valid_pawn_move(game_state: &GameState, from: (usize, usize), to: (usize, usize), is_capture:bool, active_color:Color, promotion_piece:Option<Piece>) -> bool {
+pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, usize), is_capture:bool, active_color:Color, promotion_piece:Option<Piece>) -> bool {
     // from (rank, col)
     // to (rank, col)
 
@@ -21,7 +22,7 @@ pub fn is_valid_pawn_move(game_state: &GameState, from: (usize, usize), to: (usi
             if to.0 - from.0 > 2 { return false };
             if to.0 - from.0 == 2 {
                 //2 steps only possible if the path is clear
-                if !game_state.board_square_is_empty( (from.0 + 1, from.1)) { return false }
+                if !board.board_square_is_empty( (from.0 + 1, from.1)) { return false }
             }
          } else {
             if to.0 as i32 - from.0 as i32 != 1 { return false };
@@ -33,7 +34,7 @@ pub fn is_valid_pawn_move(game_state: &GameState, from: (usize, usize), to: (usi
             if from.0 - to.0 > 2 { return false }
             if from.0 - to.0 == 2 {
                 //2 steps only possible if the path is clear
-                if !game_state.board_square_is_empty( (from.0 - 1, from.1)) { return false }
+                if !board.board_square_is_empty( (from.0 - 1, from.1)) { return false }
             }
         } else {
             if from.0 as i32 - to.0 as i32 != 1 { return false }
@@ -46,6 +47,10 @@ pub fn is_valid_pawn_move(game_state: &GameState, from: (usize, usize), to: (usi
         } else {
             if to.0 != 0 { return false }
         }
+    }
+
+    if is_king_in_check(board, (from.0, from.1), (to.0, to.1)) {
+        return false;
     }
 
     true

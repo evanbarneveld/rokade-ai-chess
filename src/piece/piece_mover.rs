@@ -26,37 +26,39 @@ impl PieceMover {
             None => return false,
         };
 
-        if !game_state.move_from_and_to_validation_check(from, to, game_state.active_color(), is_capture, piece.get_type() == PieceType::Pawn, game_state.en_passant_target()) {
+        let active_color = game_state.active_color();
+
+        if !game_state.move_from_and_to_validation_check(from, to, active_color, is_capture, piece.get_type() == PieceType::Pawn, game_state.en_passant_target()) {
             return false;
         }
 
         match piece.get_type() {
             PieceType::Pawn => {
-                if is_valid_pawn_move(game_state, from, to, is_capture, game_state.active_color(), promotion_piece) {
+                if is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, active_color, promotion_piece) {
                     return move_pawn(game_state, piece, from, to, is_capture, promotion_piece);
                 }
                 false
             }
             PieceType::Knight => {
-                if is_valid_knight_move(game_state, from, to) {
+                if is_valid_knight_move(game_state.mutable_board(), from, to) {
                     return move_knight(game_state, piece, from, to, is_capture);
                 }
                 false
             }
             PieceType::Bishop => {
-                if is_valid_bishop_move(game_state, from, to) {
+                if is_valid_bishop_move(game_state.mutable_board(), from, to) {
                     return move_bishop(game_state, piece, from, to, is_capture);
                 }
                 false
             }
             PieceType::Rook => {
-                if is_valid_rook_move(game_state, from, to) {
+                if is_valid_rook_move(game_state.mutable_board(), from, to) {
                     return move_rook(game_state, piece, from, to, is_capture);
                 }
                 false
             }
             PieceType::Queen => {
-                if is_valid_queen_move(game_state, from, to) {
+                if is_valid_queen_move(game_state.mutable_board(), from, to) {
                     return move_queen(game_state, piece, from, to, is_capture);
                 }
                 false
@@ -69,21 +71,4 @@ impl PieceMover {
             }
         }
     }
-
-    fn is_valid_king_move(game_state: &GameState, from: (usize, usize), to: (usize, usize)) -> bool {
-        if game_state.board_square_has_piece_of_opposite_color(to, game_state.active_color()) { return false; }
-
-        //check if the 'from' location is occupied with a piece and the right color
-        //determine if the position is in check
-        //check if the movement of the piece is correct
-        false
-    }
-    fn is_valid_castling_move(game_state: &GameState, from: (usize, usize), to: (usize, usize)) -> bool {
-        //check if the 'from' location is occupied with a piece and the right color
-        //determine if the position is in check
-        //check if the movement of the piece is correct
-        false
-    }
-
-
 }

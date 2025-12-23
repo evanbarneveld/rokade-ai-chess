@@ -44,6 +44,10 @@ impl GameState {
         &self.board
     }
 
+    pub fn mutable_board(&mut self) -> &mut Board {
+        &mut self.board
+    }
+
     pub fn castling_rights(&self) -> CastlingRights {
         self.castling_rights.clone()
     }
@@ -112,6 +116,10 @@ impl GameState {
 
     pub fn increment_half_move_clock(&mut self) {
         self.half_move_clock += 1;
+    }
+
+    pub fn update_king_location(&mut self, color:Color, location: (usize, usize)) {
+        self.board.set_king_location(color, location);
     }
 
     pub fn reset_half_move_clock(&mut self) {

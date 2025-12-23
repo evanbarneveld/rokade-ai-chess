@@ -1,7 +1,7 @@
-use crate::piece::pieces::{Color, Piece};
-use crate::state::game_state::GameState;
+use crate::board::Board;
+use crate::board::checks::king_in_check::is_king_in_check;
 
-pub fn is_valid_bishop_move(game_state: &GameState, from: (usize, usize), to: (usize, usize)) -> bool {
+pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize, usize)) -> bool {
     // Bishop must move diagonally: absolute delta row equals absolute delta col
     let d_row = if to.0 > from.0 { to.0 - from.0 } else { from.0 - to.0 };
     let d_col = if to.1 > from.1 { to.1 - from.1 } else { from.1 - to.1 };
@@ -20,9 +20,13 @@ pub fn is_valid_bishop_move(game_state: &GameState, from: (usize, usize), to: (u
     let end_c: i32 = to.1 as i32;
 
     while r != end_r && c != end_c {
-        if !game_state.board_square_is_empty((r as usize, c as usize)) { return false; }
+        if !board.board_square_is_empty((r as usize, c as usize)) { return false; }
         r += step_row;
         c += step_col;
+    }
+
+    if is_king_in_check(board, from, to) {
+        return false;
     }
 
     true
