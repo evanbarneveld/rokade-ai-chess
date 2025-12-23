@@ -30,10 +30,19 @@ pub enum OutcomeType {
             return OutcomeType::DrawByFiftyMoveRule
         }
 
-        // Stalemate: side to move not in check and has no legal move
+        // Determine outcome related to check states
         let active_color = game_state.active_color();
-        if !is_in_check(game_state, active_color) &&
-            !any_legal_move_exists(game_state, active_color) {
+
+        // Checkmate: side to move is in check and has no legal move
+        let in_check = is_in_check(game_state, active_color);
+
+        if in_check {
+            // check if there is there a move that moves the king out of check
+            
+        }
+
+        // Stalemate: side to move not in check and has no legal move
+        if !in_check && !any_legal_move_exists(game_state, active_color) {
             return OutcomeType::Stalemate
         }
 
@@ -74,7 +83,10 @@ pub enum OutcomeType {
                                 PieceType::Queen => is_valid_queen_move(game_state.mutable_board(), from, to, false),
                                 PieceType::King => is_valid_king_move(game_state, from, to),
                             };
-                            if legal { return true; }
+                            if legal {
+                                print!("legal move found: {:?} {:?} {:?}", p.get_type(), from, to);
+                                return true;
+                            }
                         }
                     }
                 }
