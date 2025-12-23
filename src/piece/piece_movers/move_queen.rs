@@ -1,7 +1,6 @@
-use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
 
-pub fn move_queen(game_state: &mut GameState, piece: Piece, from: (usize, usize), to: (usize, usize), is_capture: bool) -> bool {
+pub fn move_queen(game_state: &mut GameState, from: (usize, usize), to: (usize, usize), is_capture: bool) -> bool {
     // Perform the actual move on the board
     let moved = game_state.move_piece(from, to);
     if !moved { return false; }

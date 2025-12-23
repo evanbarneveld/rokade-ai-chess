@@ -1,5 +1,5 @@
 use crate::board::Board;
-use crate::board::checks::king_in_check::is_king_in_check;
+use crate::board::checks::king_in_check::move_piece_is_pinned;
 use crate::piece::pieces::{Color, Piece};
 
 pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, usize), is_capture:bool, active_color:Color, promotion_piece:Option<Piece>) -> bool {
@@ -49,7 +49,7 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
         }
     }
 
-    if is_king_in_check(board, (from.0, from.1), (to.0, to.1)) {
+    if move_piece_is_pinned(board, (from.0, from.1), (to.0, to.1)) {
         return false;
     }
 

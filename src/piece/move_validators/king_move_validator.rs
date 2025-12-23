@@ -1,4 +1,4 @@
-use crate::piece::pieces::{Color, Piece, PieceType};
+use crate::piece::pieces::{Color, PieceType};
 use crate::state::game_state::GameState;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 

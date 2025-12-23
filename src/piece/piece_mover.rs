@@ -47,19 +47,19 @@ impl PieceMover {
             }
             PieceType::Bishop => {
                 if is_valid_bishop_move(game_state.mutable_board(), from, to) {
-                    return move_bishop(game_state, piece, from, to, is_capture);
+                    return move_bishop(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Rook => {
                 if is_valid_rook_move(game_state.mutable_board(), from, to) {
-                    return move_rook(game_state, piece, from, to, is_capture);
+                    return move_rook(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Queen => {
                 if is_valid_queen_move(game_state.mutable_board(), from, to) {
-                    return move_queen(game_state, piece, from, to, is_capture);
+                    return move_queen(game_state, from, to, is_capture);
                 }
                 false
             }

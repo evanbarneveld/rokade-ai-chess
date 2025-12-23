@@ -21,7 +21,7 @@ pub struct SanMoveCompleter {}
 
 impl SanMoveCompleter {
 
-    pub fn solve_ambiguous_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<Piece>, board: &Board, active_color:Color, en_passant_target:Option<(usize,usize)>) -> Result<CompletedSanMove, String> {
+    pub fn solve_ambiguous_san_move(&self, piece: char, incomplete_move_part: &str, move_to: &str, is_capture:bool, promotion_piece:Option<Piece>, board: &mut Board, active_color:Color, en_passant_target:Option<(usize,usize)>) -> Result<CompletedSanMove, String> {
 
         let from_col = Self::get_column_number_from_char(incomplete_move_part.chars().nth(0).unwrap());
         let from_row = Self::get_row_number_from_char(incomplete_move_part.chars().nth(1).unwrap());

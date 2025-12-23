@@ -41,7 +41,10 @@ impl Piece {
             PieceType::Rook => '♜',
             PieceType::Bishop => '♝',
             PieceType::Knight => '♞',
-            PieceType::Pawn => '♟',
+            PieceType::Pawn => '\u{2659}', // works well but is not filled in
+            // PieceType::Pawn => '\u{1FA05}', // doesn't work
+            //PieceType::Pawn => '♟', // works not it terminal: pawn gets purple color!
+            //PieceType::Pawn => '\u{265F}', // works not it terminal: pawn gets purple color!
         }
     }
 

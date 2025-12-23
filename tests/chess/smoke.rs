@@ -72,9 +72,9 @@ fn test_castling_black() {
     assert_eq!(game.to_fen(), "2kr1bnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 w - - 1 8");
 }
 
-//#[test]
-fn test_black_promotion_error() {
-    let fen = "r1bqkbnr/ppp2ppp/2n5/1B1pp3/8/1P2P3/PBPP1PPP/RN1QK1NR b KQkq - 3 4";
+#[test]
+fn test_ambiguous_move_due_to_pinned_pieces() {
+    let fen = "r2qkb1r/ppp2ppp/2n5/1B1npb2/8/2N1PN2/PP1P1PPP/R1BQK2R b KQkq - 5 7";
     let mv = "Ne7";
     let mut game = Chess::new();
     game.set_starting_fen(fen);

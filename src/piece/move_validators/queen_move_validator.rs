@@ -1,5 +1,5 @@
 use crate::board::Board;
-use crate::board::checks::king_in_check::is_king_in_check;
+use crate::board::checks::king_in_check::move_piece_is_pinned;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 
@@ -10,7 +10,7 @@ pub fn is_valid_queen_move(board: &mut Board, from: (usize, usize), to: (usize, 
     let result = is_valid_rook_move(board, from, to) ||
     is_valid_bishop_move(board, from, to);
 
-    if is_king_in_check(board, from, to) {
+    if move_piece_is_pinned(board, from, to) {
         return false;
     }
 

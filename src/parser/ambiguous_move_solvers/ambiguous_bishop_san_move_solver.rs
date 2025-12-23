@@ -4,7 +4,7 @@ use crate::piece::pieces::{Color, PieceType};
 /*
  Given a incomplete SAN move and the target position on the board, return the source position, or None if the move is invalid.
  */
-pub fn solve_ambiguous_bishop_san_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &Board, active_color:Color) -> Option<(u8, u8)> {
+pub fn solve_ambiguous_bishop_san_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &mut Board, active_color:Color) -> Option<(u8, u8)> {
     // Validate destination bounds
     if to_col < 0 || to_row < 0 { return None; }
     if to_col > 7 || to_row > 7 { return None; }

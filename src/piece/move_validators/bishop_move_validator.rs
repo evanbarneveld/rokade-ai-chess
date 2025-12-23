@@ -1,5 +1,5 @@
 use crate::board::Board;
-use crate::board::checks::king_in_check::is_king_in_check;
+use crate::board::checks::king_in_check::move_piece_is_pinned;
 
 pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize, usize)) -> bool {
     // Bishop must move diagonally: absolute delta row equals absolute delta col
@@ -25,7 +25,7 @@ pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize,
         c += step_col;
     }
 
-    if is_king_in_check(board, from, to) {
+    if move_piece_is_pinned(board, from, to) {
         return false;
     }
 

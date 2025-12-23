@@ -30,34 +30,14 @@ fn test_games_of_pgn_library() {
     // Determine limit behavior
     let enable_all = env::var("ENABLE_PGN_LIBRARY_TEST").ok().as_deref() == Some("1");
     let limit_env = env::var("PGN_LIBRARY_TEST_LIMIT").ok();
-    let default_limit = 670; // reasonable default for CI speed
+    let default_limit = 10000; // reasonable default for CI speed
 
     // Games to skip from the PGN library (by game index starting at 1) because they have been checked and are invalid
     let skip_list: Vec<i32> = vec![
-        79, // knight move is ambiguous
-        82, // knight move Nxb5 is ambiguous
-        109, // knight move Ne7 is ambiguous
-        139, // knight move Ne7 is ambiguous
-        190, // knight move Ne7 is ambiguous
-        201, // knight move Ne2 is ambiguous
-        202, // knight move is ambiguous
-        218, // idem
-        239,
-        331,
-        341,
-        346,
-        401,
-        459,
-        463,
-        488,
-        524,
-        539,
-        544,
-        669
     ];
 
     //let first_test = *skip_list.last().unwrap();
-    let first_test = 1;
+    let first_test = 0;
 
     let limit = if enable_all {
         None
@@ -94,7 +74,7 @@ fn test_games_of_pgn_library() {
             continue;
         }
 
-        //print!("Testing PGN #{}: {}\n", game_number, doc.to_string());
+        print!("Testing PGN #{}: {}\n", game_number, doc.to_string());
 
         let mut game = Chess::new();
         let mut ply: usize = 0;
