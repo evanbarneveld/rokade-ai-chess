@@ -2,7 +2,6 @@ use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::piece::pieces::{Color, PieceType};
 use crate::state::game_state::GameState;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-use crate::piece::as_square_str;
 
 pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: (usize, usize)) -> bool {
 

@@ -163,3 +163,11 @@ fn test_check_with_O_O_O() {
     println!("Outcome: {:?}", outcome);
     assert_eq!(outcome, OutcomeType::InCheck)
 }
+
+/*
+
+1. Nf3 d6 2. b3 e5 3. Bb2 e4 4. Nd4 c5 5. Nb5 d5 6. e3 Nc6 7. c4 d4 8.
+exd4 cxd4 9. d3 Bb4+ 10. Ke2 Qe7 11. Nxd4 exd3+ 12. Kxd3 Nxd4 13. Kxd4 Bf5
+14. Qe2 O-O-O# 0-1
+
+ */

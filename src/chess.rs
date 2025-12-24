@@ -2,8 +2,9 @@ use crate::state::game_state::GameState;
 use crate::board::Board;
 use crate::parser::parser::MoveParser;
 use crate::piece::piece_mover::PieceMover;
-use crate::piece::pieces::{Color };
+use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::history::history::History;
+use crate::piece::{as_move_str, as_square_str};
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 
@@ -94,6 +95,29 @@ impl Chess {
         }
         Some(removed_move.0)
     }
+
+    pub fn move_piece(&mut self, from:(usize, usize), to:(usize,usize)) -> bool {
+        let mut is_capture = false;
+        let mutable_board = self.get_game_state().mutable_board();
+        if mutable_board.get(from.0, from.1).is_none() { return false; }
+        if mutable_board.get(to.0, to.1).is_some() { is_capture = true; }
+
+        if PieceMover::move_piece(&mut self.game_state, from, to, is_capture, Some(Piece::new(PieceType::Queen, Color::White))) {
+            self.game_state.switch_player_turn();
+            let from_move_string = as_square_str(from);
+            let from_to_string = as_square_str(to);
+            let mut mv = format!("{}{}", from_move_string, from_to_string);
+            if (is_capture) {
+                mv = format!("{}x{}", mv, as_square_str(to));
+            }
+
+            self.history.add_move(mv.to_string(), game_state_to_fen_string(self.game_state.clone()));
+            true
+        } else {
+            false
+        }
+    }
+
 
     pub fn move_piece_san(&mut self, mv: &str) -> bool {
         let active_color = self.game_state.active_color();

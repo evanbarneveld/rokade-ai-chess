@@ -1,7 +1,9 @@
 use std::io::{self, Write};
+use chess::board::evaluator::evaluate_position;
 use chess::Chess;              // uses the re‑export from lib.rs
 use chess::pgn_player::pgn_player::PgnPlayer;
 use chess::state::outcome::OutcomeType;
+use chess::generator::random_move::get_random_move_as_san;
 
 fn main() {
     // Start a game from the initial position
@@ -110,12 +112,28 @@ fn main() {
             }
         }
 
+        if input.eq("random") {
+            let active_color = game.get_game_state().active_color();
+            let board = game.board();
+            let random_move = get_random_move_as_san(board, active_color);
 
-        if !game.move_piece_san(input) {
-            println!("Illegal or invalid move: '{}'. Try again.\n", input);
+            println!("Random move: '{}'\n", random_move);
+
+            if !game.move_piece_san(random_move.as_str()) {
+                println!("Illegal or invalid move: '{}'. Try again.\n", random_move);
+            }
+        } else {
+            // manual move
+            if !game.move_piece_san(input) {
+                println!("Illegal or invalid move: '{}'. Try again.\n", input);
+            }
         }
 
         println!("{}", game.board());
+
+        let score = evaluate_position(game.board());
+
+        println!("Evaluation: {}", score as f32/100.0);
 
         game.get_game_state().recompute_outcome();
     }

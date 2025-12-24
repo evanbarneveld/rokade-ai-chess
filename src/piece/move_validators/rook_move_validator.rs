@@ -1,6 +1,5 @@
 use crate::board::Board;
 use crate::board::checks::king_in_check::is_king_in_check_after_move;
-use crate::piece::as_square_str;
 
 pub fn is_valid_rook_move(board: &mut Board, from: (usize, usize), to: (usize, usize), do_pin_check:bool) -> bool {
     if from == to { return false; }

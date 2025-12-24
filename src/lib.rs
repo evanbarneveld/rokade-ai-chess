@@ -4,6 +4,7 @@ pub mod state;
 pub mod piece;
 pub mod parser;
 pub mod pgn_player;
+pub mod generator;
 
 pub mod history;
 

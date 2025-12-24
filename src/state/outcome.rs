@@ -1,5 +1,5 @@
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-use crate::piece::as_square_str;
+use crate::piece::as_move_str;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::king_move_validator::is_valid_king_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
@@ -97,7 +97,7 @@ pub enum OutcomeType {
                             };
                             if legal {
                                 if in_check {
-                                    println!("Legal move found with king in check: {:?} {:?}", p.get_type(), as_square_str(from, to));
+                                    println!("Legal move found with king in check: {:?} {:?}", p.get_type(), as_move_str(from, to));
                                 }
                                 return true;
                             }
