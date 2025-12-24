@@ -91,16 +91,19 @@ fn test_games_of_pgn_library() {
 
         if last_move.ends_with('+') && outcome != OutcomeType::InCheck {
             println!("FEN: {}", game.to_fen());
+            println!("{}", game.board());
             panic!("InCheck expected");
         }
         if ply % 2 == 0 {
             if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::Black }) {
                 println!("FEN: {}", game.to_fen());
+                println!("{}", game.board());
                 panic!("Checkmate black expected");
             }
         } else {
             if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::White }) {
                 println!("FEN: {}", game.to_fen());
+                println!("{}", game.board());
                 panic!("Checkmate white expected");
             }
         }

@@ -1,3 +1,4 @@
+use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::piece::pieces::{Color, PieceType};
 use crate::state::game_state::GameState;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
@@ -13,9 +14,12 @@ pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: 
     if dr <= 1 && dc <= 1 {
         //if this move puts the move in check, its not a valid move
         let active_color = game_state.active_color();
-        if is_square_attacked_by_opponent(game_state.mutable_board(), to, active_color) {
+        let en_passant_target = game_state.en_passant_target();
+        if is_king_in_check_after_move(game_state.mutable_board(), from, to, en_passant_target) {
+            //if is_square_attacked_by_opponent(game_state.mutable_board(), to, active_color) {
             //println!("invalid king move (leads to check): {}", as_square_str(from,to));
             return false;
+            //}
         }
 
         //println!("valid king move: {}", as_square_str(from, to));

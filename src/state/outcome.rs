@@ -98,8 +98,10 @@ pub enum OutcomeType {
                             };
                             if legal {
                                 if (in_check) {
-                                    println!("legal move found with king in check: {:?} {:?}", p.get_type(), as_square_str(from, to));
-                                }   
+                                    let x = is_valid_king_move(game_state, from, to);
+                                    let x = is_valid_king_move(game_state, from, to);
+                                    println!("Legal move found with king in check: {:?} {:?}", p.get_type(), as_square_str(from, to));
+                                }
                                 return true;
                             }
                         }
