@@ -37,10 +37,11 @@ pub enum OutcomeType {
         let active_color = game_state.active_color();
 
         let in_check = is_in_check(game_state, active_color);
+        let legal_moves_exist = any_legal_move_exists(game_state, active_color);
 
         if in_check {
             // Checkmate: no move to get the king out of check
-            if !any_strict_legal_escape_exists(game_state, active_color) {
+            if !legal_moves_exist {
                 let winner = match active_color {
                     Color::White => Color::Black,
                     Color::Black => Color::White
@@ -50,7 +51,7 @@ pub enum OutcomeType {
         }
 
         // Stalemate: side to move not in check and has no legal move
-        if !in_check && !any_legal_move_exists(game_state, active_color) {
+        if !in_check && !legal_moves_exist {
             return OutcomeType::Stalemate
         }
 
@@ -96,60 +97,13 @@ pub enum OutcomeType {
                                 PieceType::King => is_valid_king_move(game_state, from, to),
                             };
                             if legal {
+                                // Simulate the move to verify king safety (covers en passant as well via pin logic already, but be thorough)
+                                //if is_king_in_check_after_move(game_state.mutable_board(), from, to, ep) {
+                                //    //print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
+                                //    return false;
+                                //}
                                 //print!("legal move found: {:?} {:?} {:?}", p.get_type(), from, to);
                                 return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    // Similar to any_legal_move_exists but performs strict legality checking with pin detection.
-    // This is required for correct checkmate evaluation.
-    fn any_strict_legal_escape_exists(game_state : &mut GameState, color: Color) -> bool {
-        for r in 0..8 {
-            for c in 0..8 {
-                if let Some(p) = game_state.board().get(r, c) {
-                    if p.get_color() != color { continue; }
-                    let from = (r, c);
-                    for tr in 0..8 {
-                        for tc in 0..8 {
-                            let to = (tr, tc);
-                            if from == to { continue; }
-                            // basic target occupancy
-                            let target = game_state.board().get(tr, tc);
-                            let is_capture = target.is_some() && target.unwrap().get_color() != color ||
-                                (p.get_type() == PieceType::Pawn && game_state.en_passant_target().is_some() && game_state.en_passant_target().unwrap() == to);
-
-                            if !game_state.move_from_and_to_validation_check(from, to, color, is_capture, p.get_type() == PieceType::Pawn, game_state.en_passant_target()) {
-                                continue;
-                            }
-
-                            let ep = game_state.en_passant_target(); // copy to avoid borrow conflict
-                            let legal = match p.get_type() {
-                                PieceType::Pawn => is_valid_pawn_move(game_state.mutable_board(), from, to, is_capture, ep, color, None, true),
-                                PieceType::Knight => is_valid_knight_move(game_state.mutable_board(), from, to, true),
-                                PieceType::Bishop => is_valid_bishop_move(game_state.mutable_board(), from, to, true),
-                                PieceType::Rook => is_valid_rook_move(game_state.mutable_board(), from, to, true),
-                                PieceType::Queen => is_valid_queen_move(game_state.mutable_board(), from, to, true),
-                                PieceType::King => is_valid_king_move(game_state, from, to),
-                            };
-                            if legal {
-                                // Additional safety: ensure resulting position leaves own king not in check for non-king moves
-                                // For king moves, validator already ensures safety.
-                                if matches!(p.get_type(), PieceType::King) {
-                                    //print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
-                                    return true;
-                                }
-
-                                // Simulate the move to verify king safety (covers en passant as well via pin logic already, but be thorough)
-                                if !is_king_in_check_after_move(game_state.mutable_board(), from, to, ep) {
-                                    //print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
-                                    return true;
-                                }
                             }
                         }
                     }
