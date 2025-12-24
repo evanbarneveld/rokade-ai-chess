@@ -23,7 +23,9 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
             if to.0 < from.0 { return false }
             if to.0 - from.0 > 2 { return false };
             if to.0 - from.0 == 2 {
-                //2 steps only possible if the path is clear
+                //2 steps only possible if the move is not a capture and the path is clear
+                //note for en-passant capture, the en-passant target is only 1 square away
+                if is_capture { return false };
                 if !board.board_square_is_empty( (from.0 + 1, from.1)) { return false }
             }
          } else {
@@ -36,7 +38,9 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
             if to.0 > from.0 { return false }
             if from.0 - to.0 > 2 { return false }
             if from.0 - to.0 == 2 {
-                //2 steps only possible if the path is clear
+                //2 steps only possible if the move is not a capture and the path is clear
+                //note for en-passant capture, the en-passant target is only 1 square away
+                if is_capture { return false };
                 if !board.board_square_is_empty( (from.0 - 1, from.1)) { return false }
             }
         } else {

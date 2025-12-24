@@ -37,7 +37,7 @@ pub enum OutcomeType {
         let active_color = game_state.active_color();
 
         let in_check = is_in_check(game_state, active_color);
-        let legal_moves_exist = any_legal_move_exists(game_state, active_color);
+        let legal_moves_exist = any_legal_move_exists(game_state, active_color, in_check);
 
         if in_check {
             // Checkmate: no move to get the king out of check
@@ -67,7 +67,7 @@ pub enum OutcomeType {
         is_square_attacked_by_opponent(game_state.mutable_board(), king_sq, color)
     }
 
-    fn any_legal_move_exists(game_state : &mut GameState, color: Color) -> bool {
+    fn any_legal_move_exists(game_state : &mut GameState, color: Color, in_check:bool) -> bool {
         // iterate all pieces of this color and attempt any legal destination
         for r in 0..8 {
             for c in 0..8 {
@@ -97,12 +97,9 @@ pub enum OutcomeType {
                                 PieceType::King => is_valid_king_move(game_state, from, to),
                             };
                             if legal {
-                                // Simulate the move to verify king safety (covers en passant as well via pin logic already, but be thorough)
-                                //if is_king_in_check_after_move(game_state.mutable_board(), from, to, ep) {
-                                //    //print!("legal move found: {:?} {:?}", p.get_type(), as_square_str(from, to));
-                                //    return false;
-                                //}
-                                //print!("legal move found: {:?} {:?} {:?}", p.get_type(), from, to);
+                                if (in_check) {
+                                    println!("legal move found with king in check: {:?} {:?}", p.get_type(), as_square_str(from, to));
+                                }   
                                 return true;
                             }
                         }

@@ -90,14 +90,17 @@ fn test_games_of_pgn_library() {
         let outcome = game.get_game_state().get_outcome().unwrap();
 
         if last_move.ends_with('+') && outcome != OutcomeType::InCheck {
+            println!("FEN: {}", game.to_fen());
             panic!("InCheck expected");
         }
         if ply % 2 == 0 {
             if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::Black }) {
+                println!("FEN: {}", game.to_fen());
                 panic!("Checkmate black expected");
             }
         } else {
             if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::White }) {
+                println!("FEN: {}", game.to_fen());
                 panic!("Checkmate white expected");
             }
         }
