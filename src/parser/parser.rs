@@ -60,7 +60,7 @@ impl MoveParser {
     }
 
     fn convert_and_validate_san_move(&mut self, board: &mut Board, active_color: Color, san_move: &str, en_passant_target:Option<(usize,usize)>) -> Result<CompletedSanMove, String> {
-        let re = Regex::new(r"^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(=[NBRQK])?(\+|#)?$|^(O-O-O)?$|^(O-O)?$").unwrap();
+        let re = Regex::new(r"^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(=[NBRQK])?(\+|#)?$|^(O-O-O)?(\+|#)?$|^(O-O)?(\+|#)?$").unwrap();
         let caps: Vec<_> = re.captures_iter(san_move).collect();
 
         //println!("{:?}", caps);
@@ -77,19 +77,22 @@ impl MoveParser {
         let is_capture = cap0.get(4).is_some();
         let is_promotion = cap0.get(6).is_some();
 
-        let is_queen_side_castle = cap0.get(0).map(|m| m.as_str()) == Some("O-O-O");
-        let is_king_side_castle = cap0.get(0).map(|m| m.as_str()) == Some("O-O");
+        let all_matches = cap0.get(0);
+        let all_matched_as_str = all_matches.unwrap().as_str();
 
-        let piece_char = cap0.get(1).map(|m| m.as_str()).unwrap_or("P").chars().nth(0).unwrap();
+        let is_queen_side_castle = all_matched_as_str.starts_with("O-O-O");
+        let is_king_side_castle = !is_queen_side_castle && all_matched_as_str.starts_with("O-O");
+
+        let move_piece_char = cap0.get(1).map(|m| m.as_str()).unwrap_or("P").chars().nth(0).unwrap();
 
         let promotion_piece: Option<Piece> = if is_promotion {
-            let mut piece_char = cap0.get(6).map(|m|m.as_str().chars().nth(1)).unwrap().unwrap();
+            let mut promotion_piece_char = cap0.get(6).map(|m|m.as_str().chars().nth(1)).unwrap().unwrap();
             if active_color == Color::White {
-                piece_char = piece_char.to_ascii_uppercase();
+                promotion_piece_char = promotion_piece_char.to_ascii_uppercase();
             } else {
-                piece_char = piece_char.to_ascii_lowercase();
+                promotion_piece_char = promotion_piece_char.to_ascii_lowercase();
             }
-            Piece::from_fen_char(piece_char)
+            Piece::from_fen_char(promotion_piece_char)
         } else {
             None
         };
@@ -124,7 +127,7 @@ impl MoveParser {
                promotion_piece
             })
         } else if move_from.contains("?") {
-            self.san_move_resolver.solve_ambiguous_san_move(piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color, en_passant_target)
+            self.san_move_resolver.solve_ambiguous_san_move(move_piece_char, move_from.as_str(), move_to.as_str(), is_capture, promotion_piece, board, active_color, en_passant_target)
         } else {
             let san_move = format!("{}{}", move_from, move_to);
             Ok(CompletedSanMove {
