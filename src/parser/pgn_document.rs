@@ -125,26 +125,6 @@ impl PGNDocument {
         }
         false
     }
-
-    fn strip_trailing_symbols(tok: &str) -> &str {
-        // Remove trailing +, ++, #, !, ?, !?, ?!, etc., and also trailing ellipses if any remained.
-        let mut end = tok.len();
-        let bytes = tok.as_bytes();
-        while end > 0 {
-            let c = bytes[end - 1] as char;
-            if matches!(c, '+' | '#' | '!' | '?' ) {
-                end -= 1;
-                continue;
-            }
-            // very rare: some texts end moves with commas/parentheses, trim conservatively
-            if matches!(c, ',' | ')' | '(') {
-                end -= 1;
-                continue;
-            }
-            break;
-        }
-        &tok[..end]
-    }
 }
 
 impl fmt::Display for PGNDocument {

@@ -6,7 +6,6 @@ use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
 use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
-use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::piece::pieces::{Color, PieceType};
 use crate::state::game_state::GameState;
 
@@ -97,9 +96,7 @@ pub enum OutcomeType {
                                 PieceType::King => is_valid_king_move(game_state, from, to),
                             };
                             if legal {
-                                if (in_check) {
-                                    let x = is_valid_king_move(game_state, from, to);
-                                    let x = is_valid_king_move(game_state, from, to);
+                                if in_check {
                                     println!("Legal move found with king in check: {:?} {:?}", p.get_type(), as_square_str(from, to));
                                 }
                                 return true;

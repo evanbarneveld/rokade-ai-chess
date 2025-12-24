@@ -10,7 +10,7 @@ pub fn is_valid_queen_move(board: &mut Board, from: (usize, usize), to: (usize, 
     let result = is_valid_queen_orthogonal_move(board, from, to) ||
         is_valid_diagonal_move(board, from, to);
 
-    if (!result) { return false; }
+    if !result { return false; }
 
     if do_pin_check && is_king_in_check_after_move(board, from, to, None) {
         return false;

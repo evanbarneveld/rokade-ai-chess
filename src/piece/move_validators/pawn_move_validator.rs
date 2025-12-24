@@ -5,7 +5,7 @@ use crate::piece::pieces::{Color, Piece};
 pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, usize), is_capture:bool, en_passant_target:Option<(usize,usize)>, active_color:Color, promotion_piece:Option<Piece>, do_pin_check:bool) -> bool {
 
     if from == to { return false; }
-    if (from.0 == to.0) { return false; } //move generators may create the weirdest moves
+    if from.0 == to.0 { return false; } //move generators may create the weirdest moves
 
     // check horizontal movement
     if is_capture {

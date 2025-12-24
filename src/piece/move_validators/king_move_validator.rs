@@ -13,13 +13,9 @@ pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: 
     let dc = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
     if dr <= 1 && dc <= 1 {
         //if this move puts the move in check, its not a valid move
-        let active_color = game_state.active_color();
         let en_passant_target = game_state.en_passant_target();
         if is_king_in_check_after_move(game_state.mutable_board(), from, to, en_passant_target) {
-            //if is_square_attacked_by_opponent(game_state.mutable_board(), to, active_color) {
-            //println!("invalid king move (leads to check): {}", as_square_str(from,to));
             return false;
-            //}
         }
 
         //println!("valid king move: {}", as_square_str(from, to));

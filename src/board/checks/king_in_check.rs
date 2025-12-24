@@ -13,6 +13,13 @@ pub fn is_king_in_check_after_move(board: &mut Board, move_from:(usize, usize), 
     board.set(move_from.0, move_from.1, None);
     board.set(move_to.0, move_to.1, from_piece);
 
+    let move_is_king_move = from_piece.unwrap().get_type() == PieceType::King;
+
+    if move_is_king_move {
+       // we just moved the king on the board
+       board.set_king_location(piece_color, move_to);
+    }
+
     let mut is_en_passant_capture = false;
 
     if from_piece.unwrap().get_type() == PieceType::Pawn && en_passant_target.is_some() {
@@ -33,6 +40,11 @@ pub fn is_king_in_check_after_move(board: &mut Board, move_from:(usize, usize), 
     //restore the board: undo the move
     board.set(move_from.0, move_from.1, from_piece);
     board.set(move_to.0, move_to.1, to_piece);
+
+    if move_is_king_move {
+        // we just did an un-move of the king
+        board.set_king_location(piece_color, move_from);
+    }
 
     if is_en_passant_capture {
         //rest the board: undo the en-passant capture

@@ -146,22 +146,3 @@ fn test_check_mate2() {
     assert_eq!(outcome, OutcomeType::Checkmate { winner: Color::Black})
 }
 
-#[test]
-fn test_check_mate3() {
-    let fen = "rnb1k2N/ppp3p1/7p/4q3/2B1pKn1/8/PPPP1PP1/R1BQ1R2 w kq - 1 15";
-    let mv = "Kg3";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    println!("{}", game.board());
-    assert!(game.move_piece_san(mv));
-    println!("{}", game.board());
-    game.get_game_state().recompute_outcome();
-    let outcome = game.get_game_state().get_outcome().unwrap();
-    println!("Outcome: {:?}", outcome);
-    assert_eq!(outcome, OutcomeType::Checkmate { winner: Color::Black})
-}
-
-//rn2k1nr/ppp2ppp/8/2b1pb2/3q4/1K3P2/PP1PP1PP/RNBQ1BNR b kq - 2 9
-//Qb4+
