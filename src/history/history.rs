@@ -26,11 +26,18 @@ impl History {
 
     // Adds a move to the history (SAN or other chosen notation)
     pub fn add_move(&mut self, mv: String, fen: String) {
+        // Truncate FEN to exclude the last two move counters (halfmove clock and fullmove number)
+        // Keep only the first four fields: piece placement, active color, castling, en passant target
+        let truncated_fen = fen
+            .split_whitespace()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join(" ");
         // Update repetition counter for the provided FEN
-        let entry = self.fen_counts.entry(fen.clone()).or_insert(0);
+        let entry = self.fen_counts.entry(truncated_fen.clone()).or_insert(0);
         *entry += 1;
 
-        self.plies.push((mv, fen));
+        self.plies.push((mv, truncated_fen));
     }
 
     // Undoes the last move and returns it, if any
