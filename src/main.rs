@@ -3,7 +3,7 @@ use chess::board::evaluator::evaluate_position;
 use chess::Chess;              // uses the re‑export from lib.rs
 use chess::pgn_player::pgn_player::PgnPlayer;
 use chess::state::outcome::OutcomeType;
-use chess::generator::random_move::get_random_move_as_san;
+use chess::generator::move_generator::generate_move_as_san;
 
 fn main() {
     // Start a game from the initial position
@@ -112,16 +112,17 @@ fn main() {
             }
         }
 
-        if input.eq("random") {
+        if input.eq("?") {
             let active_color = game.get_game_state().active_color();
             let board = game.board();
-            let random_move = get_random_move_as_san(board, active_color);
+            if let Some(generated_move) = generate_move_as_san(board, active_color) {
+                println!("Generated move: '{}'\n", generated_move);
 
-            println!("Random move: '{}'\n", random_move);
-
-            if !game.move_piece_san(random_move.as_str()) {
-                println!("Illegal or invalid move: '{}'. Try again.\n", random_move);
+                if !game.move_piece_san(generated_move.as_str()) {
+                    println!("Illegal or invalid move: '{}'. Try again.\n", generated_move);
+                }
             }
+
         } else {
             // manual move
             if !game.move_piece_san(input) {

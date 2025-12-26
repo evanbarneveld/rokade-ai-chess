@@ -5,7 +5,7 @@ pub mod piece;
 pub mod parser;
 pub mod pgn_player;
 pub mod generator;
-
+pub mod search;
 pub mod history;
 
 pub use crate::chess::Chess;

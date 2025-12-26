@@ -4,7 +4,7 @@ use crate::parser::parser::MoveParser;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::history::history::History;
-use crate::piece::{as_move_str, as_square_str};
+use crate::piece::as_square_str;
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 
@@ -107,7 +107,7 @@ impl Chess {
             let from_move_string = as_square_str(from);
             let from_to_string = as_square_str(to);
             let mut mv = format!("{}{}", from_move_string, from_to_string);
-            if (is_capture) {
+            if is_capture {
                 mv = format!("{}x{}", mv, as_square_str(to));
             }
 
