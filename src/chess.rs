@@ -118,7 +118,6 @@ impl Chess {
         }
     }
 
-
     pub fn move_piece_san(&mut self, mv: &str) -> bool {
         let active_color = self.game_state.active_color();
         let en_passant_target = self.game_state.en_passant_target();

@@ -1,18 +1,22 @@
 #[derive(Debug, Default, Clone)]
 pub struct History {
     plies: Vec<(String, String)>,
+    // Tracks how many times each FEN has appeared in the history
+    fen_counts: std::collections::HashMap<String, usize>,
 }
 
 impl History {
     pub fn new() -> Self {
         Self {
             plies: (Vec::new()),
+            fen_counts: std::collections::HashMap::new(),
         }
     }
 
     // Clears all recorded moves
     pub fn reset(&mut self) {
         self.plies.clear();
+        self.fen_counts.clear();
     }
 
     // Returns a reference to the move at the given index, if it exists
@@ -22,12 +26,28 @@ impl History {
 
     // Adds a move to the history (SAN or other chosen notation)
     pub fn add_move(&mut self, mv: String, fen: String) {
+        // Update repetition counter for the provided FEN
+        let entry = self.fen_counts.entry(fen.clone()).or_insert(0);
+        *entry += 1;
+
         self.plies.push((mv, fen));
     }
 
     // Undoes the last move and returns it, if any
     pub fn undo_move(&mut self) -> Option<(String, String)> {
-        self.plies.pop()
+        if let Some((mv, fen)) = self.plies.pop() {
+            if let Some(count) = self.fen_counts.get_mut(&fen) {
+                if *count > 1 {
+                    *count -= 1;
+                } else {
+                    // Remove to keep the map clean when count reaches zero
+                    self.fen_counts.remove(&fen);
+                }
+            }
+            Some((mv, fen))
+        } else {
+            None
+        }
     }
 
     // Optional helpers
@@ -61,5 +81,20 @@ impl History {
         }
 
         parts.join(" ") + "\n"
+    }
+
+    // Returns how many times a given FEN has appeared in the history so far
+    pub fn fen_repetition_count(&self, fen: &str) -> usize {
+        *self.fen_counts.get(fen).unwrap_or(&0)
+    }
+
+    // Returns the repetition count of the most recent position (FEN) in history
+    // If there is no move yet, returns 0
+    pub fn current_repetition_count(&self) -> usize {
+        if let Some((_, fen)) = self.plies.last() {
+            self.fen_repetition_count(fen)
+        } else {
+            0
+        }
     }
 }

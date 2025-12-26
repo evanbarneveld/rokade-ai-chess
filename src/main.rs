@@ -142,8 +142,8 @@ fn main() {
         let mut generate_move = if input.eq_ignore_ascii_case("?") { true } else {false};
         if game.active_color_is_white() {
             if bot_vs_player || bot_vs_bot { generate_move = true; }
-        } else
-            if player_vs_bot || bot_vs_bot { generate_move = true;
+        } else {
+            if player_vs_bot || bot_vs_bot { generate_move = true; }
         }
 
         if generate_move {
@@ -171,6 +171,13 @@ fn main() {
 
         game.get_game_state().recompute_outcome();
         if let Some(outcome) = game.get_game_state().get_outcome() {
+            if game.get_history().current_repetition_count() >= 3 {
+                player_vs_player = true;
+                player_vs_bot = false;
+                bot_vs_bot = false;
+                bot_vs_player = false;
+                println!("3 repetitions in a row, starting over.");
+            }
             if outcome != OutcomeType::Ongoing && outcome != OutcomeType::InCheck {
                 player_vs_player = true;
                 player_vs_bot = false;
