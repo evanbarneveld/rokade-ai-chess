@@ -18,6 +18,11 @@ fn main() {
 
     println!("{}", game.board());
 
+    let mut player_vs_player = true;
+    let mut player_vs_bot = false;
+    let mut bot_vs_player = false;
+    let mut bot_vs_bot = false;
+
     loop {
 
         let game_outcome = game.get_game_state().get_outcome();
@@ -36,13 +41,36 @@ fn main() {
 
         if io::stdout().flush().is_err() { break; }
 
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() { break; }
-        let input = input.trim();
+        let mut input = String::from("");
+
+        if (game.active_color_is_white() && (player_vs_player || player_vs_bot)) ||
+            (!game.active_color_is_white() && (player_vs_player || bot_vs_player)) {
+            let mut input_line = String::new();
+            if io::stdin().read_line(&mut input_line).is_err() { break; }
+            input = input_line.trim().to_string();
+        }
 
         if input.eq_ignore_ascii_case("exit") {
             println!("Bye!");
             break;
+        }
+        if input.eq_ignore_ascii_case("pvsb") {
+            player_vs_bot = true;
+            player_vs_player = false;
+            bot_vs_player = false;
+            bot_vs_bot = false
+        }
+        if input.eq_ignore_ascii_case("bvsb") {
+            bot_vs_bot = true;
+            player_vs_player = false;
+            bot_vs_player = false;
+            player_vs_bot = false;
+        }
+        if input.eq_ignore_ascii_case("bvsp") {
+            bot_vs_player = true;
+            player_vs_player = false;
+            player_vs_bot = false;
+            bot_vs_bot = false
         }
         if input.eq_ignore_ascii_case("fen") {
             println!("{}\n", game.to_fen());
@@ -87,7 +115,6 @@ fn main() {
                 continue;
             }
         }
-        if input.is_empty() { continue; }
 
         // Handle "pgn <file>" to feed moves from a PGN file
         {
@@ -112,20 +139,26 @@ fn main() {
             }
         }
 
-        if input.eq("?") {
+        let mut generate_move = if input.eq_ignore_ascii_case("?") { true } else {false};
+        if game.active_color_is_white() {
+            if bot_vs_player || bot_vs_bot { generate_move = true; }
+        } else
+            if player_vs_bot || bot_vs_bot { generate_move = true;
+        }
+
+        if generate_move {
             let active_color = game.get_game_state().active_color();
             let board = game.board();
             if let Some(generated_move) = generate_move_as_san(board, active_color) {
-                println!("Generated move: '{}'\n", generated_move);
+                println!("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {
                     println!("Illegal or invalid move: '{}'. Try again.\n", generated_move);
                 }
             }
-
         } else {
             // manual move
-            if !game.move_piece_san(input) {
+            if !game.move_piece_san(input.as_str()) {
                 println!("Illegal or invalid move: '{}'. Try again.\n", input);
             }
         }
@@ -137,6 +170,14 @@ fn main() {
         println!("Evaluation: {}", score as f32/100.0);
 
         game.get_game_state().recompute_outcome();
+        if let Some(outcome) = game.get_game_state().get_outcome() {
+            if outcome != OutcomeType::Ongoing && outcome != OutcomeType::InCheck {
+                player_vs_player = true;
+                player_vs_bot = false;
+                bot_vs_bot = false;
+                bot_vs_player = false;
+            }
+        }
     }
 }
 
