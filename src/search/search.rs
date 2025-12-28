@@ -1,11 +1,49 @@
 use crate::board::Board;
 use crate::board::checks::king_in_check::is_king_in_check_after_move;
+use crate::board::evaluator::evaluate_position;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
 use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::piece::pieces::{Color, PieceType};
+
+
+pub (crate) fn find_best_move(board: &Board, active_color:Color) -> Option<((usize, usize), (usize, usize))> {
+
+    // get all valid moves given the position on the board and the active_color
+    let moves = find_valid_moves(board, active_color);
+
+    // for each valid move, simulate the move on the board, evaluate_position and then restore the board to its original state
+    // select the move with the best evaluation and return it, except if there is none
+    if moves.is_empty() {
+        return None;
+    }
+
+    let mut best_move: Option<((usize, usize), (usize, usize))> = None;
+    let mut best_score: Option<i32> = None;
+
+    for (from, to) in moves.into_iter() {
+        // simulate the move
+        let simulation_board = simulate_on_cloned_board(&board, from, to);
+        let score = evaluate_position(&simulation_board);
+
+        match best_score {
+            None => {
+                best_score = Some(score);
+                best_move = Some((from, to));
+            }
+            Some(current) => {
+                if score > current {
+                    best_score = Some(score);
+                    best_move = Some((from, to));
+                }
+            }
+        }
+    }
+
+    best_move
+}
 
 pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
     let mut result: Vec<((usize, usize), (usize, usize))> = Vec::new();
@@ -59,3 +97,18 @@ pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize
     }
     result
 }
+
+fn simulate_on_cloned_board(current: &Board, from: (usize, usize), to: (usize, usize)) -> Board {
+    let mut clone = current.clone();
+    // move the piece on the cloned board (no special moves handling here)
+    // if it's a pawn, use move_pawn API; otherwise generic move_piece
+    if let Some(p) = clone.get(from.0, from.1) {
+        if p.get_type() == PieceType::Pawn {
+            let _ = clone.move_pawn(from, to, None);
+        } else {
+            let _ = clone.move_piece(from, to);
+        }
+    }
+    clone
+}
+

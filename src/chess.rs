@@ -109,10 +109,15 @@ impl Chess {
     pub fn move_piece(&mut self, from:(usize, usize), to:(usize,usize)) -> bool {
         let mut is_capture = false;
         let mutable_board = self.get_game_state().mutable_board();
-        if mutable_board.get(from.0, from.1).is_none() { return false; }
+        let piece_to_move = mutable_board.get(from.0, from.1);
+        if piece_to_move.is_none() { return false; }
         if mutable_board.get(to.0, to.1).is_some() { is_capture = true; }
 
-        if PieceMover::move_piece(&mut self.game_state, from, to, is_capture, Some(Piece::new(PieceType::Queen, Color::White))) {
+        let promotion_piece = if piece_to_move.unwrap().get_type() == PieceType::Pawn && (to.0 == 7 || to.0 == 0) {
+           Some(Piece::new(PieceType::Queen, Color::White))
+        } else { None };
+
+        if PieceMover::move_piece(&mut self.game_state, from, to, is_capture, promotion_piece) {
             self.game_state.switch_player_turn();
             let from_move_string = as_square_str(from);
             let from_to_string = as_square_str(to);

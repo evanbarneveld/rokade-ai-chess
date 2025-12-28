@@ -9,3 +9,10 @@ path = "src/lib.rs"
 
 [dependencies]
 regex = "1.12.2"
+
+[profile.dev]
+# Compile dev builds with zero optimizations for faster compile times and easier debugging
+opt-level = 0
+debug = true
+incremental = true
+lto = "off"

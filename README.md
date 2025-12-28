@@ -1,4 +1,7 @@
 TODO
+
+- promotion piece -> promotion piece TYPE
+- 
 - check if castling moves are correctly checked (in-check rules) 
 - history should include # and + signs in moves
 - add draw detection (not enough material),
