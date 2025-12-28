@@ -13,7 +13,7 @@ use crate::piece::pieces::{Color, PieceType};
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
-pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:f32, mut history: History) -> Option<((usize, usize), (usize, usize))> {
+pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
 
     let active_color = game_state.active_color();
 
@@ -185,11 +185,11 @@ fn sort_moves_on_score_asc(
 
 // Selects randomly among the best-scoring moves in a sorted (ascending) move table.
 fn random_select_a_move_from(
-    sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, playing_strength: f32
+    sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, playing_strength: usize
 ) -> Option<((usize, usize), (usize, usize))> {
 
-    for (score, mv) in sorted_moves.iter().enumerate() {
-        let r: f32 = rng().random();
+    for (_, mv) in sorted_moves.iter().enumerate() {
+        let r: usize = rng().random_range(0..1000);
         if r < playing_strength {
             return Some((mv.0, mv.1))
         }

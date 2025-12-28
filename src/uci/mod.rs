@@ -56,7 +56,17 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line.starts_with("go ") || line == "go" {
-            let best = go_bestmove(&mut engine, line);
+            let mut movetime = 1000;
+
+            let line_parts: Vec<&str> = line.split(' ').filter(|w| !w.is_empty()).collect();
+            if line_parts.len() > 1 && line_parts[1] == "movetime" {
+                if line_parts.len() > 2 {
+                    //convert line_parts[2] to a number
+                    movetime = line_parts[2].parse::<usize>().unwrap();
+
+                }
+            }
+            let best = go_bestmove(&mut engine, line, movetime);
             writeln!(stdout, "bestmove {}", best)?;
             stdout.flush()?;
             continue;
@@ -145,13 +155,13 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
     engine.move_piece(from_idx, to_idx)
 }
 
-fn go_bestmove(engine: &mut Chess, line: &str) -> String {
+fn go_bestmove(engine: &mut Chess, line: &str, move_time:usize) -> String {
     // Currently we only support depth-limited instant move selection: pick the first legal move.
     // Parse optional depth but ignore for now.
     let depth = parse_depth(line).unwrap_or(4);
     let history = engine.get_history().clone();
     let game_state = engine.get_game_state();
-    let best_move = find_move(*game_state, depth, 0.8f32, history);
+    let best_move = find_move(*game_state, depth, move_time, history);
 
     if best_move.is_some() {
         let mv = best_move.unwrap();
