@@ -9,35 +9,41 @@ use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::piece::pieces::{Color, PieceType};
 
 
-pub (crate) fn find_best_move(board: &Board, active_color:Color) -> Option<((usize, usize), (usize, usize))> {
-
-    // get all valid moves given the position on the board and the active_color
+pub (crate) fn find_best_move(board: &Board, active_color: Color, depth: usize) -> Option<((usize, usize), (usize, usize))> {
+    // collect all legal moves for the side to move
     let moves = find_valid_moves(board, active_color);
 
-    // for each valid move, simulate the move on the board, evaluate_position and then restore the board to its original state
-    // select the move with the best evaluation and return it, except if there is none
     if moves.is_empty() {
         return None;
     }
 
+    // if depth is 0, treat it as 1 ply (evaluate after making one move)
+    let search_depth = if depth == 0 { 1 } else { depth };
+
     let mut best_move: Option<((usize, usize), (usize, usize))> = None;
-    let mut best_score: Option<i32> = None;
+    // If it's White to move we maximize, if Black we minimize (evaluation is from White's perspective)
+    let mut best_score: i32 = if active_color == Color::White { i32::MIN } else { i32::MAX };
 
     for (from, to) in moves.into_iter() {
         // simulate the move
         let simulation_board = simulate_on_cloned_board(&board, from, to);
-        let score = evaluate_position(&simulation_board);
 
-        match best_score {
-            None => {
-                best_score = Some(score);
+        // recurse: after making a move, it's the opponent's turn and depth decreases
+        let score = if search_depth <= 1 {
+            evaluate_position(&simulation_board)
+        } else {
+            minimax(&simulation_board, opposite_color(active_color), search_depth - 1)
+        };
+
+        if active_color == Color::White {
+            if score > best_score {
+                best_score = score;
                 best_move = Some((from, to));
             }
-            Some(current) => {
-                if score > current {
-                    best_score = Some(score);
-                    best_move = Some((from, to));
-                }
+        } else {
+            if score < best_score {
+                best_score = score;
+                best_move = Some((from, to));
             }
         }
     }
@@ -96,6 +102,43 @@ pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize
         }
     }
     result
+}
+
+#[inline]
+fn opposite_color(c: Color) -> Color {
+    match c { Color::White => Color::Black, Color::Black => Color::White }
+}
+
+// Basic depth-limited minimax without alpha-beta pruning.
+// Returns an evaluation in centipawns (positive better for White).
+fn minimax(board: &Board, to_move: Color, depth: usize) -> i32 {
+    if depth == 0 {
+        return evaluate_position(board);
+    }
+
+    let moves = find_valid_moves(board, to_move);
+    if moves.is_empty() {
+        // no legal moves: fall back to static eval (no checkmate detection here)
+        return evaluate_position(board);
+    }
+
+    if to_move == Color::White {
+        let mut best = i32::MIN;
+        for (from, to) in moves.into_iter() {
+            let b = simulate_on_cloned_board(board, from, to);
+            let val = minimax(&b, Color::Black, depth - 1);
+            if val > best { best = val; }
+        }
+        best
+    } else {
+        let mut best = i32::MAX;
+        for (from, to) in moves.into_iter() {
+            let b = simulate_on_cloned_board(board, from, to);
+            let val = minimax(&b, Color::White, depth - 1);
+            if val < best { best = val; }
+        }
+        best
+    }
 }
 
 fn simulate_on_cloned_board(current: &Board, from: (usize, usize), to: (usize, usize)) -> Board {
