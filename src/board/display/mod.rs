@@ -7,10 +7,10 @@ impl Board {
     pub fn get_board_display_string(&self, history: &History) -> String {
         // ANSI escape sequences for background colors (light/dark) and reset
         const RESET: &str = "\x1b[0m";
-        const BG_LIGHT: &str = "\x1b[48;5;244m"; // light gray
-        const BG_DARK: &str = "\x1b[48;5;239m";  // dark gray
-        const BG_LAST_LIGHT: &str = "\x1b[48;5;248m"; // light gray highlight (closer to BG_LIGHT)
-        const BG_LAST_DARK: &str = "\x1b[48;5;237m";  // slightly lighter gray (closer to BG_DARK)
+        const BG_LIGHT: &str = "\x1b[48;5;248m"; // light gray
+        const BG_DARK: &str = "\x1b[48;5;242m";  // dark gray
+        const BG_LAST_LIGHT: &str = "\x1b[48;5;252m"; // slightly lighter than light gray
+        const BG_LAST_DARK: &str = "\x1b[48;5;238m";  // slightly lighter than dark gray
         // Foreground colors for pieces
         const FG_WHITE: &str = "\x1b[97m"; // white pieces (white)
         const FG_BLACK: &str = "\x1b[30m"; // black pieces (black)
