@@ -1,31 +1,32 @@
 use crate::board::Board;
 use crate::piece::as_square_str;
 use crate::piece::pieces::{Color, PieceType};
+use crate::state::game_state::GameState;
 
-pub fn convert_move_to_san(board: &Board, generated_move: Option<((usize, usize), (usize, usize))>) -> Result<Option<String>, Option<String>> {
-    // No move available
-    if generated_move.is_none() { return Err(None); }
+pub fn convert_move_to_san(game_state : GameState, generated_move: Option<((usize, usize), (usize, usize))>) -> Option<String> {
+
+    if generated_move.is_none() { return None; }
 
     let some_generated_move = generated_move.unwrap();
+
+    let board = game_state.board();
 
     let square_move = get_san_move_if_casting_move(board, some_generated_move.0, some_generated_move.1);
 
     if square_move.is_some() {
-        return Ok(square_move);
+        return square_move;
     }
 
     let (prefix, is_pawn_promotion) = get_san_move_piece_prefix(board, some_generated_move.0, some_generated_move.1);
     // If this is a capture, reflect that in the SAN-like output by inserting an 'x'
     if board.get(some_generated_move.1.0, some_generated_move.1.1).is_some() {
         let pawn_promotion = if is_pawn_promotion { "=Q" } else { "" };
-        return Err(Some(format!("{}{}x{}{}", prefix, as_square_str(some_generated_move.0), as_square_str(some_generated_move.1), pawn_promotion)));
+        return Some(format!("{}{}x{}{}", prefix, as_square_str(some_generated_move.0), as_square_str(some_generated_move.1), pawn_promotion));
     }
 
     // Default to simple coordinate move (e.g., e2e4), with optional prefix for piece type
-    Ok({
-        let pawn_promotion = if is_pawn_promotion { "=Q" } else { "" };
-        Some(format!("{}{}{}{}", prefix, as_square_str(some_generated_move.0), as_square_str(some_generated_move.1), pawn_promotion))
-    })
+    let pawn_promotion = if is_pawn_promotion { "=Q" } else { "" };
+    Some(format!("{}{}{}{}", prefix, as_square_str(some_generated_move.0), as_square_str(some_generated_move.1), pawn_promotion))
 }
 
 fn get_san_move_piece_prefix(board: &Board, from: (usize, usize), to: (usize, usize)) -> (String, bool) {

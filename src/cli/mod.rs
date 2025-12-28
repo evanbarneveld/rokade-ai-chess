@@ -60,7 +60,9 @@ pub fn run_cli() {
                 break;
             }
 
-            handle_game_mode_commands(&mut mode, &some_input);
+            if handle_game_mode_commands(&mut mode, &some_input) {
+                continue;
+            }
 
             if some_input.eq_ignore_ascii_case("fen") {
                 println!("{}\n", game.to_fen());
@@ -102,14 +104,15 @@ pub fn run_cli() {
 
         // handle the move
         if must_generate_move(&mut game, &mut mode, move_is_bot_move) {
-            let active_color = game.get_game_state().active_color();
-            let board = game.board();
-            if let Some(generated_move) = generate_move_as_san(board, active_color) {
+            let history = game.get_history().clone();
+            if let Some(generated_move) = generate_move_as_san(*game.get_game_state(), history) {
                 println ! ("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {
                     println ! ("Illegal or invalid move: '{}'. Try again.\n", generated_move);
                 }
+            } else {
+                println ! ("No legal moves available.\n");
             }
         }
 
@@ -239,9 +242,10 @@ fn print_help() {
     println!("exit           - exit the program");
 }
 
-fn handle_game_mode_commands(mode: &mut GameMode, some_input: &String) {
-    if some_input.eq_ignore_ascii_case("pvsb") { *mode = GameMode::PlayerVsBot; }
-    if some_input.eq_ignore_ascii_case("bvsb") { *mode = GameMode::BotVsBot; }
-    if some_input.eq_ignore_ascii_case("bvsp") { *mode = GameMode::BotVsPlayer; }
-    if some_input.eq_ignore_ascii_case("pvp") { *mode = GameMode::PlayerVsPlayer; }
+fn handle_game_mode_commands(mode: &mut GameMode, some_input: &String) -> bool {
+    if some_input.eq_ignore_ascii_case("pvsb") { *mode = GameMode::PlayerVsBot; return true};
+    if some_input.eq_ignore_ascii_case("bvsb") { *mode = GameMode::BotVsBot; return true};
+    if some_input.eq_ignore_ascii_case("bvsp") { *mode = GameMode::BotVsPlayer; return true };
+    if some_input.eq_ignore_ascii_case("pvp") { *mode = GameMode::PlayerVsPlayer; return true};
+    false
 }

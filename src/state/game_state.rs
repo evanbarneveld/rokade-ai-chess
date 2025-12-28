@@ -4,7 +4,7 @@ use crate::piece::pieces::{Piece, Color};
 use crate::state::outcome::{recompute_outcome, OutcomeType};
 use crate::state::castling::CastlingRights;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct GameState {
     board: Board,
     active_color: Color,

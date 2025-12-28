@@ -13,3 +13,13 @@ pub fn as_move_str(from:(usize, usize), to:(usize, usize)) -> String{
     let to_col = (b'a' + to.1 as u8) as char;
     format!("{}{}{}{}", from_col, from.0+1, to_col, to.0+1)
 }
+
+pub fn as_move_str_with_capture_flag(from:(usize, usize), to:(usize, usize), is_capture_move: bool) -> String{
+    let from_col = (b'a' + from.1 as u8) as char;
+    let to_col = (b'a' + to.1 as u8) as char;
+    if !is_capture_move {
+        format!("{}{}{}{}", from_col, from.0+1, to_col, to.0+1)
+    } else {
+        format!("{}{}x{}{}", from_col, from.0+1, to_col, to.0+1)
+    }
+}

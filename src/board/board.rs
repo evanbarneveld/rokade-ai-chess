@@ -1,7 +1,7 @@
 use crate::piece::pieces::{Piece, PieceType, Color};
 use crate::board::checks::move_squares_validity::move_from_and_to_validation_check;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Board {
     //these are the squares on the board
     squares: [[Option<Piece>; 8]; 8],

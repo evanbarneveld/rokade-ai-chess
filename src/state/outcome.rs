@@ -9,7 +9,7 @@ use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::piece::pieces::{Color, PieceType};
 use crate::state::game_state::GameState;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum OutcomeType {
     Ongoing,
     InCheck,

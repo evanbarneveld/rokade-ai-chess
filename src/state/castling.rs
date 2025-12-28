@@ -1,5 +1,5 @@
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CastlingRights {
     white_kingside: bool,
     white_queenside: bool,

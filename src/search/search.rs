@@ -1,16 +1,23 @@
 use crate::board::Board;
 use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::board::evaluator::evaluate_position;
+use crate::board::san_move::convert_move_to_san;
+use crate::history::history::History;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
 use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::piece::pieces::{Color, PieceType};
+use crate::state::fen::writer::game_state_to_fen_string;
+use crate::state::game_state::GameState;
 
+pub (crate) fn find_best_move(game_state: GameState, depth: usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
 
-pub (crate) fn find_best_move(board: &Board, active_color: Color, depth: usize) -> Option<((usize, usize), (usize, usize))> {
+    let active_color = game_state.active_color();
+
     // collect all legal moves for the side to move
+    let board = game_state.board();
     let moves = find_valid_moves(board, active_color);
 
     if moves.is_empty() {
@@ -26,14 +33,26 @@ pub (crate) fn find_best_move(board: &Board, active_color: Color, depth: usize) 
 
     for (from, to) in moves.into_iter() {
         // simulate the move
-        let simulation_board = simulate_on_cloned_board(&board, from, to);
+        let mut simulation_board = simulate_on_cloned_board(&board, from, to);
 
         // recurse: after making a move, it's the opponent's turn and depth decreases
-        let score = if search_depth <= 1 {
+        let mut score = if search_depth <= 1 {
             evaluate_position(&simulation_board)
         } else {
             minimax(&simulation_board, opposite_color(active_color), search_depth - 1)
         };
+
+        //the move leads to a 3-fold repetition?
+        let san_move = convert_move_to_san(game_state, Some((from, to)));
+
+        simulation_board.move_piece(from, to);
+        let fen = game_state_to_fen_string(game_state);
+        history.add_move(san_move.unwrap(), fen);
+
+        if history.current_repetition_count() == 3 {
+            // this is a bad move
+            score = if active_color == Color::White { i32::MIN } else { i32::MAX };
+        }
 
         if active_color == Color::White {
             if score > best_score {
