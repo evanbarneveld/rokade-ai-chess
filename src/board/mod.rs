@@ -1,7 +1,8 @@
-mod board;
-mod display;
+pub mod board;
+pub(crate) mod display;
 pub(crate) mod checks;
+pub(crate) mod san_move;
+
 pub mod evaluator;
-pub mod san_move;
 
 pub use board::Board;

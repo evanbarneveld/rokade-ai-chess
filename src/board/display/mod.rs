@@ -2,6 +2,7 @@ use std::fmt;
 use crate::board::Board;
 use crate::piece::pieces::Color;
 
+/// Display the chess board using ANSI escape sequences and Unicode chess symbols
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // ANSI escape sequences for background colors (light/dark) and reset

@@ -1,3 +1,3 @@
-pub mod move_squares_validity;
-pub mod king_in_check;
-pub mod square_attacked;
+pub(crate) mod move_squares_validity;
+pub(crate) mod king_in_check;
+pub(crate) mod square_attacked;

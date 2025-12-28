@@ -8,11 +8,13 @@ pub fn convert_move_to_san(board: &Board, generated_move: Option<((usize, usize)
 
     let some_generated_move = generated_move.unwrap();
 
-    if let Some(square_move) = get_if_casting_move(board, some_generated_move.0, some_generated_move.1) {
-        return Err(square_move);
+    let square_move = get_san_move_if_casting_move(board, some_generated_move.0, some_generated_move.1);
+
+    if square_move.is_some() {
+        return Ok(square_move);
     }
 
-    let (prefix, is_pawn_promotion) = get_move_piece_prefix(board, some_generated_move.0, some_generated_move.1);
+    let (prefix, is_pawn_promotion) = get_san_move_piece_prefix(board, some_generated_move.0, some_generated_move.1);
     // If this is a capture, reflect that in the SAN-like output by inserting an 'x'
     if board.get(some_generated_move.1.0, some_generated_move.1.1).is_some() {
         let pawn_promotion = if is_pawn_promotion { "=Q" } else { "" };
@@ -26,7 +28,7 @@ pub fn convert_move_to_san(board: &Board, generated_move: Option<((usize, usize)
     })
 }
 
-fn get_move_piece_prefix(board: &Board, from: (usize, usize), to: (usize, usize)) -> (String, bool) {
+fn get_san_move_piece_prefix(board: &Board, from: (usize, usize), to: (usize, usize)) -> (String, bool) {
     // Determine SAN piece prefix (empty for pawns)
     let mut prefix = String::new();
     let mut is_pawn_promotion = false;
@@ -50,17 +52,17 @@ fn get_move_piece_prefix(board: &Board, from: (usize, usize), to: (usize, usize)
     (prefix, is_pawn_promotion)
 }
 
-fn get_if_casting_move(board: &Board, from: (usize, usize), to: (usize, usize)) -> Option<Option<String>> {
+fn get_san_move_if_casting_move(board: &Board, from: (usize, usize), to: (usize, usize)) -> Option<String> {
     // Castling detection (king moves two files)
     if let Some(p) = board.get(from.0, from.1) {
         if p.get_type() == PieceType::King {
             // king side castle
             if to.1 == from.1 + 2 {
-                return Some(Some(String::from("O-O")));
+                return Some(String::from("O-O"));
             }
             // queen side castle
             if from.1 >= 2 && to.1 + 2 == from.1 {
-                return Some(Some(String::from("O-O-O")));
+                return Some(String::from("O-O-O"));
             }
         }
     }

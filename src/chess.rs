@@ -54,9 +54,18 @@ impl Chess {
     }
 
     pub fn reset_board_to_fen(&mut self, fen: &str) -> Result<(), String> {
-        self.game_state = reset_from_fen(fen)?;
-        self.game_state.recompute_outcome();
-        Ok(())
+        match reset_from_fen(fen) {
+            Ok(state) => Ok({
+                self.game_state = state;
+                self.game_state.recompute_outcome();
+            })
+            ,
+            Err(e) => Err(
+                {
+                  println!("{}", e); String::from("Error parsing FEN")
+                }
+            )
+        }
     }
 
     pub fn board(&mut self) -> &Board {
@@ -89,6 +98,7 @@ impl Chess {
             let last_index = self.history.len() - 1;
             let last_move = self.history.get_move(last_index);
             let last_fen = last_move.map(|mv| mv.1.clone());
+            if last_fen.is_none() { return None; }
             self.reset_board_to_fen(last_fen.unwrap().as_str()).unwrap();
         } else {
             self.reset().unwrap();

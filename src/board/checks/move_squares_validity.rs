@@ -5,6 +5,7 @@ use crate::piece::pieces::{Color};
 /// Basic check to see if a move is invalid, regardless of the type of the piece.
 /// A move is invalid when:
 ///
+/// - the source and target squares are the same
 /// - the coordinates are out of range
 /// - the source square is empty, there is nothing to move
 /// - the source square is occupied by a piece of the other player
@@ -18,6 +19,7 @@ use crate::piece::pieces::{Color};
 
     if from.0 > 7 || from.1 > 7 || to.0 > 7 || to.1 > 7 { return false; }
 
+    // is there a piece on the 'from' square that has the same color as the active player?
     let source_piece = board.get(from.0, from.1);
     if source_piece.is_none() { return false; }
     if source_piece.unwrap().get_color() != active_color { return false; }
@@ -25,8 +27,12 @@ use crate::piece::pieces::{Color};
     let target_piece = board.get(to.0, to.1);
 
     if target_piece.is_some() {
+        // there is a piece on the 'to' square
+        // if the move is a capture move, then the target square must be empty
         if !is_capture { return false; }
-        if target_piece.unwrap().get_color() == active_color { return false; }
+
+        // the target square must be occupied by a piece of the other player if it is a capture move
+        if is_capture && target_piece.unwrap().get_color() == active_color { return false; }
     } else {
         // no piece on 'to' square
         if is_capture {

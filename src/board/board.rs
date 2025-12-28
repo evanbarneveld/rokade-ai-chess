@@ -3,7 +3,9 @@ use crate::board::checks::move_squares_validity::move_from_and_to_validation_che
 
 #[derive(Debug, Clone)]
 pub struct Board {
+    //these are the squares on the board
     squares: [[Option<Piece>; 8]; 8],
+    //keep track of the king locations
     white_king_location: (usize, usize),
     black_king_location: (usize, usize),
 }
@@ -39,7 +41,7 @@ impl Board {
         if color == Color::White { self.white_king_location = location } else { self.black_king_location = location }
     }
 
-    pub fn set_location_of_kings(&mut self) {
+    pub fn find_and_set_location_of_kings(&mut self) {
         self.set_king_location(Color::White, self.find_king_location(Color::White).unwrap());
         self.set_king_location(Color::Black, self.find_king_location(Color::Black).unwrap());
     }
@@ -62,7 +64,7 @@ impl Board {
             self.squares[7][col] = Some(Piece::new(piece_type, Color::Black));
         }
 
-        self.set_location_of_kings()
+        self.find_and_set_location_of_kings()
     }
 
     pub fn get(&self, row: usize, col: usize) -> Option<Piece> {

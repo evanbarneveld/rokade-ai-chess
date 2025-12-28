@@ -41,7 +41,7 @@ pub fn reset_from_fen(fen: &str) -> Result<GameState, String> {
         }
     }
 
-    board.set_location_of_kings();
+    board.find_and_set_location_of_kings();
 
     // Parse active color (field 2)
     let active_color = match parts[1] {
