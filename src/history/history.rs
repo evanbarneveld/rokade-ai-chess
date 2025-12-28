@@ -98,7 +98,7 @@ impl History {
     // Returns the repetition count of the most recent position (FEN) in history
     // If there is no move yet, returns 0
     pub fn current_repetition_count(&self) -> usize {
-        if let Some((_, fen, truncated_fen)) = self.plies.last() {
+        if let Some((_, _fen, truncated_fen)) = self.plies.last() {
             self.fen_repetition_count(truncated_fen)
         } else {
             0
