@@ -215,19 +215,19 @@ fn main() {
     }
 
     fn print_help() {
-        println!("reset - reset the board to the initial position");
-        println!("reset <fen> - set initial position to the FEN position, and reset the board");
+        println!("reset          - reset the board to the initial position");
+        println!("reset <fen>    - set initial position to the FEN position, and reset the board");
         println!("reset standard - set the initial position to the standard position and reset the board");
-        println!("pgn <file> - replay the given PGN file");
-        println!("? - automatic move");
-        println!("fen - print the current FEN position");
-        println!("undo - undo the last move");
-        println!("list - list all moves");
-        println!("pvsb - play vs bot");
-        println!("bvsb - bot vs bot");
-        println!("bvsp - bot vs player");
-        println!("pvp - player vs player");
-        println!("exit - exit the program");
+        println!("pgn <file>     - replay the given PGN file");
+        println!("?              - automatic move");
+        println!("fen            - print the current FEN position");
+        println!("undo           - undo the last move");
+        println!("list           - list all moves");
+        println!("pvsb           - play vs bot");
+        println!("bvsb           - bot vs bot");
+        println!("bvsp           - bot vs player");
+        println!("pvp            - player vs player");
+        println!("exit           - exit the program");
     }
 
     fn handle_game_mode_commands(mode: &mut GameMode, some_input: &String) {
