@@ -13,7 +13,7 @@ use crate::piece::pieces::{Color, PieceType};
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
-pub (crate) fn  find_move(game_state: GameState, depth: usize, playing_strength:f32, mut history: History) -> Option<((usize, usize), (usize, usize))> {
+pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:f32, mut history: History) -> Option<((usize, usize), (usize, usize))> {
 
     let active_color = game_state.active_color();
 
@@ -63,14 +63,12 @@ pub (crate) fn  find_move(game_state: GameState, depth: usize, playing_strength:
     let mut sorted_moves = sort_moves_on_score_asc(&mut move_table);
 
     // find the best move based on the evaluation scores
-    if active_color == Color::Black {
+    if active_color == Color::White {
         // what is the best move
-        sorted_moves.reverse();
+       sorted_moves.reverse();
     }
 
-     let worst_index = (((sorted_moves.len() - 1) as f32) * (1.0f32 - playing_strength)) as usize ;
-
-     random_select_a_move_from(&sorted_moves, worst_index)
+    random_select_a_move_from(&sorted_moves, playing_strength)
 }
 
 pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
@@ -187,13 +185,17 @@ fn sort_moves_on_score_asc(
 
 // Selects randomly among the best-scoring moves in a sorted (ascending) move table.
 fn random_select_a_move_from(
-    sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, worst_index: usize
+    sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, playing_strength: f32
 ) -> Option<((usize, usize), (usize, usize))> {
 
-    // generate a random number between 0 and worst_index (inclusive)
-    let random_index = rng().random_range(0..= worst_index);
+    for (score, mv) in sorted_moves.iter().enumerate() {
+        let r: f32 = rng().random();
+        if r < playing_strength {
+            return Some((mv.0, mv.1))
+        }
+    }
 
-    let selected_move = sorted_moves.get(random_index).unwrap();
-
-    Some((selected_move.0, selected_move.1))
+    //return the worst move
+    let worst_move = sorted_moves.last().unwrap();
+    Some((worst_move.0, worst_move.1))
 }
