@@ -82,7 +82,7 @@ pub fn run_cli() {
                 continue;
             }
 
-            if some_input.starts_with("pgn") {
+            if some_input.starts_with("pgn_database") {
                 handle_pgn(&mut game, some_input);
                 println!("{}", game.board());
                 continue;
@@ -165,10 +165,10 @@ fn handle_reset(game: &mut Chess, input: String) {
 fn handle_pgn(game: &mut Chess, input: String) {
     let mut parts = input.splitn(2, char::is_whitespace);
     let cmd = parts.next().unwrap_or("");
-    if cmd.eq_ignore_ascii_case("pgn") {
+    if cmd.eq_ignore_ascii_case("pgn_database") {
         let path = parts.next().unwrap_or("").trim();
         if path.is_empty() {
-            println!("Use command 'pgn <file>\n");
+            println!("Use command 'pgn_database <file>\n");
         }
         match game.reset() {
             Ok(_) => {
@@ -229,7 +229,7 @@ fn print_help() {
     println!("reset          - reset the board to the initial position");
     println!("reset <fen>    - set initial position to the FEN position, and reset the board");
     println!("reset standard - set the initial position to the standard position and reset the board");
-    println!("pgn <file>     - replay the given PGN file");
+    println!("pgn_database <file>     - replay the given PGN file");
     println!("?              - automatic move");
     println!("fen            - print the current FEN position");
     println!("undo           - undo the last move");

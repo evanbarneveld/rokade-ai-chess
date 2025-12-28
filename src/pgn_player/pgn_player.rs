@@ -8,7 +8,7 @@ impl PgnPlayer {
             Ok(mut doc) => {
                 while let Some(mv) = doc.next_move() {
                     if !game.move_piece_san(&mv) {
-                        let msg = format!("Illegal or invalid move from PGN: '{}'. Stopping pgn replay.\n", mv);
+                        let msg = format!("Illegal or invalid move from PGN: '{}'. Stopping pgn_database replay.\n", mv);
                         return Err(msg);
                     }
                 }

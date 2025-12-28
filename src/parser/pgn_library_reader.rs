@@ -7,7 +7,7 @@ use crate::parser::pgn_document::PGNDocument;
 /// Streams PGN games one-by-one from a large PGN file without loading it entirely.
 ///
 /// Usage:
-/// - Create with `PGNLibraryReader::new_default()` to read from `pgn/LumbrasGigaBase_Online_2025.pgn`,
+/// - Create with `PGNLibraryReader::new_default()` to read from `pgn_database/LumbrasGigaBase_Online_2025.pgn_database`,
 ///   or `PGNLibraryReader::new(path)` for a custom file.
 /// - Call `next_pgn()` repeatedly to retrieve `PGNDocument`s until it returns `Ok(None)`.
 /// - Call `reset()` to start over from the beginning of the file.
@@ -29,9 +29,9 @@ impl PGNLibraryReader {
     }
 
     /// Construct a reader pointing to the repository PGN:
-    /// `pgn/LumbrasGigaBase_Online_2025.pgn` relative to current working directory.
+    /// `pgn_database/LumbrasGigaBase_Online_2025.pgn_database` relative to current working directory.
     pub fn new_default() -> Result<Self, String> {
-        let path = PathBuf::from("pgn").join("LumbrasGigaBase_Online_2025.pgn");
+        let path = PathBuf::from("../../pgn_database").join("LumbrasGigaBase_Online_2025.pgn_database");
         Self::new(path)
     }
 

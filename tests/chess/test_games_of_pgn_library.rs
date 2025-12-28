@@ -12,7 +12,7 @@ fn test_games_of_pgn_library() {
     //
     // To keep CI fast and to avoid failures on machines missing the large PGN
     // file, the test has two guards:
-    // - If the PGN file pgn/LumbrasGigaBase_Online_2025.pgn does not exist, the
+    // - If the PGN file pgn_database/LumbrasGigaBase_Online_2025.pgn_database does not exist, the
     //   test returns early (skip).
     // - By default, only the first N games are checked (N=25). You can override
     //   this by setting ENABLE_PGN_LIBRARY_TEST=1 to process all games, or set
@@ -30,7 +30,7 @@ fn test_games_of_pgn_library() {
 
 
     // Verify that the expected PGN exists; skip test if missing.
-    let pgn_path = PathBuf::from("pgn").join("LumbrasGigaBase_Online_2025.pgn");
+    let pgn_path = PathBuf::from("../../pgn_database").join("LumbrasGigaBase_Online_2025.pgn_database");
     if !pgn_path.exists() {
         eprintln!(
             "Skipping test_games_of_pgn_library: '{}' not found.",
