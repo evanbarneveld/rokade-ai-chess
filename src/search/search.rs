@@ -47,7 +47,7 @@ pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:u
 
         simulation_board.move_piece(from, to);
         let fen = game_state_to_fen_string(game_state);
-        history.add_move(san_move.unwrap(), fen);
+        history.add_move(san_move.unwrap(), (from, to), fen);
 
         if history.current_repetition_count() == 2 {
             // avoid 3-fold repetition

@@ -29,11 +29,12 @@ pub fn run_cli() {
         return;
     }
 
-    // print the initial board to the console
-    println!("{}", game.board());
-
     // loop for each move
     loop {
+
+        let history = game.get_history().clone();
+        println!("{}", game.board().get_board_display_string(&history));
+
         print_user_prompt(&mut game);
 
         let input: Option<String>;
@@ -69,12 +70,10 @@ pub fn run_cli() {
 
             if some_input.eq_ignore_ascii_case("fen") {
                 println!("{}\n", game.to_fen());
-                println!("{}", game.board());
                 continue;
             }
             if some_input.eq_ignore_ascii_case("undo") {
                 game.undo_move();
-                println!("{}", game.board());
                 continue;
             }
             if some_input.eq_ignore_ascii_case("list") {
@@ -89,7 +88,6 @@ pub fn run_cli() {
 
             if some_input.starts_with("pgn_database") {
                 handle_pgn(&mut game, some_input);
-                println!("{}", game.board());
                 continue;
             }
 
@@ -131,8 +129,6 @@ pub fn run_cli() {
                 println ! ("No legal moves available.\n");
             }
         }
-
-        println ! ("{}", game.board());
 
         let history = game.get_history().clone();
         game.get_game_state().recompute_outcome(&history);
@@ -215,7 +211,6 @@ fn handle_reset(game: &mut Chess, input: String) {
             match game.reset() {
                 Ok(_) => {
                     println!("Board was reset.\n");
-                    println!("{}", game.board());
                 },
                 Err(e) => println!("Error resetting board: {}\n", e),
             }
@@ -225,7 +220,6 @@ fn handle_reset(game: &mut Chess, input: String) {
             match game.set_starting_fen(fen) {
                 Ok(()) => {
                     println!("Board was reset.\n");
-                    println!("{}", game.board())
                 },
                 Err(e) => println!("Error parsing FEN: {}\n", e),
             }

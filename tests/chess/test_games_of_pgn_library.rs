@@ -82,7 +82,8 @@ fn test_games_of_pgn_library() {
                     game.to_fen(),
                     doc.to_string()
                 );
-                println!("{}", game.board());
+                let history = game.get_history().clone();
+                println!("{}", game.board().get_board_display_string(&history));
                 println!("{}", msg);
                 assert!(false);
             }
@@ -94,19 +95,19 @@ fn test_games_of_pgn_library() {
 
         if last_move.ends_with('+') && outcome != OutcomeType::InCheck {
             println!("FEN: {}", game.to_fen());
-            println!("{}", game.board());
+            println!("{}", game.board().get_board_display_string(&history));
             panic!("InCheck expected");
         }
         if ply % 2 == 0 {
             if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::Black }) {
                 println!("FEN: {}", game.to_fen());
-                println!("{}", game.board());
+                println!("{}", game.board().get_board_display_string(&history));
                 panic!("Checkmate black expected");
             }
         } else {
             if last_move.ends_with('#') && outcome != (OutcomeType::Checkmate { winner: Color::White }) {
                 println!("FEN: {}", game.to_fen());
-                println!("{}", game.board());
+                println!("{}", game.board().get_board_display_string(&history));
                 panic!("Checkmate white expected");
             }
         }

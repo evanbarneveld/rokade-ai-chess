@@ -97,9 +97,9 @@ impl Chess {
         if self.history.len() > 0 {
             let last_index = self.history.len() - 1;
             let last_move = self.history.get_move(last_index);
-            let last_fen = last_move.map(|mv| mv.1.clone());
+            let last_fen = last_move.map(|mv| mv.2.clone());
             if last_fen.is_none() { return None; }
-            self.reset_board_to_fen(last_fen.unwrap().as_str()).unwrap();
+            self.reset_board_to_fen(&last_fen.unwrap()).unwrap();
         } else {
             self.reset().unwrap();
         }
@@ -126,7 +126,7 @@ impl Chess {
                 mv = format!("{}x{}", mv, as_square_str(to));
             }
 
-            self.history.add_move(mv.to_string(), game_state_to_fen_string(self.game_state.clone()));
+            self.history.add_move(mv.to_string(), (from, to), game_state_to_fen_string(self.game_state.clone()));
             true
         } else {
             false
@@ -143,7 +143,7 @@ impl Chess {
             Ok(v) => {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
-                    self.history.add_move(mv.to_string(), game_state_to_fen_string(self.game_state.clone()));
+                    self.history.add_move(mv.to_string(), (v.from, v.to), game_state_to_fen_string(self.game_state.clone()));
                     true
                 } else {
                     false

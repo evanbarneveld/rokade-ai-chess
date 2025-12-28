@@ -1,6 +1,6 @@
 #[derive(Debug, Default, Clone)]
 pub struct History {
-    plies: Vec<(String, String, String)>, //contains san_move, fen after move, fen (without move counters) after move
+    plies: Vec<(String, ((usize, usize),(usize, usize)), String, String)>, //contains san_move, fen after move, fen (without move counters) after move
     // Tracks how many times each FEN has appeared in the history
     fen_counts: std::collections::HashMap<String, usize>,
 }
@@ -20,12 +20,12 @@ impl History {
     }
 
     // Returns a reference to the move at the given index, if it exists
-    pub fn get_move(&self, index: usize) -> Option<&(String, String, String)> {
+    pub fn get_move(&self, index: usize) -> Option<&(String, ((usize, usize),(usize, usize)), String, String)> {
         self.plies.get(index)
     }
 
     // Adds a move to the history (SAN or other chosen notation)
-    pub fn add_move(&mut self, mv: String, fen: String) {
+    pub fn add_move(&mut self, mv: String, board_move:((usize, usize), (usize, usize)), fen: String) {
         // Truncate FEN to exclude the last two move counters (halfmove clock and fullmove number)
         // Keep only the first four fields: piece placement, active color, castling, en passant target
         let truncated_fen = fen
@@ -37,12 +37,12 @@ impl History {
         let entry = self.fen_counts.entry(truncated_fen.clone()).or_insert(0);
         *entry += 1;
 
-        self.plies.push((mv, fen ,truncated_fen));
+        self.plies.push((mv, board_move, fen ,truncated_fen));
     }
 
     // Undoes the last move and returns it, if any
     pub fn undo_move(&mut self) -> Option<(String, String, String)> {
-        if let Some((mv, fen, truncated_fen)) = self.plies.pop() {
+        if let Some((mv, board_move, fen, truncated_fen)) = self.plies.pop() {
             if let Some(count) = self.fen_counts.get_mut(&truncated_fen) {
                 if *count > 1 {
                     *count -= 1;
@@ -98,7 +98,7 @@ impl History {
     // Returns the repetition count of the most recent position (FEN) in history
     // If there is no move yet, returns 0
     pub fn current_repetition_count(&self) -> usize {
-        if let Some((_, _fen, truncated_fen)) = self.plies.last() {
+        if let Some((_, _, _fen, truncated_fen)) = self.plies.last() {
             self.fen_repetition_count(truncated_fen)
         } else {
             0
