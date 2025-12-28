@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, Write};
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::find_best_move;
+use crate::search::search::find_move;
 
 // Minimal UCI interface implementation.
 // Supported commands:
@@ -151,7 +151,7 @@ fn go_bestmove(engine: &mut Chess, line: &str) -> String {
     let depth = parse_depth(line).unwrap_or(4);
     let history = engine.get_history().clone();
     let game_state = engine.get_game_state();
-    let best_move = find_best_move(*game_state, depth, history);
+    let best_move = find_move(*game_state, depth, 0.8f32, history);
 
     if best_move.is_some() {
         let mv = best_move.unwrap();

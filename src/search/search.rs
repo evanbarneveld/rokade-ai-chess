@@ -1,3 +1,4 @@
+use rand::{rng, Rng};
 use crate::board::Board;
 use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::board::evaluator::evaluate_position;
@@ -12,28 +13,27 @@ use crate::piece::pieces::{Color, PieceType};
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
-pub (crate) fn find_best_move(game_state: GameState, depth: usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
+pub (crate) fn  find_move(game_state: GameState, depth: usize, playing_strength:f32, mut history: History) -> Option<((usize, usize), (usize, usize))> {
 
     let active_color = game_state.active_color();
 
     // collect all legal moves for the side to move
     let board = game_state.board();
-    let moves = find_valid_moves(board, active_color);
+    let valid_moves = find_valid_moves(board, active_color);
 
-    if moves.is_empty() {
+    if valid_moves.is_empty() {
         return None;
     }
 
     // if depth is 0, treat it as 1 ply (evaluate after making one move)
     let search_depth = if depth == 0 { 1 } else { depth };
+    
+    // create a vector with the moves and the scores
+    let mut move_table: Vec<((usize, usize), (usize, usize), i32)> = Vec::new();
 
-    let mut best_move: Option<((usize, usize), (usize, usize))> = None;
-    // If it's White to move we maximize, if Black we minimize (evaluation is from White's perspective)
-    let mut best_score: i32 = if active_color == Color::White { i32::MIN } else { i32::MAX };
-
-    for (from, to) in moves.into_iter() {
+    for (from, to) in valid_moves.into_iter() {
         // simulate the move
-        let mut simulation_board = simulate_on_cloned_board(&board, from, to);
+        let mut simulation_board = move_piece_on_board(&board, from, to);
 
         // recurse: after making a move, it's the opponent's turn and depth decreases
         let mut score = if search_depth <= 1 {
@@ -49,25 +49,28 @@ pub (crate) fn find_best_move(game_state: GameState, depth: usize, mut history: 
         let fen = game_state_to_fen_string(game_state);
         history.add_move(san_move.unwrap(), fen);
 
-        if history.current_repetition_count() == 3 {
-            // this is a bad move
-            score = if active_color == Color::White { i32::MIN } else { i32::MAX };
+        if history.current_repetition_count() == 2 {
+            // avoid 3-fold repetition
+            score = if active_color == Color::White { i32::MIN+1 } else { i32::MAX-1 };
         }
 
-        if active_color == Color::White {
-            if score > best_score {
-                best_score = score;
-                best_move = Some((from, to));
-            }
-        } else {
-            if score < best_score {
-                best_score = score;
-                best_move = Some((from, to));
-            }
-        }
+        move_table.push((from, to, score));
     }
 
-    best_move
+    if move_table.is_empty() { return None; }
+
+
+    let mut sorted_moves = sort_moves_on_score_asc(&mut move_table);
+
+    // find the best move based on the evaluation scores
+    if active_color == Color::Black {
+        // what is the best move
+        sorted_moves.reverse();
+    }
+
+     let worst_index = (((sorted_moves.len() - 1) as f32) * (1.0f32 - playing_strength)) as usize ;
+
+     random_select_a_move_from(&sorted_moves, worst_index)
 }
 
 pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
@@ -144,7 +147,7 @@ fn minimax(board: &Board, to_move: Color, depth: usize) -> i32 {
     if to_move == Color::White {
         let mut best = i32::MIN;
         for (from, to) in moves.into_iter() {
-            let b = simulate_on_cloned_board(board, from, to);
+            let b = move_piece_on_board(board, from, to);
             let val = minimax(&b, Color::Black, depth - 1);
             if val > best { best = val; }
         }
@@ -152,7 +155,7 @@ fn minimax(board: &Board, to_move: Color, depth: usize) -> i32 {
     } else {
         let mut best = i32::MAX;
         for (from, to) in moves.into_iter() {
-            let b = simulate_on_cloned_board(board, from, to);
+            let b = move_piece_on_board(board, from, to);
             let val = minimax(&b, Color::White, depth - 1);
             if val < best { best = val; }
         }
@@ -160,7 +163,7 @@ fn minimax(board: &Board, to_move: Color, depth: usize) -> i32 {
     }
 }
 
-fn simulate_on_cloned_board(current: &Board, from: (usize, usize), to: (usize, usize)) -> Board {
+fn move_piece_on_board(current: &Board, from: (usize, usize), to: (usize, usize)) -> Board {
     let mut clone = current.clone();
     // move the piece on the cloned board (no special moves handling here)
     // if it's a pawn, use move_pawn API; otherwise generic move_piece
@@ -174,3 +177,23 @@ fn simulate_on_cloned_board(current: &Board, from: (usize, usize), to: (usize, u
     clone
 }
 
+// Sorts the move table by score in ascending order and returns a cloned, sorted vector.
+fn sort_moves_on_score_asc(
+    move_table: &mut Vec<((usize, usize), (usize, usize), i32)>
+) -> Vec<((usize, usize), (usize, usize), i32)> {
+    move_table.sort_by_key(|m| m.2);
+    move_table.clone()
+}
+
+// Selects randomly among the best-scoring moves in a sorted (ascending) move table.
+fn random_select_a_move_from(
+    sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, worst_index: usize
+) -> Option<((usize, usize), (usize, usize))> {
+
+    // generate a random number between 0 and worst_index (inclusive)
+    let random_index = rng().random_range(0..= worst_index);
+
+    let selected_move = sorted_moves.get(random_index).unwrap();
+
+    Some((selected_move.0, selected_move.1))
+}
