@@ -92,7 +92,7 @@ pub fn run_cli() {
             }
 
             if some_input.starts_with("strength") {
-                if handle_strength(&mut game, some_input.clone(), &mut white_bot_strength, &mut black_bot_strength) {
+                if handle_strength(some_input.clone(), &mut white_bot_strength, &mut black_bot_strength) {
                     continue
                 }
             }
@@ -142,7 +142,7 @@ pub fn run_cli() {
     }
 }
 
-fn handle_strength(game: &mut Chess, input: String, white_bot_strength: &mut usize, mut black_bot_strength: &mut usize) -> bool {
+fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_strength: &mut usize) -> bool {
 
     let mut parts = input.split_whitespace();
     let _ = parts.next(); // consume 'strength'

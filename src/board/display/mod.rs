@@ -1,4 +1,3 @@
-use std::fmt;
 use crate::board::Board;
 use crate::history::history::History;
 use crate::piece::pieces::Color;
@@ -43,10 +42,10 @@ impl Board {
 
                 if last_move.is_some() {
                     let lmv = last_move.unwrap();
-                    if (col == lmv.1.0.1 && row == lmv.1.0.0) {
+                    if col == lmv.1.0.1 && row == lmv.1.0.0 {
                         is_last_move = true;
                     }
-                    if (col == lmv.1.1.1 && row == lmv.1.1.0) {
+                    if col == lmv.1.1.1 && row == lmv.1.1.0 {
                         is_last_move = true;
                     }
                 };

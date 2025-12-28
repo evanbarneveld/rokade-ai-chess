@@ -42,7 +42,7 @@ impl History {
 
     // Undoes the last move and returns it, if any
     pub fn undo_move(&mut self) -> Option<(String, String, String)> {
-        if let Some((mv, board_move, fen, truncated_fen)) = self.plies.pop() {
+        if let Some((mv, _, fen, truncated_fen)) = self.plies.pop() {
             if let Some(count) = self.fen_counts.get_mut(&truncated_fen) {
                 if *count > 1 {
                     *count -= 1;

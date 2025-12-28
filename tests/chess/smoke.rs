@@ -166,7 +166,7 @@ fn test_check_mate2() {
 }
 
 #[test]
-fn test_check_with_O_O_O() {
+fn test_check_with_o_o_o() {
     let fen = "r3kb1r/pp2pppp/n1p2n2/5b2/2P4N/2N3P1/PP2PP1P/R1BK1B1R b kq - 4 8";
     let mv = "O-O-O+";
     //let mv = "e2";
