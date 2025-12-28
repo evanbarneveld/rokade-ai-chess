@@ -10,8 +10,8 @@ impl Board {
         const RESET: &str = "\x1b[0m";
         const BG_LIGHT: &str = "\x1b[48;5;244m"; // light gray
         const BG_DARK: &str = "\x1b[48;5;239m";  // dark gray
-        const BG_LAST_LIGHT: &str = "\x1b[48;5;117m"; // light blue
-        const BG_LAST_DARK: &str = "\x1b[48;5;18m";  // dark blue
+        const BG_LAST_LIGHT: &str = "\x1b[48;5;248m"; // light gray highlight (closer to BG_LIGHT)
+        const BG_LAST_DARK: &str = "\x1b[48;5;237m";  // slightly lighter gray (closer to BG_DARK)
         // Foreground colors for pieces
         const FG_WHITE: &str = "\x1b[97m"; // white pieces (white)
         const FG_BLACK: &str = "\x1b[30m"; // black pieces (black)
