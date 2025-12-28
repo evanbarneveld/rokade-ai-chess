@@ -119,12 +119,10 @@ pub fn run_cli() {
 
         println ! ("Evaluation: {}", score as f32 / 100.0);
 
-        game.get_game_state().recompute_outcome();
+        let history = game.get_history().clone();
+        game.get_game_state().recompute_outcome(&history);
+
         if let Some(outcome) = game.get_game_state().get_outcome() {
-            if game.get_history().current_repetition_count() >= 3 {
-                mode = GameMode::PlayerVsPlayer;
-                println ! ("3 repetitions in a row, starting over.");
-            }
             if outcome != OutcomeType::Ongoing && outcome != OutcomeType::InCheck {
                 mode = GameMode::PlayerVsPlayer;
             }

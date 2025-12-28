@@ -31,7 +31,7 @@ impl Chess {
         }
     }
 
-    pub fn get_history(&self) -> &History {
+    pub fn get_history(&mut self) -> &History {
         &self.history
     }
     
@@ -39,7 +39,7 @@ impl Chess {
         self.history.reset();
         match reset_from_fen(&self.starting_fen) {
             Ok(mut state) => {
-                state.recompute_outcome();
+                state.recompute_outcome(&self.history);
                 Ok(self.game_state = state)
             },
             Err(e) => Err(e)
@@ -49,7 +49,7 @@ impl Chess {
     pub fn set_starting_fen(&mut self, fen: &str) -> Result<(), String> {
         self.starting_fen = String::from(fen);
         self.game_state = reset_from_fen(&self.starting_fen)?;
-        self.game_state.recompute_outcome();
+        self.game_state.recompute_outcome(&self.history);
         Ok(())
     }
 
@@ -57,7 +57,7 @@ impl Chess {
         match reset_from_fen(fen) {
             Ok(state) => Ok({
                 self.game_state = state;
-                self.game_state.recompute_outcome();
+                self.game_state.recompute_outcome(&self.history);
             })
             ,
             Err(e) => Err(

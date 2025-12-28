@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::history::history::History;
 use crate::piece::pieces::{Piece, Color};
 use crate::state::outcome::{recompute_outcome, OutcomeType};
 use crate::state::castling::CastlingRights;
@@ -134,8 +135,8 @@ impl GameState {
 
     pub fn get_half_move_clock(&self) -> u32 { self.half_move_clock }
 
-    pub fn recompute_outcome(&mut self) {
-        self.outcome = Some(recompute_outcome(self));
+    pub fn recompute_outcome(&mut self, history: &History) {
+        self.outcome = Some(recompute_outcome(self, history));
     }
 
     pub fn get_outcome(&self) -> Option<OutcomeType> { self.outcome.clone() }

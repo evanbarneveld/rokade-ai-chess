@@ -1,4 +1,5 @@
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+use crate::history::history::History;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::king_move_validator::is_valid_king_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
@@ -19,7 +20,7 @@ pub enum OutcomeType {
     DrawByThreefoldRepetition,
 }
 
-    pub fn recompute_outcome(game_state: &mut GameState) -> OutcomeType {
+    pub fn recompute_outcome(game_state: &mut GameState, history: &History) -> OutcomeType {
 
         // Insufficient material check applies immediately
         if has_insufficient_material(game_state) {
@@ -52,6 +53,10 @@ pub enum OutcomeType {
         if !in_check && !legal_moves_exist {
             return OutcomeType::Stalemate
         }
+
+        if history.current_repetition_count() >= 3 {
+            return OutcomeType::DrawByThreefoldRepetition
+        };
 
         if in_check {
             OutcomeType::InCheck
