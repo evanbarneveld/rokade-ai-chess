@@ -148,11 +148,11 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
 fn go_bestmove(engine: &mut Chess, line: &str) -> String {
     // Currently we only support depth-limited instant move selection: pick the first legal move.
     // Parse optional depth but ignore for now.
-    let depth = parse_depth(line).unwrap_or(3);
+    let depth = parse_depth(line).unwrap_or(4);
     let active = engine.get_game_state().active_color();
     let board = engine.board().clone();
 
-    let best_move = find_best_move(&board, active, 4); // TODO use depth
+    let best_move = find_best_move(&board, active, depth);
 
     if best_move.is_some() {
         let mv = best_move.unwrap();

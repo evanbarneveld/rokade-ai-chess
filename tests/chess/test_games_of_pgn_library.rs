@@ -88,7 +88,8 @@ fn test_games_of_pgn_library() {
             }
         }
 
-        game.get_game_state().recompute_outcome();
+        let history = game.get_history().clone();
+        game.get_game_state().recompute_outcome(&history);
         let outcome = game.get_game_state().get_outcome().unwrap();
 
         if last_move.ends_with('+') && outcome != OutcomeType::InCheck {

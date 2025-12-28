@@ -123,7 +123,8 @@ fn test_check_mate() {
     println!("{}", game.board());
     assert!(game.move_piece_san(mv));
     println!("{}", game.board());
-    game.get_game_state().recompute_outcome();
+    let history = game.get_history().clone();
+    game.get_game_state().recompute_outcome(&history);
     let outcome = game.get_game_state().get_outcome().unwrap();
     println!("Outcome: {:?}", outcome);
     assert_eq!(outcome, OutcomeType::Checkmate { winner: Color::Black})
@@ -140,7 +141,8 @@ fn test_check_mate2() {
     println!("{}", game.board());
     assert!(game.move_piece_san(mv));
     println!("{}", game.board());
-    game.get_game_state().recompute_outcome();
+    let history = game.get_history().clone();
+    game.get_game_state().recompute_outcome(&history);
     let outcome = game.get_game_state().get_outcome().unwrap();
     println!("Outcome: {:?}", outcome);
     assert_eq!(outcome, OutcomeType::Checkmate { winner: Color::Black})
@@ -158,7 +160,8 @@ fn test_check_with_O_O_O() {
     println!("{}", game.board());
     assert!(game.move_piece_san(mv));
     println!("{}", game.board());
-    game.get_game_state().recompute_outcome();
+    let history = game.get_history().clone();
+    game.get_game_state().recompute_outcome(&history);
     let outcome = game.get_game_state().get_outcome().unwrap();
     println!("Outcome: {:?}", outcome);
     assert_eq!(outcome, OutcomeType::InCheck)
