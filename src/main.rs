@@ -48,7 +48,7 @@ fn main() {
 
             if some_input.eq_ignore_ascii_case("help") {
                 print_help();
-                break;
+                continue;
             }
 
             handle_game_mode_commands(&mut mode, &some_input);
@@ -75,6 +75,7 @@ fn main() {
 
             if some_input.starts_with("pgn") {
                 handle_pgn(&mut game, some_input);
+                println!("{}", game.board());
                 continue;
             }
 
