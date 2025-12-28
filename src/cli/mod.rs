@@ -108,7 +108,7 @@ pub fn run_cli() {
             }
 
             // assume the input is a move
-            if !move_is_bot_move {
+            if !move_is_bot_move && !some_input.is_empty() {
                 if !game.move_piece_san(some_input.as_str()) {
                     println!("Illegal or invalid move: '{}'. Try again.\n", some_input);
                 }
