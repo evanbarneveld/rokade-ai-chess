@@ -2,7 +2,6 @@ use rand::{rng, Rng};
 use crate::board::Board;
 use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::board::evaluator::evaluate_position;
-use crate::board::san_move::convert_move_to_san;
 use crate::history::history::History;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
@@ -10,8 +9,9 @@ use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
 use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::piece::pieces::{Color, Piece, PieceType};
-use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
+use crate::search::zobrist::compute_zobrist;
+use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 ///
@@ -36,6 +36,10 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     let mut alpha = i32::MIN + 1;
     let mut beta = i32::MAX - 1;
 
+    // Initialize a transposition table (~100MB)
+    let mut tt = TranspositionTable::new_128mb();
+    tt.next_age();
+
     for (from, to) in valid_moves.into_iter() {
         // simulate the move once on a cloned board
         let simulation_board = move_piece_on_board(&board, from, to);
@@ -45,7 +49,7 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
             evaluate_position(&simulation_board)
         } else {
             // alpha-beta search from the opponent's perspective
-            alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta)
+            alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut tt)
         };
 
         // Root-only light heuristic to break early equalities in the opening and
@@ -224,7 +228,7 @@ fn opposite_color(c: Color) -> Color {
 }
 
 // Alpha-beta pruning search. Returns evaluation in centipawns (positive is better for White).
-fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32) -> i32 {
+fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32, ply: i32, tt: &mut TranspositionTable) -> i32 {
 
     // print board
     //println!("alpha-beta\n{}", board.get_board_display_string(None));
@@ -235,7 +239,28 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         return score;
     }
 
-    let moves = find_all_valid_moves(board, to_move);
+    // TT probe
+    let key = compute_zobrist(board, to_move);
+    if let Some(entry) = tt.probe(key) {
+        if entry.depth as usize >= depth {
+            let tt_score = from_tt_score(entry.score, ply);
+            match entry.bound {
+                Bound::Exact => { return tt_score; }
+                Bound::Lower => { if tt_score >= beta { return tt_score; } if tt_score > alpha { alpha = tt_score; } }
+                Bound::Upper => { if tt_score <= alpha { return tt_score; } if tt_score < beta { beta = tt_score; } }
+            }
+        }
+    }
+
+    let mut moves = find_all_valid_moves(board, to_move);
+    // If TT has a best move, try it first
+    if let Some(entry) = tt.probe(key) {
+        let bm = decode_move(entry.best_from, entry.best_to);
+        if let Some(pos) = moves.iter().position(|m| *m == bm) {
+            let first = moves.remove(pos);
+            moves.insert(0, first);
+        }
+    }
     if moves.is_empty() {
         // No legal moves: checkmate or stalemate
         let in_check = is_side_in_check(board, to_move);
@@ -243,21 +268,22 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
             // Losing side to move is checkmated. Use large negative for side to move.
             // Depth-based bonus (the sooner the mate, the larger the magnitude):
             // With our interface lacking ply, approximate using remaining depth.
-            const MATE_BASE: i32 = 30_000; // larger than any eval
-            return -MATE_BASE + depth as i32;
+            return -MATE_VALUE + depth as i32;
         } else {
             // stalemate: draw
             return 0;
         }
     }
 
-    if to_move == Color::White {
+    let original_alpha = alpha;
+    let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
+    let value = if to_move == Color::White {
         let mut value = i32::MIN;
         for (from, to) in moves.into_iter() {
             let b = move_piece_on_board(board, from, to);
-            let score = alphabeta(&b, Color::Black, depth - 1, alpha, beta);
+            let score = alphabeta(&b, Color::Black, depth - 1, alpha, beta, ply + 1, tt);
             if score > value { value = score; }
-            if value > alpha { alpha = value; }
+            if value > alpha { alpha = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
         }
         value
@@ -265,13 +291,22 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         let mut value = i32::MAX;
         for (from, to) in moves.into_iter() {
             let b = move_piece_on_board(board, from, to);
-            let score = alphabeta(&b, Color::White, depth - 1, alpha, beta);
+            let score = alphabeta(&b, Color::White, depth - 1, alpha, beta, ply + 1, tt);
             if score < value { value = score; }
-            if value < beta { beta = value; }
+            if value < beta { beta = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
         }
         value
-    }
+    };
+
+    // Store to TT
+    let bound = if value <= original_alpha { Bound::Upper }
+                else if value >= beta { Bound::Lower }
+                else { Bound::Exact };
+    let (bf, bt) = if let Some((f, t)) = best_from_to { let (ff, tt2) = encode_move(f, t); (Some(ff), Some(tt2)) } else { (None, None) };
+    let tt_score = to_tt_score(value, ply);
+    tt.store(key, depth as i16, bound, tt_score, bf, bt);
+    value
 }
 
 /// Helper: is the given side to move currently in check on this board state?
