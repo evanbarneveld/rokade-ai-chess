@@ -9,16 +9,17 @@ use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
 use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
-use crate::piece::pieces::{Color, PieceType};
+use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
+/// Find the best move for the given game state and the playing_strength
+///
 pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
-
-    let active_color = game_state.active_color();
 
     // collect all legal moves for the side to move
     let board = game_state.board();
+    let active_color = game_state.active_color();
     let valid_moves = find_valid_moves(board, active_color);
 
     if valid_moves.is_empty() {
@@ -95,26 +96,7 @@ pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize
                         continue;
                     }
 
-                    // piece-type specific path/shape validation including pin checks
-                    let mut tmp = board.clone();
-                    let ok = match piece.get_type() {
-                        PieceType::Pawn => is_valid_pawn_move(&mut tmp, from, to, is_capture, None, active_color, None, true),
-                        PieceType::Knight => is_valid_knight_move(&mut tmp, from, to, true),
-                        PieceType::Bishop => is_valid_bishop_move(&mut tmp, from, to, true),
-                        PieceType::Rook => is_valid_rook_move(&mut tmp, from, to, true),
-                        PieceType::Queen => is_valid_queen_move(&mut tmp, from, to, true),
-                        PieceType::King => {
-                            // king: allow single-square moves that do not move into check (no castling here)
-                            let dr = if r > tr { r - tr } else { tr - r };
-                            let dc = if c > tc { c - tc } else { tc - c };
-                            if dr <= 1 && dc <= 1 {
-                                // ensure the king wouldn't be in check after the move
-                                !is_king_in_check_after_move(&mut tmp, from, to, None)
-                            } else { false }
-                        }
-                    };
-
-                    if ok {
+                    if is_piece_move_valid(board, active_color, r, c, piece, tr, tc, from, to, is_capture) {
                         result.push((from, to));
                     }
                 }
@@ -122,6 +104,28 @@ pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize
         }
     }
     result
+}
+
+fn is_piece_move_valid(board: &Board, active_color: Color, r: usize, c: usize, piece: Piece, tr: usize, tc: usize, from: (usize, usize), to: (usize, usize), is_capture: bool) -> bool {
+    // piece-type specific path/shape validation including pin checks
+    let mut tmp = board.clone();
+    let ok = match piece.get_type() {
+        PieceType::Pawn => is_valid_pawn_move(&mut tmp, from, to, is_capture, None, active_color, None, true),
+        PieceType::Knight => is_valid_knight_move(&mut tmp, from, to, true),
+        PieceType::Bishop => is_valid_bishop_move(&mut tmp, from, to, true),
+        PieceType::Rook => is_valid_rook_move(&mut tmp, from, to, true),
+        PieceType::Queen => is_valid_queen_move(&mut tmp, from, to, true),
+        PieceType::King => {
+            // king: allow single-square moves that do not move into check (no castling here)
+            let dr = if r > tr { r - tr } else { tr - r };
+            let dc = if c > tc { c - tc } else { tc - c };
+            if dr <= 1 && dc <= 1 {
+                // ensure the king wouldn't be in check after the move
+                !is_king_in_check_after_move(&mut tmp, from, to, None)
+            } else { false }
+        }
+    };
+    ok
 }
 
 #[inline]
@@ -183,10 +187,13 @@ fn sort_moves_on_score_asc(
     move_table.clone()
 }
 
+// Controlled by the strength parameter, the search will not always return the best move.
 // Selects randomly among the best-scoring moves in a sorted (ascending) move table.
 fn random_select_a_move_from(
     sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, playing_strength: usize
 ) -> Option<((usize, usize), (usize, usize))> {
+
+    if playing_strength > 1000 { return None; }
 
     for (_, mv) in sorted_moves.iter().enumerate() {
         let r: usize = rng().random_range(0..1000);
