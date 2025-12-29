@@ -13,14 +13,14 @@ use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
-/// Find the best move for the given game state and the playing_strength
+/// Find the best move for the given game state, the search_depth, and the playing_strength
 ///
 pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
 
     // collect all legal moves for the side to move
     let board = game_state.board();
     let active_color = game_state.active_color();
-    let valid_moves = find_valid_moves(board, active_color);
+    let valid_moves = find_all_valid_moves(board, active_color);
 
     if valid_moves.is_empty() {
         return None;
@@ -84,10 +84,10 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
        sorted_moves.reverse();
     }
 
-    random_select_a_move_from(&sorted_moves, playing_strength)
+    select_move_based_using_strength(&sorted_moves, playing_strength)
 }
 
-pub(crate) fn find_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
+pub(crate) fn find_all_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
     let mut result: Vec<((usize, usize), (usize, usize))> = Vec::new();
 
     // iterate all squares and collect legal moves for the active color
@@ -154,7 +154,7 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         return evaluate_position(board);
     }
 
-    let moves = find_valid_moves(board, to_move);
+    let moves = find_all_valid_moves(board, to_move);
     if moves.is_empty() {
         return evaluate_position(board);
     }
@@ -206,7 +206,7 @@ fn sort_moves_on_score_asc(
 
 // Controlled by the strength parameter, the search will not always return the best move.
 // Selects randomly among the best-scoring moves in a sorted (ascending) move table.
-fn random_select_a_move_from(
+fn select_move_based_using_strength(
     sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, playing_strength: usize
 ) -> Option<((usize, usize), (usize, usize))> {
 
