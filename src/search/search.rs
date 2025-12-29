@@ -2,7 +2,6 @@ use rand::{rng, Rng};
 use crate::board::Board;
 use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::board::evaluator::evaluate_position;
-use crate::history::history::History;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
@@ -39,7 +38,7 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     // collect all legal moves for the side to move
     let board = game_state.board();
     let active_color = game_state.active_color();
-    let mut moves = find_all_valid_moves(board, active_color);
+    let moves = find_all_valid_moves(board, active_color);
 
     if moves.is_empty() {
         return None;
