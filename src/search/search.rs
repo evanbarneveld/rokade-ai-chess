@@ -15,7 +15,7 @@ use crate::state::game_state::GameState;
 
 /// Find the best move for the given game state and the playing_strength
 ///
-pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
+pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
 
     // collect all legal moves for the side to move
     let board = game_state.board();
@@ -27,10 +27,14 @@ pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:u
     }
 
     // if depth is 0, treat it as 1 ply (evaluate after making one move)
-    let search_depth = if depth == 0 { 1 } else { depth };
+    let search_depth = if search_depth == 0 { 1 } else { search_depth };
     
     // create a vector with the moves and the scores
     let mut move_table: Vec<((usize, usize), (usize, usize), i32)> = Vec::new();
+
+    // initialize root alpha/beta for potential root-level cutoffs
+    let mut alpha = i32::MIN + 1;
+    let mut beta = i32::MAX - 1;
 
     for (from, to) in valid_moves.into_iter() {
         // simulate the move
@@ -40,7 +44,8 @@ pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:u
         let mut score = if search_depth <= 1 {
             evaluate_position(&simulation_board)
         } else {
-            minimax(&simulation_board, opposite_color(active_color), search_depth - 1)
+            // alpha-beta search from the opponent's perspective
+            alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta)
         };
 
         //the move leads to a 3-fold repetition?
@@ -56,6 +61,16 @@ pub (crate) fn find_move(game_state: GameState, depth: usize, playing_strength:u
         }
 
         move_table.push((from, to, score));
+
+        // update root alpha/beta based on side to move
+        if active_color == Color::White {
+            if score > alpha { alpha = score; }
+        } else {
+            if score < beta { beta = score; }
+        }
+
+        // optional root-level cutoff: if bounds cross, remaining moves unlikely to change decision
+        if alpha >= beta { break; }
     }
 
     if move_table.is_empty() { return None; }
@@ -133,35 +148,37 @@ fn opposite_color(c: Color) -> Color {
     match c { Color::White => Color::Black, Color::Black => Color::White }
 }
 
-// Basic depth-limited minimax without alpha-beta pruning.
-// Returns an evaluation in centipawns (positive better for White).
-fn minimax(board: &Board, to_move: Color, depth: usize) -> i32 {
+// Alpha-beta pruning search. Returns evaluation in centipawns (positive is better for White).
+fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32) -> i32 {
     if depth == 0 {
         return evaluate_position(board);
     }
 
     let moves = find_valid_moves(board, to_move);
     if moves.is_empty() {
-        // no legal moves: fall back to static eval (no checkmate detection here)
         return evaluate_position(board);
     }
 
     if to_move == Color::White {
-        let mut best = i32::MIN;
+        let mut value = i32::MIN;
         for (from, to) in moves.into_iter() {
             let b = move_piece_on_board(board, from, to);
-            let val = minimax(&b, Color::Black, depth - 1);
-            if val > best { best = val; }
+            let score = alphabeta(&b, Color::Black, depth - 1, alpha, beta);
+            if score > value { value = score; }
+            if value > alpha { alpha = value; }
+            if alpha >= beta { break; }
         }
-        best
+        value
     } else {
-        let mut best = i32::MAX;
+        let mut value = i32::MAX;
         for (from, to) in moves.into_iter() {
             let b = move_piece_on_board(board, from, to);
-            let val = minimax(&b, Color::White, depth - 1);
-            if val < best { best = val; }
+            let score = alphabeta(&b, Color::White, depth - 1, alpha, beta);
+            if score < value { value = score; }
+            if value < beta { beta = value; }
+            if alpha >= beta { break; }
         }
-        best
+        value
     }
 }
 

@@ -19,6 +19,8 @@ pub fn run_cli() {
     let mut mode = GameMode::PlayerVsPlayer;
     let mut white_bot_strength: usize = 1000;
     let mut black_bot_strength: usize = 1000;
+    let mut white_bot_search_depth: usize = 6;
+    let mut black_bot_search_depth: usize = 6;
 
     println!("Welcome to chess. Type 'help' for help, enter move, or 'exit' to exit.\n");
 
@@ -97,6 +99,12 @@ pub fn run_cli() {
                 }
             }
 
+            if some_input.starts_with("depth") {
+                if handle_search_depth(some_input.clone(), &mut white_bot_search_depth, &mut black_bot_search_depth) {
+                    continue
+                }
+            }
+
             if some_input.eq_ignore_ascii_case("eval") {
                 let score = evaluate_position(game.board());
                 println ! ("Evaluation: {}", score as f32 / 100.0);
@@ -119,7 +127,8 @@ pub fn run_cli() {
         if must_generate_move(&mut game, &mut mode, move_is_bot_move) {
             let history = game.get_history().clone();
             let strength = if game.active_color_is_white() { white_bot_strength } else { black_bot_strength };
-            if let Some(generated_move) = generate_move_as_san(*game.get_game_state(), history, strength) {
+            let search_depth = if game.active_color_is_white() { white_bot_search_depth } else { black_bot_search_depth };
+            if let Some(generated_move) = generate_move_as_san(*game.get_game_state(), history, search_depth, strength) {
                 println ! ("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {
@@ -139,6 +148,65 @@ pub fn run_cli() {
             }
         }
 
+    }
+}
+
+fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_bot_search_depth: &mut usize) -> bool {
+
+    let mut parts = input.split_whitespace();
+    let _ = parts.next(); // consume 'strength'
+    let first = parts.next();
+
+    if first.is_none() {
+        println!("White bot search depth {}, black bot search depth {}", white_bot_search_depth, black_bot_search_depth);
+        return true
+    }
+    let second = parts.next();
+
+    // helper to parse a usize in 0..=1000
+    let parse_depth = |s: &str| -> Option<usize> {
+        match s.parse::<usize>() {
+            Ok(v) if v <= 10 => Some(v),
+            _ => None
+        }
+    };
+
+    match (first, second) {
+        // strength <n>  -> set both
+        (Some(n), None) => {
+            if let Some(v) = parse_depth(n) {
+                *white_bot_search_depth = v;
+                *black_bot_search_depth = v;
+                println!("Set both bot search depths to {} (0..10).", v);
+            } else {
+                println!("Invalid strength. Use: depth <0..10> | depth white <0..10> | depth black <0..10>");
+            }
+            return true
+        }
+        // strength white <n>
+        (Some(color), Some(n)) if color.eq_ignore_ascii_case("white") => {
+            if let Some(v) = parse_depth(n) {
+                *white_bot_search_depth = v;
+                println!("Set white bot search depth to {} (0..10).", v);
+            } else {
+                println!("Invalid search depth for white. Use: depth white <0..10>");
+            }
+            return true
+        }
+        // strength black <n>
+        (Some(color), Some(n)) if color.eq_ignore_ascii_case("black") => {
+            if let Some(v) = parse_depth(n) {
+                *black_bot_search_depth = v;
+                println!("Set black bot search depth to {} (0..10).", v);
+            } else {
+                println!("Invalid search depth for black. Use: depth black <0..10>");
+            }
+            return true
+        }
+        _ => {
+            println!("Usage: depth <0..10> | depth white <0..10> | depth black <0..10>");
+            return true
+        }
     }
 }
 
@@ -291,23 +359,28 @@ fn must_generate_move(game: &mut Chess, mode: &mut GameMode, move_is_bot_move : 
 }
 
 fn print_help() {
-    println!("reset          - reset the board to the initial position");
-    println!("reset <fen>    - set initial position to the FEN position, and reset the board");
-    println!("reset standard - set the initial position to the standard position and reset the board");
-    println!("pgn_database <file>     - replay the given PGN file");
-    println!("?              - automatic move");
-    println!("fen            - print the current FEN position");
-    println!("undo           - undo the last move");
-    println!("list           - list all moves");
-    println!("strength       - get the strength of the bots (higher = stronger)");
-    println!("strength <0..1000>            - set both bots' playing strength");
-    println!("strength white <0..1000>      - set white bot playing strength");
-    println!("strength black <0..1000>      - set black bot playing strength");
-    println!("pvsb           - play vs bot");
-    println!("bvsb           - bot vs bot");
-    println!("bvsp           - bot vs player");
-    println!("pvp            - player vs player");
-    println!("exit           - exit the program");
+    println!("reset                    - reset the board to the initial position");
+    println!("undo                     - undo the last move");
+    println!("list                     - list all moves");
+    println!("pvsb                     - set playing mode 'player vs bot'");
+    println!("bvsp                     - set playing mode 'bot vs player'");
+    println!("exit                     - exit the program");
+    println!("?                        - automatic move");
+    println!("reset <fen>              - set initial position to the FEN position, and reset the board");
+    println!("reset standard           - set the initial position to the standard position and reset the board");
+    println!("pgn_database <file>      - replay the given PGN file");
+    println!("fen                      - print the current FEN position");
+    println!("depth                    - get the search depths of the bots (higher = stronger)");
+    println!("depth <0..10>            - set both bots' search dept");
+    println!("depth white <0..10>      - set white bot search dept");
+    println!("depth black <0..10>      - set black bot search dept");
+    println!("strength                 - get the strength of the bots (higher = stronger)");
+    println!("strength <0..1000>       - set both bots' playing strength");
+    println!("strength white <0..1000> - set white bot playing strength");
+    println!("strength black <0..1000> - set black bot playing strength");
+    println!("eval                     - evaluate the current position");
+    println!("bvsb                     - set playing mode 'bot vs bot'");
+    println!("pvp                      - set playing mode 'player vs player'");
 }
 
 fn handle_game_mode_commands(mode: &mut GameMode, some_input: &String) -> bool {
