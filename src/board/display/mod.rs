@@ -4,7 +4,7 @@ use crate::piece::pieces::Color;
 
 
 impl Board {
-    pub fn get_board_display_string(&self, history: &History) -> String {
+    pub fn get_board_display_string(&self, history: Option<&History>) -> String {
         // ANSI escape sequences for background colors (light/dark) and reset
         const RESET: &str = "\x1b[0m";
         const BG_LIGHT: &str = "\x1b[48;5;248m"; // light gray
@@ -17,11 +17,14 @@ impl Board {
 
         let mut result = String::new();
 
-        let last_move = if history.len() > 0 {
-            history.get_move(history.len() - 1)
-        } else {
-            None
-        };
+        let mut last_move = None;
+
+        if history.is_some() {
+            let h = history.unwrap();
+            if h.len() > 0 {
+               last_move = h.get_move(h.len() - 1)
+            }
+        }
 
         // File labels (top), spaced to match 3-character wide squares
         result.push_str("  "); // left margin for rank labels

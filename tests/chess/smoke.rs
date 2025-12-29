@@ -21,9 +21,9 @@ fn test_pawn_capture() {
     let mut game = Chess::new();
     game.set_starting_fen("rnbqkbnr/p1pppppp/P7/8/8/1p6/1PPPPPPP/RNBQKBNR w KQkq - 0 4");
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!( game.move_piece_san("cxb3"));
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert_eq!(game.to_fen(), "rnbqkbnr/p1pppppp/P7/8/8/1P6/1P1PPPPP/RNBQKBNR b KQkq - 0 4");
 }
 
@@ -32,10 +32,10 @@ fn test_en_passant_pawn_capture() {
     let mut game = Chess::new();
     game.set_starting_fen("rnbqkbnr/1ppppp1p/8/p3P3/6pP/1P6/P1PP1PP1/RNBQKBNR b KQkq h3 0 4");
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!( game.move_piece_san("g4xh3"));
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert_eq!(game.to_fen(), "rnbqkbnr/1ppppp1p/8/p3P3/8/1P5p/P1PP1PP1/RNBQKBNR w KQkq - 0 5");
 }
 
@@ -44,10 +44,10 @@ fn test_en_passant_capture_black() {
     let mut game = Chess::new();
     game.set_starting_fen("rn2k1nr/ppp2ppp/8/2bqpb2/2Pp4/1K3P2/PP1PP1PP/RNBQ1BNR b kq c3 0 7");
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san("dxc3"));
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn test_pawn_move_over_piece() {
     let mut game = Chess::new();
     game.set_starting_fen("rnbqkbn1/ppppppp1/3r4/7p/7P/3R4/PPPPPPP1/RNBQKBN1 w KQkq h6 4 4");
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!( !game.move_piece_san("d2d4"));
     assert!(game.move_piece_san("a2a4"));
     assert!( !game.move_piece_san("d7d5"));
@@ -66,10 +66,10 @@ fn test_castling() {
     let mut game = Chess::new();
     game.set_starting_fen("r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4");
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san("O-O"));
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert_eq!(game.to_fen(), "r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 1 4");
 }
 
@@ -78,10 +78,10 @@ fn test_castling_black() {
     let mut game = Chess::new();
     game.set_starting_fen("r3kbnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 b kq - 0 7");
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san("O-O-O"));
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert_eq!(game.to_fen(), "2kr1bnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 w - - 1 8");
 }
 #[test]
@@ -93,7 +93,7 @@ fn test_ambiguous_move_due_to_pinned_pieces() {
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san(mv));
 }
 
@@ -106,10 +106,10 @@ fn test_ambigous_rook_error() {
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san(mv));
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
 }
 
 #[test]
@@ -121,10 +121,10 @@ fn black_en_passant_error() {
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san(mv));
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
 }
 
 #[test]
@@ -136,9 +136,9 @@ fn test_check_mate() {
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     let history = game.get_history().clone();
     game.get_game_state().recompute_outcome(&history);
     let outcome = game.get_game_state().get_outcome().unwrap();
@@ -155,9 +155,9 @@ fn test_check_mate2() {
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     let history = game.get_history().clone();
     game.get_game_state().recompute_outcome(&history);
     let outcome = game.get_game_state().get_outcome().unwrap();
@@ -175,9 +175,9 @@ fn test_check_with_o_o_o() {
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(&history));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
     let history = game.get_history().clone();
     game.get_game_state().recompute_outcome(&history);
     let outcome = game.get_game_state().get_outcome().unwrap();

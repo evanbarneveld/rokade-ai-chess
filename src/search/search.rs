@@ -15,7 +15,7 @@ use crate::state::game_state::GameState;
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 ///
-pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize, mut history: History) -> Option<((usize, usize), (usize, usize))> {
+pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize, history: History) -> Option<((usize, usize), (usize, usize))> {
 
     // collect all legal moves for the side to move
     let board = game_state.board();
@@ -37,8 +37,8 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     let mut beta = i32::MAX - 1;
 
     for (from, to) in valid_moves.into_iter() {
-        // simulate the move
-        let mut simulation_board = move_piece_on_board(&board, from, to);
+        // simulate the move once on a cloned board
+        let simulation_board = move_piece_on_board(&board, from, to);
 
         // recurse: after making a move, it's the opponent's turn and depth decreases
         let mut score = if search_depth <= 1 {
@@ -48,16 +48,18 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
             alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta)
         };
 
-        //the move leads to a 3-fold repetition?
-        let san_move = convert_move_to_san(game_state, Some((from, to)));
-
-        simulation_board.move_piece(from, to);
-        let fen = game_state_to_fen_string(game_state);
-        history.add_move(san_move.unwrap(), (from, to), fen);
-
-        if history.current_repetition_count() == 2 {
-            // avoid 3-fold repetition
-            score = if active_color == Color::White { i32::MIN+1 } else { i32::MAX-1 };
+        // Small root-only tiebreaker: prefer captures slightly to reduce equal scores at low depth.
+        if let Some(captured) = board.get(to.0, to.1) {
+            use crate::piece::pieces::PieceType::*;
+            let cap_val = match captured.get_type() {
+                Pawn => 100,
+                Knight => 320,
+                Bishop => 330,
+                Rook => 500,
+                Queen => 900,
+                King => 0,
+            };
+            score += cap_val / 10; // small bonus for capturing more valuable pieces
         }
 
         move_table.push((from, to, score));
@@ -78,10 +80,10 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
 
     let mut sorted_moves = sort_moves_on_score_asc(&mut move_table);
 
-    // find the best move based on the evaluation scores
+    // For White (maximizing side), higher scores are better. We sorted ascending,
+    // so reverse to get best-first ordering. For Black (minimizing) keep ascending.
     if active_color == Color::White {
-        // what is the best move
-       sorted_moves.reverse();
+        sorted_moves.reverse();
     }
 
     select_move_based_using_strength(&sorted_moves, playing_strength)
@@ -150,13 +152,21 @@ fn opposite_color(c: Color) -> Color {
 
 // Alpha-beta pruning search. Returns evaluation in centipawns (positive is better for White).
 fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32) -> i32 {
+
+    // print board
+    //println!("alpha-beta\n{}", board.get_board_display_string(None));
+
     if depth == 0 {
-        return evaluate_position(board);
+        let score = evaluate_position(board);
+        //println!("score: {}", score);
+        return score;
     }
 
     let moves = find_all_valid_moves(board, to_move);
     if moves.is_empty() {
-        return evaluate_position(board);
+        let score = evaluate_position(board);
+        //println!("score: {}", score);
+        return score;
     }
 
     if to_move == Color::White {
@@ -210,16 +220,31 @@ fn select_move_based_using_strength(
     sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, playing_strength: usize
 ) -> Option<((usize, usize), (usize, usize))> {
 
-    if playing_strength > 1000 { return None; }
+    if sorted_moves.is_empty() { return None; }
 
-    for (_, mv) in sorted_moves.iter().enumerate() {
-        let r: usize = rng().random_range(0..1000);
-        if r < playing_strength {
-            return Some((mv.0, mv.1))
-        }
-    }
+    // Clamp strength to [1..1000]
+    let ps = if playing_strength == 0 { 1 } else { playing_strength.min(1000) };
 
-    //return the worst move
-    let worst_move = sorted_moves.last().unwrap();
-    Some((worst_move.0, worst_move.1))
+    // Choose from top-K based on strength. For low strength pick from a wider bucket,
+    // but still bias the pick toward the best move within that bucket.
+    // Map strength to K in [len, 1] roughly: strong -> pick among top 1..3, weak -> wider.
+    let len = sorted_moves.len();
+    // Limit randomness to top 6 to avoid clearly dubious opening moves surfacing too often.
+    let max_bucket = len.min(6);
+    let k = if ps >= 950 { 1 }
+            else if ps >= 800 { 2 }
+            else if ps >= 650 { 3 }
+            else if ps >= 500 { 4 }
+            else if ps >= 350 { 5 }
+            else if ps >= 200 { 6 }
+            else { 8 };
+    let k = k.min(max_bucket).max(1);
+
+    // Random index within top-k, biased toward 0 (best move).
+    // Use the minimum of two uniform draws to skew toward lower indices.
+    let r1: usize = rng().random_range(0..k);
+    let r2: usize = rng().random_range(0..k);
+    let idx = r1.min(r2);
+    let pick = &sorted_moves[idx];
+    Some((pick.0, pick.1))
 }

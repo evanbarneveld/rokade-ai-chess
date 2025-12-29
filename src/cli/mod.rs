@@ -35,7 +35,7 @@ pub fn run_cli() {
     loop {
 
         let history = game.get_history().clone();
-        println!("{}", game.board().get_board_display_string(&history));
+        println!("{}", game.board().get_board_display_string(Some(&history)));
 
         print_user_prompt(&mut game);
 
