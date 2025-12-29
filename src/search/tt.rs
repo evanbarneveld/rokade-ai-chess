@@ -37,7 +37,7 @@ impl TranspositionTable {
         Self { entries, mask: size - 1, age: 0 }
     }
 
-    pub fn new_128mb() -> Self { Self::with_capacity_pow2(22) }
+    pub fn new_size_18() -> Self { Self::with_capacity_pow2(18) }
 
     #[inline]
     fn index(&self, key: u64) -> usize { (key as usize) & self.mask }

@@ -66,7 +66,7 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     // First: search one move serially (YBWC-lite) to seed bounds and provide good ordering
     let (first_from, first_to) = moves[0];
     let first_board = move_piece_on_board(&board, first_from, first_to);
-    let mut first_tt = TranspositionTable::new_128mb();
+    let mut first_tt = TranspositionTable::new_size_18();
     first_tt.next_age();
     let first_score_raw = if effective_depth <= 1 {
         evaluate_position(&first_board)
@@ -102,7 +102,7 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     let _results: Vec<_> = rest.par_iter()
         .map(|&(from, to)| {
             let simulation_board = move_piece_on_board(&board, from, to);
-            let mut local_tt = TranspositionTable::new_128mb();
+            let mut local_tt = TranspositionTable::new_size_18();
             local_tt.next_age();
             let search_score = if effective_depth <= 1 {
                 evaluate_position(&simulation_board)
