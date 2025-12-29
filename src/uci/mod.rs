@@ -1,4 +1,5 @@
 use std::io::{self, BufRead, Write};
+use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
 use crate::search::search::find_move;
@@ -13,10 +14,15 @@ use crate::search::search::find_move;
 // - stop (no-op for instant search)
 // - quit
 // Notes:
-// - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.
+// - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
+
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let mut log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("uci.log")?;
     let mut engine = Chess::new();
     let mut running = true;
 
@@ -31,19 +37,25 @@ pub fn run_uci() -> io::Result<()> {
             break;
         }
         let line = input.trim();
+        // log input
+        log_io(&mut log, "IN ", line);
         if line.is_empty() {
             continue;
         }
 
         if line == "uci" {
-            writeln!(stdout, "id name eriks-chess")?;
-            writeln!(stdout, "id author erik van barneveld")?;
-            writeln!(stdout, "uciok")?;
+            let m1 = "id name eriks-chess".to_string();
+            writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
+            let m2 = "id author erik van barneveld".to_string();
+            writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);
+            let m3 = "uciok".to_string();
+            writeln!(stdout, "{}", m3)?; log_io(&mut log, "OUT", &m3);
             stdout.flush()?;
             continue;
         }
         if line == "isready" {
-            writeln!(stdout, "readyok")?;
+            let m = "readyok".to_string();
+            writeln!(stdout, "{}", m)?; log_io(&mut log, "OUT", &m);
             stdout.flush()?;
             continue;
         }
@@ -67,7 +79,8 @@ pub fn run_uci() -> io::Result<()> {
                 }
             }
             let best = go_bestmove(&mut engine, line, movetime);
-            writeln!(stdout, "bestmove {}", best)?;
+            let out = format!("bestmove {}", best);
+            writeln!(stdout, "{}", out)?; log_io(&mut log, "OUT", &out);
             stdout.flush()?;
             continue;
         }
@@ -91,25 +104,25 @@ fn handle_position(engine: &mut Chess, args: &str) {
     // Syntax we handle:
     // position startpos [moves ...]
     // position fen <fen-string> [moves ...]
-    let mut rest = args.trim();
+    let mut rest = args.trim().to_string();
     if let Some(s) = rest.strip_prefix("startpos") {
         let _ = engine.set_starting_fen(Chess::DEFAULT_CHESS_STARTING_FEN);
         let _ = engine.reset();
-        rest = s.trim();
+        rest = s.trim().to_string();
     } else if let Some(s) = rest.strip_prefix("fen ") {
         // everything up to " moves" (if present) is the FEN
         if let Some(idx) = s.find(" moves ") {
             let (fen, tail) = s.split_at(idx);
             let _ = engine.reset_board_to_fen(fen.trim());
-            rest = tail.trim_start_matches(" moves ");
+            rest = format!("{} {}", "moves", tail.trim_start_matches(" moves "));
         } else {
             // only fen provided
             let _ = engine.reset_board_to_fen(s.trim());
-            rest = "";
+            rest = String::new();
         }
     }
 
-    if let Some(moves_part) = rest.strip_prefix("moves ") {
+    if let Some(moves_part) = rest.as_str().strip_prefix("moves ") {
         for mv in moves_part.split_whitespace() {
             let _ = apply_uci_move(engine, mv);
         }
@@ -181,4 +194,9 @@ fn parse_depth(s: &str) -> Option<usize> {
         }
     }
     None
+}
+
+fn log_io(log: &mut std::fs::File, direction: &str, text: &str) {
+    let _ = writeln!(log, "[{}] {}", direction, text);
+    let _ = log.flush();
 }
