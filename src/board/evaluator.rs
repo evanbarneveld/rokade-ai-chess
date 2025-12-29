@@ -203,5 +203,76 @@ pub fn evaluate_position(board: &Board) -> i32 {
         }
     }
 
+    // Small tempo bonus to the side to move to break ties among otherwise equal quiet moves.
+    // This helps differentiate opening replies where static features are very similar.
+    // Positive = better for White, negative = better for Black.
+    // We detect the side to move by counting legal moves; cheaper: infer by parity of total moves is not available here.
+    // Instead, approximate: if White has strictly more legal moves than Black, assume White to move; vice versa.
+    // To keep it deterministic and inexpensive, give a fixed tiny bonus scaled by phase.
+    // Note: evaluation here is board-only; if a true side-to-move flag is available in GameState, prefer passing it in.
+    let tempo_bonus = 8; // in centipawns
+    // Heuristic: in opening/middlegame (phase high), apply full bonus, taper towards endgame.
+    let tempo = (tempo_bonus * phase) / 24;
+    // Estimate side to move by mobility; if equal, give no bonus.
+    let mut white_moves = 0usize;
+    let mut black_moves = 0usize;
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = board.get(r, c) {
+                let color = p.get_color();
+                match p.get_type() {
+                    PieceType::Knight => {
+                        // Knight mobility: up to 8 offsets
+                        const K: [(i32,i32);8] = [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)];
+                        for (dr, dc) in K { let nr = r as i32 + dr; let nc = c as i32 + dc; if nr>=0 && nr<8 && nc>=0 && nc<8 {
+                            if let Some(tp) = board.get(nr as usize, nc as usize) { if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } } } else { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
+                        }}
+                    }
+                    PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
+                        // Sliding mobility in basic directions
+                        let dirs: &[(i32,i32)] = match p.get_type() {
+                            PieceType::Bishop => &[(1,1),(1,-1),(-1,1),(-1,-1)],
+                            PieceType::Rook => &[(1,0),(-1,0),(0,1),(0,-1)],
+                            _ => &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)],
+                        };
+                        for (dr, dc) in dirs.iter() {
+                            let mut nr = r as i32 + dr; let mut nc = c as i32 + dc;
+                            while nr>=0 && nr<8 && nc>=0 && nc<8 {
+                                if let Some(tp) = board.get(nr as usize, nc as usize) {
+                                    if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
+                                    break;
+                                } else {
+                                    if color==Color::White { white_moves+=1; } else { black_moves+=1; }
+                                }
+                                nr += dr; nc += dc;
+                            }
+                        }
+                    }
+                    PieceType::King => {
+                        for dr in -1..=1 { for dc in -1..=1 { if dr==0 && dc==0 { continue; } let nr=r as i32+dr; let nc=c as i32+dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
+                            if let Some(tp)=board.get(nr as usize, nc as usize) { if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } } } else { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
+                        } }}
+                    }
+                    PieceType::Pawn => {
+                        // Simple pawn mobility: one step forward if empty, captures diagonally if enemy
+                        let dir: i32 = if color==Color::White { 1 } else { -1 };
+                        let nr = r as i32 + dir;
+                        if nr>=0 && nr<8 {
+                            // forward
+                            if board.get(nr as usize, c).is_none() { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
+                            // captures
+                            for dc in [-1,1] { let nc = c as i32 + dc; if nc>=0 && nc<8 {
+                                if let Some(tp)=board.get(nr as usize, nc as usize) { if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } } }
+                            }}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if white_moves > black_moves { score += tempo; }
+    else if black_moves > white_moves { score -= tempo; }
+
     score
 }

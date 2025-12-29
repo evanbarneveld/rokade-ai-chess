@@ -86,7 +86,12 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
         sorted_moves.reverse();
     }
 
-    select_move_based_using_strength(&sorted_moves, playing_strength)
+    let best_move = &sorted_moves.first().unwrap();
+
+    // always return the best move, even if it's not the best move according to the playing_strength parameter.
+    Some((best_move.0, best_move.1))
+
+    //select_move_based_using_strength(&sorted_moves, playing_strength)
 }
 
 pub(crate) fn find_all_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
