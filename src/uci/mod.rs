@@ -161,7 +161,8 @@ fn go_bestmove(engine: &mut Chess, line: &str, move_time:usize) -> String {
     let depth = parse_depth(line).unwrap_or(7);
     let history = engine.get_history().clone();
     let game_state = engine.get_game_state();
-    let best_move = find_move(*game_state, depth, move_time, history);
+    let playing_strength = move_time;
+    let best_move = find_move(*game_state, depth, playing_strength);
 
     if best_move.is_some() {
         let mv = best_move.unwrap();

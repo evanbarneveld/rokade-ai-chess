@@ -12,16 +12,15 @@ use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
 use crate::search::zobrist::compute_zobrist;
 use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
-#[cfg(feature = "parallel")] use rayon::prelude::*;
-#[cfg(feature = "parallel")] use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 
-#[cfg(feature = "parallel")]
 fn init_rayon_pool_if_needed() {
     use std::sync::OnceLock;
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        // Prefer 16 threads by default; allow env override via RAYON_NUM_THREADS
-        let default_threads = 16usize;
+        // Prefer 12 threads by default; allow env override via RAYON_NUM_THREADS
+        let default_threads = 12usize;
         let num_threads = std::env::var("RAYON_NUM_THREADS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
@@ -34,8 +33,7 @@ fn init_rayon_pool_if_needed() {
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 ///
-pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize, _history: History) -> Option<((usize, usize), (usize, usize))> {
-    #[cfg(feature = "parallel")]
+pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize) -> Option<((usize, usize), (usize, usize))> {
     init_rayon_pool_if_needed();
 
     // collect all legal moves for the side to move
@@ -50,6 +48,18 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     // if depth is 0, treat it as 1 ply (evaluate after making one move)
     let search_depth = if search_depth == 0 { 1 } else { search_depth };
 
+    // Map playing_strength [1..1000] to an effective depth to intentionally weaken play at low strengths.
+    // Rough mapping: at ~300 strength, cap to ~3 ply; at 1000 keep requested depth.
+    let ps = if playing_strength == 0 { 1 } else { playing_strength.min(1000) } as i32;
+    let depth_min = 2i32; // never search less than 2 ply to avoid outright blunders like hanging queen immediately
+    let depth_max = search_depth as i32;
+    let effective_depth = if depth_max <= depth_min { depth_max } else {
+        // linear interpolation between depth_min (weak) and depth_max (strong)
+        let t = ps as f32 / 1000.0;
+        let d = (depth_min as f32 + t * (depth_max as f32 - depth_min as f32)).round() as i32;
+        d.clamp(depth_min, depth_max)
+    } as usize;
+
     // initialize root alpha/beta for potential root-level cutoffs
     let mut alpha = i32::MIN + 1;
     let beta = i32::MAX - 1;
@@ -59,10 +69,10 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     let first_board = move_piece_on_board(&board, first_from, first_to);
     let mut first_tt = TranspositionTable::new_128mb();
     first_tt.next_age();
-    let first_score_raw = if search_depth <= 1 {
+    let first_score_raw = if effective_depth <= 1 {
         evaluate_position(&first_board)
     } else {
-        alphabeta(&first_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut first_tt)
+        alphabeta(&first_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt)
     };
     // Apply root-only adjustments identical to the original code
     let mut first_adjusted = first_score_raw + root_move_bonus(&board, first_from, first_to, active_color);
@@ -73,6 +83,13 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
         };
         first_adjusted += cap_val / 10;
     }
+    // Inject random evaluation noise based on strength (weaker -> more noise)
+    let sigma = strength_noise_sigma(ps as usize);
+    if sigma > 0 {
+        let n: i32 = rng().random_range(-sigma..=sigma);
+        first_adjusted += n;
+    }
+
     // Update alpha/beta according to side to move
     if active_color == Color::White { if first_score_raw > alpha { alpha = first_score_raw; } }
 
@@ -83,54 +100,30 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     // Remaining moves
     let rest = &moves[1..];
 
-    // Serial path (no feature): keep behavior similar to original but without shared TT contention
-    #[cfg(not(feature = "parallel"))]
-    for &(from, to) in rest.iter() {
-        let simulation_board = move_piece_on_board(&board, from, to);
-        let mut local_tt = TranspositionTable::new_128mb();
-        local_tt.next_age();
-        let search_score = if search_depth <= 1 {
-            evaluate_position(&simulation_board)
-        } else {
-            alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut local_tt)
-        };
-        let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
-        if let Some(captured) = board.get(to.0, to.1) {
-            use crate::piece::pieces::PieceType::*;
-            let cap_val = match captured.get_type() {
-                Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
+    let _results: Vec<_> = rest.par_iter()
+        .map(|&(from, to)| {
+            let simulation_board = move_piece_on_board(&board, from, to);
+            let mut local_tt = TranspositionTable::new_128mb();
+            local_tt.next_age();
+            let search_score = if effective_depth <= 1 {
+                evaluate_position(&simulation_board)
+            } else {
+                alphabeta(&simulation_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut local_tt)
             };
-            adjusted_score += cap_val / 10;
-        }
-        move_table.push((from, to, adjusted_score));
-    }
-
-    // Parallel path (feature = "parallel"): evaluate remaining root moves in parallel using per-thread TT
-    #[cfg(feature = "parallel")]
-    {
-        let parallel_results: Vec<_> = rest.par_iter()
-            .map(|&(from, to)| {
-                let simulation_board = move_piece_on_board(&board, from, to);
-                let mut local_tt = TranspositionTable::new_128mb();
-                local_tt.next_age();
-                let search_score = if search_depth <= 1 {
-                    evaluate_position(&simulation_board)
-                } else {
-                    alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut local_tt)
+            let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
+            if let Some(captured) = board.get(to.0, to.1) {
+                use crate::piece::pieces::PieceType::*;
+                let cap_val = match captured.get_type() {
+                    Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
                 };
-                let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
-                if let Some(captured) = board.get(to.0, to.1) {
-                    use crate::piece::pieces::PieceType::*;
-                    let cap_val = match captured.get_type() {
-                        Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
-                    };
-                    adjusted_score += cap_val / 10;
-                }
-                (from, to, adjusted_score)
-            })
-            .collect();
-        move_table.extend(parallel_results);
-    }
+                adjusted_score += cap_val / 10;
+            }
+            let sigma = strength_noise_sigma(ps as usize);
+            if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted_score += n; }
+            (from, to, adjusted_score)
+        })
+        .collect();
+    move_table.extend(_results);
 
     if move_table.is_empty() { return None; }
 
@@ -393,6 +386,26 @@ fn select_move_based_using_strength(
     // Clamp strength to [1..1000]
     let ps = if playing_strength == 0 { 1 } else { playing_strength.min(1000) };
 
+    // Blunder chance: with some probability (higher when weaker), deliberately pick from the bottom of list.
+    // This creates human-like mistakes at low skill.
+    let blunder_chance = if ps >= 950 { 0.0 }
+        else if ps >= 800 { 0.01 }
+        else if ps >= 650 { 0.03 }
+        else if ps >= 500 { 0.05 }
+        else if ps >= 350 { 0.10 }
+        else { 0.18 };
+    let roll: f32 = rng().random::<f32>();
+    if roll < blunder_chance {
+        // pick from bottom bucket (worst moves), limited to 30% of list but at least 2 moves
+        let len = sorted_moves.len();
+        let bucket = (len as f32 * 0.30).ceil() as usize;
+        let bucket = bucket.max(2).min(len);
+        let start = len - bucket;
+        let idx = rng().random_range(start..len);
+        let pick = &sorted_moves[idx];
+        return Some((pick.0, pick.1));
+    }
+
     // Choose from top-K based on strength. For low strength pick from a wider bucket,
     // but still bias the pick toward the best move within that bucket.
     // Map strength to K in [len, 1] roughly: strong -> pick among top 1..3, weak -> wider.
@@ -415,4 +428,16 @@ fn select_move_based_using_strength(
     let idx = r1.min(r2);
     let pick = &sorted_moves[idx];
     Some((pick.0, pick.1))
+}
+
+// Map strength to evaluation noise (centipawns). 0 at 1000, higher at low strengths.
+#[inline]
+fn strength_noise_sigma(ps: usize) -> i32 {
+    let ps = ps.min(1000).max(1) as i32;
+    // Piecewise linear: ~200cp at ps=1, ~120cp at ps=300, ~0 at 1000
+    let sigma = if ps >= 1000 { 0 }
+        else if ps >= 700 { ((1000 - ps) as f32 * 0.10) as i32 }  // up to ~30cp
+        else if ps >= 400 { ((700 - ps) as f32 * 0.20 + 30.0) as i32 } // ~30..90
+        else { ((400 - ps) as f32 * 0.30 + 90.0) as i32 }; // up to ~210
+    sigma.max(0)
 }
