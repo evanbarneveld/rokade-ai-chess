@@ -41,12 +41,16 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
         let simulation_board = move_piece_on_board(&board, from, to);
 
         // recurse: after making a move, it's the opponent's turn and depth decreases
-        let mut score = if search_depth <= 1 {
+        let search_score = if search_depth <= 1 {
             evaluate_position(&simulation_board)
         } else {
             // alpha-beta search from the opponent's perspective
             alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta)
         };
+
+        // Root-only light heuristic to break early equalities in the opening and
+        // discourage flank pawn pushes like h2-h4/a2-a4 as first moves.
+        let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
 
         // Small root-only tiebreaker: prefer captures slightly to reduce equal scores at low depth.
         if let Some(captured) = board.get(to.0, to.1) {
@@ -59,16 +63,17 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
                 Queen => 900,
                 King => 0,
             };
-            score += cap_val / 10; // small bonus for capturing more valuable pieces
+            adjusted_score += cap_val / 10; // small bonus for capturing more valuable pieces
         }
 
-        move_table.push((from, to, score));
+        // store only adjusted score for root-level ranking
+        move_table.push((from, to, adjusted_score));
 
         // update root alpha/beta based on side to move
         if active_color == Color::White {
-            if score > alpha { alpha = score; }
+            if search_score > alpha { alpha = search_score; }
         } else {
-            if score < beta { beta = score; }
+            if search_score < beta { beta = search_score; }
         }
 
         // optional root-level cutoff: if bounds cross, remaining moves unlikely to change decision
@@ -86,12 +91,12 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
         sorted_moves.reverse();
     }
 
-    let best_move = &sorted_moves.first().unwrap();
-
-    // always return the best move, even if it's not the best move according to the playing_strength parameter.
-    Some((best_move.0, best_move.1))
-
-    //select_move_based_using_strength(&sorted_moves, playing_strength)
+    if playing_strength >= 1000 {
+        let best_move = &sorted_moves.first().unwrap();
+        Some((best_move.0, best_move.1))
+    } else {
+        select_move_based_using_strength(&sorted_moves, playing_strength)
+    }
 }
 
 pub(crate) fn find_all_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
@@ -126,6 +131,69 @@ pub(crate) fn find_all_valid_moves(board: &Board, active_color:Color) -> Vec<((u
         }
     }
     result
+}
+
+// Small, root-level heuristic bonus used to break ties at low depth.
+// Positive favors White; negative favors Black (we add for side to move).
+fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side: Color) -> i32 {
+    let mut bonus: i32 = 0;
+
+    // Identify piece and basic metadata
+    let piece = match board.get(from.0, from.1) { Some(p) => p, None => return 0 };
+    let pt = piece.get_type();
+
+    // Opening-principle nudges (very small):
+    // - prefer central pawn advances (d/e pawns); discourage a/h pawn pushes
+    // - prefer knights to c3/f3 and bishops to c4/f4 for White (mirror for Black)
+    let (fr, fc) = from;
+    let (tr, tc) = to;
+
+    // discourage rook pawns (files a/h -> col 0/7) pushing as early plan
+    if pt == PieceType::Pawn && (fc == 0 || fc == 7) {
+        // stronger if double push (two ranks)
+        let dr = if fr > tr { fr as i32 - tr as i32 } else { tr as i32 - fr as i32 };
+        bonus -= if dr >= 2 { 35 } else { 25 };
+    }
+
+    // prefer central pawn advances on d/e files, especially 2-step from home
+    if pt == PieceType::Pawn && (fc == 3 || fc == 4) {
+        let dr = if fr > tr { fr as i32 - tr as i32 } else { tr as i32 - fr as i32 };
+        bonus += if dr >= 2 { 35 } else { 20 };
+    }
+
+    // Knights to c3/f3 (White) or c6/f6 (Black)
+    if pt == PieceType::Knight {
+        match side {
+            Color::White => {
+                if (tr, tc) == (2, 2) || (tr, tc) == (2, 5) { bonus += 20; }
+            }
+            Color::Black => {
+                if (tr, tc) == (5, 2) || (tr, tc) == (5, 5) { bonus += 20; }
+            }
+        }
+    }
+
+    // Bishops to c4/f4 for White; c5/f5 for Black
+    if pt == PieceType::Bishop {
+        match side {
+            Color::White => { if (tr, tc) == (3, 2) || (tr, tc) == (3, 5) { bonus += 12; } }
+            Color::Black => { if (tr, tc) == (4, 2) || (tr, tc) == (4, 5) { bonus += 12; } }
+        }
+    }
+
+    // Very small central control nudge for landing on or influencing center rings
+    let central_files = tc >= 2 && tc <= 5; // c..f
+    let central_ranks_white = tr >= 2 && tr <= 4; // ranks 3..5 from White pov
+    let central_ranks_black = tr >= 3 && tr <= 5; // ranks 4..6 from White rows ~ Black push
+    if central_files && ((side == Color::White && central_ranks_white) || (side == Color::Black && central_ranks_black)) {
+        bonus += 5;
+    }
+
+    // Apply sign for side to move (we always add for the maximizing side at root)
+    match side {
+        Color::White => bonus,
+        Color::Black => -bonus,
+    }
 }
 
 fn is_piece_move_valid(board: &Board, active_color: Color, r: usize, c: usize, piece: Piece, tr: usize, tc: usize, from: (usize, usize), to: (usize, usize), is_capture: bool) -> bool {
@@ -169,9 +237,18 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
 
     let moves = find_all_valid_moves(board, to_move);
     if moves.is_empty() {
-        let score = evaluate_position(board);
-        //println!("score: {}", score);
-        return score;
+        // No legal moves: checkmate or stalemate
+        let in_check = is_side_in_check(board, to_move);
+        if in_check {
+            // Losing side to move is checkmated. Use large negative for side to move.
+            // Depth-based bonus (the sooner the mate, the larger the magnitude):
+            // With our interface lacking ply, approximate using remaining depth.
+            const MATE_BASE: i32 = 30_000; // larger than any eval
+            return -MATE_BASE + depth as i32;
+        } else {
+            // stalemate: draw
+            return 0;
+        }
     }
 
     if to_move == Color::White {
@@ -195,6 +272,15 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         }
         value
     }
+}
+
+/// Helper: is the given side to move currently in check on this board state?
+fn is_side_in_check(board: &Board, side: Color) -> bool {
+    use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+    // We need a mutable Board to call existing helpers in some places, so clone.
+    let mut tmp = board.clone();
+    let king_sq = tmp.get_king_location(side);
+    is_square_attacked_by_opponent(&mut tmp, king_sq, side)
 }
 
 fn move_piece_on_board(current: &Board, from: (usize, usize), to: (usize, usize)) -> Board {
