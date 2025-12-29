@@ -12,88 +12,130 @@ use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
 use crate::search::zobrist::compute_zobrist;
 use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
+#[cfg(feature = "parallel")] use rayon::prelude::*;
+#[cfg(feature = "parallel")] use rayon::ThreadPoolBuilder;
+
+#[cfg(feature = "parallel")]
+fn init_rayon_pool_if_needed() {
+    use std::sync::OnceLock;
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        // Prefer 16 threads by default; allow env override via RAYON_NUM_THREADS
+        let default_threads = 16usize;
+        let num_threads = std::env::var("RAYON_NUM_THREADS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(default_threads);
+        let _ = ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build_global();
+    });
+}
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 ///
-pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize, history: History) -> Option<((usize, usize), (usize, usize))> {
+pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize, _history: History) -> Option<((usize, usize), (usize, usize))> {
+    #[cfg(feature = "parallel")]
+    init_rayon_pool_if_needed();
 
     // collect all legal moves for the side to move
     let board = game_state.board();
     let active_color = game_state.active_color();
-    let valid_moves = find_all_valid_moves(board, active_color);
+    let mut moves = find_all_valid_moves(board, active_color);
 
-    if valid_moves.is_empty() {
+    if moves.is_empty() {
         return None;
     }
 
     // if depth is 0, treat it as 1 ply (evaluate after making one move)
     let search_depth = if search_depth == 0 { 1 } else { search_depth };
-    
-    // create a vector with the moves and the scores
-    let mut move_table: Vec<((usize, usize), (usize, usize), i32)> = Vec::new();
 
     // initialize root alpha/beta for potential root-level cutoffs
     let mut alpha = i32::MIN + 1;
-    let mut beta = i32::MAX - 1;
+    let beta = i32::MAX - 1;
 
-    // Initialize a transposition table (~100MB)
-    let mut tt = TranspositionTable::new_128mb();
-    tt.next_age();
+    // First: search one move serially (YBWC-lite) to seed bounds and provide good ordering
+    let (first_from, first_to) = moves[0];
+    let first_board = move_piece_on_board(&board, first_from, first_to);
+    let mut first_tt = TranspositionTable::new_128mb();
+    first_tt.next_age();
+    let first_score_raw = if search_depth <= 1 {
+        evaluate_position(&first_board)
+    } else {
+        alphabeta(&first_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut first_tt)
+    };
+    // Apply root-only adjustments identical to the original code
+    let mut first_adjusted = first_score_raw + root_move_bonus(&board, first_from, first_to, active_color);
+    if let Some(captured) = board.get(first_to.0, first_to.1) {
+        use crate::piece::pieces::PieceType::*;
+        let cap_val = match captured.get_type() {
+            Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
+        };
+        first_adjusted += cap_val / 10;
+    }
+    // Update alpha/beta according to side to move
+    if active_color == Color::White { if first_score_raw > alpha { alpha = first_score_raw; } }
 
-    for (from, to) in valid_moves.into_iter() {
-        // simulate the move once on a cloned board
+    // Collect scored moves
+    let mut move_table: Vec<((usize, usize), (usize, usize), i32)> = Vec::with_capacity(moves.len());
+    move_table.push((first_from, first_to, first_adjusted));
+
+    // Remaining moves
+    let rest = &moves[1..];
+
+    // Serial path (no feature): keep behavior similar to original but without shared TT contention
+    #[cfg(not(feature = "parallel"))]
+    for &(from, to) in rest.iter() {
         let simulation_board = move_piece_on_board(&board, from, to);
-
-        // recurse: after making a move, it's the opponent's turn and depth decreases
+        let mut local_tt = TranspositionTable::new_128mb();
+        local_tt.next_age();
         let search_score = if search_depth <= 1 {
             evaluate_position(&simulation_board)
         } else {
-            // alpha-beta search from the opponent's perspective
-            alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut tt)
+            alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut local_tt)
         };
-
-        // Root-only light heuristic to break early equalities in the opening and
-        // discourage flank pawn pushes like h2-h4/a2-a4 as first moves.
         let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
-
-        // Small root-only tiebreaker: prefer captures slightly to reduce equal scores at low depth.
         if let Some(captured) = board.get(to.0, to.1) {
             use crate::piece::pieces::PieceType::*;
             let cap_val = match captured.get_type() {
-                Pawn => 100,
-                Knight => 320,
-                Bishop => 330,
-                Rook => 500,
-                Queen => 900,
-                King => 0,
+                Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
             };
-            adjusted_score += cap_val / 10; // small bonus for capturing more valuable pieces
+            adjusted_score += cap_val / 10;
         }
-
-        // store only adjusted score for root-level ranking
         move_table.push((from, to, adjusted_score));
+    }
 
-        // update root alpha/beta based on side to move
-        if active_color == Color::White {
-            if search_score > alpha { alpha = search_score; }
-        } else {
-            if search_score < beta { beta = search_score; }
-        }
-
-        // optional root-level cutoff: if bounds cross, remaining moves unlikely to change decision
-        if alpha >= beta { break; }
+    // Parallel path (feature = "parallel"): evaluate remaining root moves in parallel using per-thread TT
+    #[cfg(feature = "parallel")]
+    {
+        let parallel_results: Vec<_> = rest.par_iter()
+            .map(|&(from, to)| {
+                let simulation_board = move_piece_on_board(&board, from, to);
+                let mut local_tt = TranspositionTable::new_128mb();
+                local_tt.next_age();
+                let search_score = if search_depth <= 1 {
+                    evaluate_position(&simulation_board)
+                } else {
+                    alphabeta(&simulation_board, opposite_color(active_color), search_depth - 1, alpha, beta, 1, &mut local_tt)
+                };
+                let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
+                if let Some(captured) = board.get(to.0, to.1) {
+                    use crate::piece::pieces::PieceType::*;
+                    let cap_val = match captured.get_type() {
+                        Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
+                    };
+                    adjusted_score += cap_val / 10;
+                }
+                (from, to, adjusted_score)
+            })
+            .collect();
+        move_table.extend(parallel_results);
     }
 
     if move_table.is_empty() { return None; }
 
-
     let mut sorted_moves = sort_moves_on_score_asc(&mut move_table);
-
-    // For White (maximizing side), higher scores are better. We sorted ascending,
-    // so reverse to get best-first ordering. For Black (minimizing) keep ascending.
-    if active_color == Color::White {
-        sorted_moves.reverse();
-    }
+    if active_color == Color::White { sorted_moves.reverse(); }
 
     if playing_strength >= 1000 {
         let best_move = &sorted_moves.first().unwrap();
