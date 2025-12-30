@@ -1048,6 +1048,9 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
                     let vic_v = piece_simple_value(vic.get_type());
                     // Skip "bad" captures where attacker is significantly more valuable than victim
                     if vic_v + 50 < att_v { continue; }
+                    // Futility in qsearch (White to move): if even taking the victim cannot raise alpha, skip
+                    const FUT_MARGIN: i32 = 50;
+                    if stand_pat + vic_v + FUT_MARGIN <= a { continue; }
                 }
             }
             let was_capture = board.get(to.0, to.1).is_some();
@@ -1069,6 +1072,9 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
                     let att_v = piece_simple_value(att.get_type());
                     let vic_v = piece_simple_value(vic.get_type());
                     if vic_v + 50 < att_v { continue; }
+                    // Futility in qsearch (Black to move): if even taking the victim cannot drop below beta, skip
+                    const FUT_MARGIN: i32 = 50;
+                    if stand_pat - vic_v - FUT_MARGIN >= bnd { continue; }
                 }
             }
             let was_capture = board.get(to.0, to.1).is_some();
