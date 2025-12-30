@@ -27,6 +27,8 @@ pub struct TranspositionTable {
     entries: Box<[Entry]>,
     mask: usize,
     age: u8,
+    // number of slots that have been written at least once (approximate occupancy)
+    used_slots: usize,
 }
 
 impl TranspositionTable {
@@ -34,7 +36,7 @@ impl TranspositionTable {
     pub fn with_capacity_pow2(pow2: u32) -> Self {
         let size = 1usize << pow2;
         let entries = vec![Entry::default(); size].into_boxed_slice();
-        Self { entries, mask: size - 1, age: 0 }
+        Self { entries, mask: size - 1, age: 0, used_slots: 0 }
     }
 
     pub fn new_with_default_size() -> Self { Self::with_capacity_pow2(24) }
@@ -58,13 +60,24 @@ impl TranspositionTable {
         let e = &mut self.entries[idx];
         // Replace if empty, deeper, or older (simple replacement scheme favoring depth)
         if e.depth < 0 || depth > e.depth || (depth == e.depth && self.age.wrapping_sub(e.age) > 8) {
+            let was_empty = e.depth < 0;
             e.key = key;
             e.depth = depth;
             e.bound = bound;
             e.score = score;
             if let (Some(f), Some(t)) = (best_from, best_to) { e.best_from = f; e.best_to = t; }
             e.age = self.age;
+            if was_empty { self.used_slots = self.used_slots.saturating_add(1); }
         }
+    }
+    
+    // Return UCI-style hashfull (permill 0..1000) based on approximate occupancy.
+    #[inline]
+    pub fn hashfull_permille(&self) -> u16 {
+        if self.entries.is_empty() { return 0; }
+        let used = self.used_slots.min(self.entries.len());
+        let v = (used as u128) * 1000u128 / (self.entries.len() as u128);
+        v.min(1000) as u16
     }
 }
 

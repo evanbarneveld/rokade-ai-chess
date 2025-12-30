@@ -86,7 +86,7 @@ pub fn run_uci() -> io::Result<()> {
             reset_search_telemetry();
             // Install a temporary info callback so we can emit progress while searching.
             // The callback prints UCI-compliant info lines with current best root move scores.
-            let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>| {
+            let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>, hashfull: u16| {
                 let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
                 for (f, t) in pv_moves {
                     pv_parts.push(as_move_str(f, t));
@@ -97,7 +97,7 @@ pub fn run_uci() -> io::Result<()> {
                 let ms = start.elapsed().as_millis().max(1);
                 let nps = (nodes as u128 * 1000u128) / ms;
                 // Print directly to stdout; ignore logging for async updates
-                let _ = writeln!(io::stdout(), "info depth {} score cp {} nodes {} nps {} pv {}", depth_used, score_cp, nodes, nps, pv);
+                let _ = writeln!(io::stdout(), "info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, score_cp, nodes, nps, hashfull, pv);
             });
             set_info_callback(Some(info_cb));
 

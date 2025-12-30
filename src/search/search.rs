@@ -94,7 +94,8 @@ fn init_rayon_pool_if_needed() {
 }
 
 // --- Lightweight info callback support to report progress while searching ---
-type InfoCb = dyn Fn(((usize, usize), (usize, usize)), i32, usize, Vec<((usize, usize), (usize, usize))>) + Send + Sync + 'static;
+// Include UCI hashfull (permill) so GUI can display hash usage
+type InfoCb = dyn Fn(((usize, usize), (usize, usize)), i32, usize, Vec<((usize, usize), (usize, usize))>, u16) + Send + Sync + 'static;
 static INFO_CB: OnceLock<Mutex<Option<Arc<InfoCb>>>> = OnceLock::new();
 
 fn info_cb_cell() -> &'static Mutex<Option<Arc<InfoCb>>> {
@@ -107,9 +108,9 @@ pub(crate) fn set_info_callback(cb: Option<Arc<InfoCb>>) {
     *guard = cb;
 }
 
-fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used: usize, pv: Vec<((usize, usize), (usize, usize))>) {
+fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used: usize, pv: Vec<((usize, usize), (usize, usize))>, hashfull_permille: u16) {
     if let Some(cb) = info_cb_cell().lock().unwrap().as_ref().cloned() {
-        (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used, pv)
+        (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used, pv, hashfull_permille)
     }
 }
 
@@ -392,9 +393,10 @@ pub(crate) fn find_move_with_info(
 
         let ((bf, bt), best_adj, best_raw) = best_tuple;
         last_score = best_raw;
-        // Emit PV/info for this iteration
+        // Emit PV/info for this iteration, including TT hashfull permille
         let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
-        emit_info(bf, bt, best_adj, depth_now, pv);
+        let hf = tt.hashfull_permille();
+        emit_info(bf, bt, best_adj, depth_now, pv, hf);
         chosen = Some((bf, bt, best_adj, depth_now));
     }
 
