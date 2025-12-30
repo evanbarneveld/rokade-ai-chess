@@ -42,7 +42,7 @@ fn init_rayon_pool_if_needed() {
 }
 
 // --- Lightweight info callback support to report progress while searching ---
-type InfoCb = dyn Fn(((usize, usize), (usize, usize)), i32, usize) + Send + Sync + 'static;
+type InfoCb = dyn Fn(((usize, usize), (usize, usize)), i32, usize, Vec<((usize, usize), (usize, usize))>) + Send + Sync + 'static;
 static INFO_CB: OnceLock<Mutex<Option<Arc<InfoCb>>>> = OnceLock::new();
 
 fn info_cb_cell() -> &'static Mutex<Option<Arc<InfoCb>>> {
@@ -55,10 +55,43 @@ pub(crate) fn set_info_callback(cb: Option<Arc<InfoCb>>) {
     *guard = cb;
 }
 
-fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used: usize) {
+fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used: usize, pv: Vec<((usize, usize), (usize, usize))>) {
     if let Some(cb) = info_cb_cell().lock().unwrap().as_ref().cloned() {
-        (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used)
+        (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used, pv)
     }
+}
+
+#[inline]
+fn build_pv_for_root(
+    board: &Board,
+    root_side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    tt: &TranspositionTable,
+    max_len: usize,
+) -> Vec<((usize, usize), (usize, usize))> {
+    let mut pv: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(max_len.max(1));
+    pv.push((from, to));
+
+    // Work on a temporary board following the PV using TT best moves
+    let mut tmp = board.clone();
+    let _undo = make_move_simple(&mut tmp, from, to);
+    let mut side = opposite_color(root_side);
+
+    for _ in 1..max_len {
+        let key = compute_zobrist(&tmp, side);
+        let Some(entry) = tt.probe(key) else { break; };
+        let (bf, bt) = (entry.best_from, entry.best_to);
+        let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
+        let next = ((nfr, nfc), (ntr, ntc));
+        // Validate legality in current position to avoid garbage PV
+        let legals = find_all_valid_moves(&tmp, side);
+        if !legals.contains(&next) { break; }
+        pv.push(next);
+        let _u = make_move_simple(&mut tmp, (nfr, nfc), (ntr, ntc));
+        side = opposite_color(side);
+    }
+    pv
 }
 
 // --- Simple global telemetry (nodes visited) for UCI info reporting ---
@@ -217,7 +250,8 @@ pub(crate) fn find_move_with_info(
     }
 
     // Emit info for the first (seed) move
-    emit_info(first_from, first_to, first_adjusted, effective_depth);
+    let first_pv = build_pv_for_root(board, active_color, first_from, first_to, &first_tt, effective_depth);
+    emit_info(first_from, first_to, first_adjusted, effective_depth, first_pv);
 
     // Update alpha/beta according to side to move
     if active_color == Color::White { if first_score_raw > alpha { alpha = first_score_raw; } }
@@ -277,7 +311,8 @@ pub(crate) fn find_move_with_info(
                 }
             }
             // Emit info for each evaluated root move
-            emit_info(from, to, adjusted_score, effective_depth);
+            let pv = build_pv_for_root(board, active_color, from, to, &local_tt, effective_depth);
+            emit_info(from, to, adjusted_score, effective_depth, pv);
             (from, to, adjusted_score)
         })
         .collect();

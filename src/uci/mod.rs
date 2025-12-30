@@ -84,8 +84,12 @@ pub fn run_uci() -> io::Result<()> {
             reset_search_telemetry();
             // Install a temporary info callback so we can emit progress while searching.
             // The callback prints UCI-compliant info lines with current best root move scores.
-            let info_cb = Arc::new(move |mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize| {
-                let pv = as_move_str(mv.0, mv.1);
+            let info_cb = Arc::new(move |mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>| {
+                let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
+                for (f, t) in pv_moves {
+                    pv_parts.push(as_move_str(f, t));
+                }
+                let pv = pv_parts.join(" ");
                 // Compute current nodes and nps
                 let nodes = get_nodes();
                 let ms = start.elapsed().as_millis().max(1);
