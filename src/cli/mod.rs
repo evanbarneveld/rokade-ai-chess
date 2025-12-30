@@ -7,6 +7,8 @@ use crate::pgn_player::pgn_player::PgnPlayer;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 
+const DEFAULT_SEARCH_DEPTH: usize = 5;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum GameMode {
     PlayerVsPlayer,
@@ -19,8 +21,8 @@ pub fn run_cli() {
     let mut mode = GameMode::PlayerVsPlayer;
     let mut white_bot_strength: usize = 1000;
     let mut black_bot_strength: usize = 1000;
-    let mut white_bot_search_depth: usize = 7;
-    let mut black_bot_search_depth: usize = 7;
+    let mut white_bot_search_depth: usize = DEFAULT_SEARCH_DEPTH;
+    let mut black_bot_search_depth: usize = DEFAULT_SEARCH_DEPTH;
 
     println!("Welcome to chess. Type 'help' for help, enter move, or 'quit' to quit.\n");
 
