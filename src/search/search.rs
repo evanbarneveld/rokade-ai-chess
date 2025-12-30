@@ -599,6 +599,187 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
         bonus += if dr >= 2 { 35 } else { 20 };
     }
 
+    // Guard: avoid rewarding quiet moves that step into an attacked square with negative SEE
+    // This helps prevent moves like Nd5? that walk into easy counters. We only apply at root as a tie-break.
+    // Extra penalty if the destination is attacked by an enemy pawn.
+    if let Some(moved) = board.get(fr, fc) {
+        let is_capture = board.get(tr, tc).is_some();
+        let is_pawn_move = moved.get_type() == PieceType::Pawn;
+        let is_quiet = !is_capture && !is_pawn_move;
+        if is_quiet {
+            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+            // Simple attack check
+            let mut tmp = board.clone();
+            // simulate the move
+            tmp.set(fr, fc, None);
+            let prev = tmp.get(tr, tc);
+            tmp.set(tr, tc, Some(moved));
+            // If the destination is attacked by opponent, consider SEE-like material swing using MVV/LVA proxy
+            if is_square_attacked_by_opponent(&mut tmp, (tr, tc), side) {
+                // Very cheap SEE approximation: value(moved) - max attacker value on that square (assume a pawn/knight/bishop/rook/queen could capture)
+                use crate::piece::pieces::PieceType::*;
+                let val = match moved.get_type() { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 };
+                // Detect if attacked specifically by a pawn in the original board relative to opponent
+                let mut pawn_attacked = false;
+                let opp = opposite_color(side);
+                // Check pawn attack pattern on the destination in the post-move position
+                // White pawns attack up (+1 row), Black pawns attack down (-1 row)
+                if opp == Color::White {
+                    if tr >= 1 {
+                        if tc >= 1 { if let Some(p)=tmp.get(tr-1, tc-1) { if p.get_color()==opp && p.get_type()==Pawn { pawn_attacked = true; }}}
+                        if tc+1 < 8 { if let Some(p)=tmp.get(tr-1, tc+1) { if p.get_color()==opp && p.get_type()==Pawn { pawn_attacked = true; }}}
+                    }
+                } else {
+                    if tr+1 < 8 {
+                        if tc >= 1 { if let Some(p)=tmp.get(tr+1, tc-1) { if p.get_color()==opp && p.get_type()==Pawn { pawn_attacked = true; }}}
+                        if tc+1 < 8 { if let Some(p)=tmp.get(tr+1, tc+1) { if p.get_color()==opp && p.get_type()==Pawn { pawn_attacked = true; }}}
+                    }
+                }
+                // Apply a stronger penalty proportional to the piece value if likely hanging
+                // Increase magnitude to ensure quiet "walk-into" moves don't win shallow tie-breaks.
+                let mut pen = (val / 5).max(40); // stronger base penalty
+                if pawn_attacked { pen += (val / 4).max(40); }
+                bonus -= pen;
+            }
+
+            // restore tmp (not needed further)
+            let _ = prev;
+        }
+
+        // Additional guard for knights: penalize moving a knight to a square
+        // that can be immediately attacked by an enemy pawn after a single-step advance
+        // (e.g., Nd5 can be hit by ...c6 if a pawn sits on c7 and c6 is empty).
+        if moved.get_type() == PieceType::Knight && !is_capture {
+            let opp = opposite_color(side);
+            // For Black pawns (opp == Black), check pawns at (tr+2, tc±1) with (tr+1, tc±1) empty
+            // For White pawns (opp == White), symmetric: pawns at (tr-2, tc±1) with (tr-1, tc±1) empty
+            let dirs: [i32; 2] = [-1, 1];
+            match opp {
+                Color::Black => {
+                    let base_r2 = tr as i32 + 2;
+                    let base_r1 = tr as i32 + 1;
+                    if base_r2 < 8 && base_r1 < 8 {
+                        for dc in dirs {
+                            let c2 = tc as i32 + dc;
+                            if c2 < 0 || c2 >= 8 { continue; }
+                            let r2 = base_r2 as usize; let c2u = c2 as usize;
+                            let r1 = base_r1 as usize; let c1u = c2 as usize;
+                            if let Some(p) = board.get(r2, c2u) { if p.get_color()==opp && p.get_type()==PieceType::Pawn {
+                                if board.get(r1, c1u).is_none() {
+                                    // pawn can advance and then attack the knight square
+                                    bonus -= 120; // stronger penalty to discourage walk-into pawn shove
+                                }
+                            }}
+                        }
+                    }
+                }
+                Color::White => {
+                    let base_r2 = tr as i32 - 2;
+                    let base_r1 = tr as i32 - 1;
+                    if base_r2 >= 0 && base_r1 >= 0 {
+                        for dc in dirs {
+                            let c2 = tc as i32 + dc;
+                            if c2 < 0 || c2 >= 8 { continue; }
+                            let r2 = base_r2 as usize; let c2u = c2 as usize;
+                            let r1 = base_r1 as usize; let c1u = c2 as usize;
+                            if let Some(p) = board.get(r2, c2u) { if p.get_color()==opp && p.get_type()==PieceType::Pawn {
+                                if board.get(r1, c1u).is_none() {
+                                    bonus -= 120;
+                                }
+                            }}
+                        }
+                    }
+                }
+            }
+
+            // Also penalize knight moves whose destination is attacked in the post-move position
+            // (simulate the move and test attacks). This stacks with the SEE-like guard above.
+            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+            let mut tmp2 = board.clone();
+            tmp2.set(fr, fc, None);
+            tmp2.set(tr, tc, Some(moved));
+            if is_square_attacked_by_opponent(&mut tmp2, (tr, tc), side) {
+                bonus -= 100;
+            }
+        }
+    }
+
+    // Special root guard vs immediate queen capture on destination (applies to quiets and captures):
+    // If opponent has a queen that can capture the destination square right away after our move,
+    // apply a large penalty (root-only heuristic). This targets motifs like Nxd5? ...Qxd5!
+    {
+        use crate::piece::pieces::PieceType::*;
+        if let Some(moved) = board.get(fr, fc) {
+            let opp = opposite_color(side);
+            // Build post-move board once
+            let mut post = board.clone();
+            let captured_here = board.get(tr, tc);
+            post.set(fr, fc, None);
+            post.set(tr, tc, Some(moved));
+            let mut opp_queen_can_capture = false;
+            'scanq: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+                if p.get_color()==opp && p.get_type()==Queen {
+                    if is_valid_queen_move(&mut post, (r,c), (tr,tc), true) { opp_queen_can_capture = true; break 'scanq; }
+                }
+            }}}
+            if opp_queen_can_capture {
+                let moved_val = match moved.get_type() { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 };
+                let cap_val = captured_here.map(|cp| match cp.get_type(){ Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 }).unwrap_or(0);
+                // Penalize roughly the net loss if queen recaptures: moved_val - cap_val (but at least some floor)
+                let net = (moved_val - cap_val).max(100);
+                bonus -= (net / 1).max(260);
+            }
+        }
+    }
+
+    // Safety for queen moves: penalize moving the queen onto an attacked square,
+    // with an extra penalty if attacked by a pawn (common tactical blunder like Qxf3? g2xf3!).
+    if pt == PieceType::Queen {
+        use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+        let mut tmp = board.clone();
+        let attacked = is_square_attacked_by_opponent(&mut tmp, to, side);
+        if attacked {
+            // base penalty for moving queen onto any attacked square
+            bonus -= 120;
+            // extra if attacked by pawn: detect two pawn attack directions relative to opponent
+            let opp = opposite_color(side);
+            let (tr_u, tc_u) = to;
+            let pawn_attack = match opp {
+                Color::White => {
+                    // White pawns attack to (r+1, c-1) and (r+1, c+1) from their square.
+                    // So a square (tr_u, tc_u) is attacked by a White pawn if there is a White pawn at (tr_u-1, tc_u±1).
+                    if tr_u >= 1 {
+                        let r = tr_u - 1;
+                        let mut pa = false;
+                        if tc_u >= 1 {
+                            if let Some(p) = board.get(r, tc_u - 1) { pa |= p.get_color()==opp && p.get_type()==PieceType::Pawn; }
+                        }
+                        if tc_u + 1 < 8 {
+                            if let Some(p) = board.get(r, tc_u + 1) { pa |= p.get_color()==opp && p.get_type()==PieceType::Pawn; }
+                        }
+                        pa
+                    } else { false }
+                }
+                Color::Black => {
+                    // Black pawns attack to (r-1, c-1) and (r-1, c+1) from their square.
+                    // So (tr_u, tc_u) is attacked by a Black pawn if there is a Black pawn at (tr_u+1, tc_u±1).
+                    if tr_u + 1 < 8 {
+                        let r = tr_u + 1;
+                        let mut pa = false;
+                        if tc_u >= 1 {
+                            if let Some(p) = board.get(r, tc_u - 1) { pa |= p.get_color()==opp && p.get_type()==PieceType::Pawn; }
+                        }
+                        if tc_u + 1 < 8 {
+                            if let Some(p) = board.get(r, tc_u + 1) { pa |= p.get_color()==opp && p.get_type()==PieceType::Pawn; }
+                        }
+                        pa
+                    } else { false }
+                }
+            };
+            if pawn_attack { bonus -= 180; }
+        }
+    }
+
     // Knights to c3/f3 (White) or c6/f6 (Black)
     if pt == PieceType::Knight {
         match side {
@@ -624,7 +805,24 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
     let central_ranks_white = tr >= 2 && tr <= 4; // ranks 3..5 from White pov
     let central_ranks_black = tr >= 3 && tr <= 5; // ranks 4..6 from White rows ~ Black push
     if central_files && ((side == Color::White && central_ranks_white) || (side == Color::Black && central_ranks_black)) {
-        bonus += 5;
+        // Suppress the central nudge if destination will be attacked or is queen-capturable immediately
+        use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+        let mut allow_nudge = true;
+        if let Some(moved_here) = board.get(fr, fc) {
+            let mut tmpp = board.clone();
+            tmpp.set(fr, fc, None);
+            tmpp.set(tr, tc, Some(moved_here));
+            if is_square_attacked_by_opponent(&mut tmpp, (tr, tc), side) { allow_nudge = false; }
+            if allow_nudge {
+                let opp = opposite_color(side);
+                'qscan2: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+                    if p.get_color()==opp && p.get_type()==PieceType::Queen {
+                        if is_valid_queen_move(&mut tmpp, (r,c), (tr,tc), true) { allow_nudge = false; break 'qscan2; }
+                    }
+                }}}
+            }
+        }
+        if allow_nudge { bonus += 5; }
     }
 
     // Apply sign for side to move (we always add for the maximizing side at root)
@@ -748,9 +946,25 @@ fn alphabeta(
     // - Side to move is not in check
     // - Halfmove clock not already at draw threshold
     // - Avoid in likely zugzwang scenarios (very low material) — here we approximate by requiring some non-pawn material
-    if depth >= 3 {
+    // Null-move pruning (safer settings): require a bit more depth and cap reduction
+    if depth >= 4 {
         let in_check = is_side_in_check(board, to_move);
         if !in_check && halfmove_clock < 100 {
+            // Additional safety: if our queen is currently attacked, do not try null move.
+            // This avoids pruning away urgent queen-saving defenses.
+            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+            let mut queen_under_attack = false;
+            'findq: for r in 0..8 {
+                for c in 0..8 {
+                    if let Some(p) = board.get(r, c) {
+                        if p.get_color() == to_move && p.get_type() == PieceType::Queen {
+                            if is_square_attacked_by_opponent(board, (r, c), to_move) { queen_under_attack = true; }
+                            break 'findq;
+                        }
+                    }
+                }
+            }
+            if !queen_under_attack {
             // Quick material heuristic: require presence of any piece other than kings/pawns
             let mut has_non_pawn_minor = false;
             'scan: for r in 0..8 {
@@ -768,8 +982,8 @@ fn alphabeta(
                 }
             }
             if has_non_pawn_minor {
-                // Reduction R: base on depth (deeper search -> larger R)
-                let r = if depth >= 6 { 3 } else { 2 } as usize;
+                // Reduction R: capped to 2 for safety
+                let r = if depth >= 6 { 2 } else { 2 } as usize;
                 let undo: Option<()> = None;
                 // Make a null move: switch side to move without changing board, but we still push repetition key
                 // We reuse halfmove_clock (null move does not reset it)
@@ -781,6 +995,7 @@ fn alphabeta(
                 if score >= beta {
                     return score; // null-move cutoff
                 }
+            }
             }
         }
     }
@@ -883,6 +1098,21 @@ fn alphabeta(
         let mut value = MIN_EVAL_VALUE;
         let mut is_first_move = true; // PVS: first move searched with full window
         let mut move_index: i32 = 0;  // LMR: track move order
+        // Precompute whether our queen is currently under attack in this node (before making a move)
+        let mut queen_in_danger = false;
+        {
+            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+            'findq: for r in 0..8 {
+                for c in 0..8 {
+                    if let Some(p) = board.get(r, c) {
+                        if p.get_color() == to_move && p.get_type() == PieceType::Queen {
+                            if is_square_attacked_by_opponent(board, (r, c), to_move) { queen_in_danger = true; }
+                            break 'findq;
+                        }
+                    }
+                }
+            }
+        }
         for (from, to) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
@@ -920,9 +1150,28 @@ fn alphabeta(
                 score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
                 is_first_move = false;
             } else {
-                // Late Move Reduction
+                // Late Move Reduction (safer): start later and cap reductions
                 let mut reduced_depth = child_depth;
-                if quiet && child_depth >= 3 && move_index >= 3 {
+                // Do not reduce if the move gives check or if our queen is currently in danger (urgent moves)
+                // Also, do not reduce if this move is a queen move landing on an attacked square — needs full depth.
+                let gives_check = is_side_in_check(board, Color::Black);
+                // Strictly avoid reducing checking moves and immediate recaptures at shallow depth
+                let mut is_immediate_recapture = false;
+                if let Some(_cap) = target_piece { // current move captured something
+                    // After our capture, if opponent can immediately recapture on the same square, treat as immediate recapture scenario
+                    // We approximate by: was there a capture, and is this the same 'to' square as a previous capture this ply? We don't track last capture here,
+                    // so use a conservative proxy: any capture counts as tactically sharp; we won't reduce captures anyway because quiet=false.
+                    is_immediate_recapture = true;
+                }
+                let mut queen_into_danger = false;
+                if let Some(p) = moved_piece { if p.get_type()==PieceType::Queen {
+                    use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+                    let attacked = is_square_attacked_by_opponent(board, to, Color::White);
+                    queen_into_danger = attacked;
+                }}
+                // Never reduce checking moves at shallow depths
+                let allow_reduce = !(gives_check && child_depth <= 5);
+                if quiet && child_depth >= 3 && move_index >= 5 && allow_reduce && !queen_in_danger && !queen_into_danger {
                     // Basic reduction formula: grows with move index and depth
                     // Use history to avoid over-reducing historically good moves
                     let hist = HEUR.with(|h| {
@@ -930,7 +1179,11 @@ fn alphabeta(
                         m.history_score(to_move, from, to)
                     });
                     let hist_good = hist > 10_000; // tuned threshold
-                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1) - if hist_good { 1 } else { 0 };
+                    let mut r = 1 + ((move_index as usize) / 6).min(1); // cap growth
+                    if (child_depth as usize) >= 6 { r += 0; }
+                    if hist_good { r = r.saturating_sub(1); }
+                    // Final cap to 2 plies
+                    r = r.min(2);
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // Null-window search for subsequent moves (PVS window)
@@ -966,6 +1219,21 @@ fn alphabeta(
         let mut value = MAX_EVAL_VALUE;
         let mut is_first_move = true; // PVS for minimizing side too
         let mut move_index: i32 = 0;  // LMR index
+        // Precompute whether our queen is currently under attack in this node
+        let mut queen_in_danger = false;
+        {
+            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+            'findq: for r in 0..8 {
+                for c in 0..8 {
+                    if let Some(p) = board.get(r, c) {
+                        if p.get_color() == to_move && p.get_type() == PieceType::Queen {
+                            if is_square_attacked_by_opponent(board, (r, c), to_move) { queen_in_danger = true; }
+                            break 'findq;
+                        }
+                    }
+                }
+            }
+        }
         for (from, to) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
@@ -998,15 +1266,30 @@ fn alphabeta(
                 score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
                 is_first_move = false;
             } else {
-                // Late Move Reduction
+                // Late Move Reduction (safer): start later and cap reductions
                 let mut reduced_depth = child_depth;
-                if quiet && child_depth >= 3 && move_index >= 3 {
+                let gives_check = is_side_in_check(board, Color::White);
+                // Strictly avoid reducing checking moves and immediate recaptures at shallow depth
+                let mut is_immediate_recapture = false;
+                if let Some(_cap) = target_piece { is_immediate_recapture = true; }
+                let mut queen_into_danger = false;
+                if let Some(p) = moved_piece { if p.get_type()==PieceType::Queen {
+                    use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+                    let attacked = is_square_attacked_by_opponent(board, to, Color::Black);
+                    queen_into_danger = attacked;
+                }}
+                // Never reduce checking moves at shallow depths
+                let allow_reduce = !(gives_check && child_depth <= 5);
+                if quiet && child_depth >= 3 && move_index >= 5 && allow_reduce && !queen_in_danger && !queen_into_danger {
                     let hist = HEUR.with(|h| {
                         let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
                         m.history_score(to_move, from, to)
                     });
                     let hist_good = hist < -10_000; // minimizing side: negative is good for minimizing? keep symmetric for simplicity
-                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1) - if hist_good { 1 } else { 0 };
+                    let mut r = 1 + ((move_index as usize) / 6).min(1);
+                    if (child_depth as usize) >= 6 { r += 0; }
+                    if hist_good { r = r.saturating_sub(1); }
+                    r = r.min(2);
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // For the minimizing side, a null-window around beta-1 .. beta works equivalently
