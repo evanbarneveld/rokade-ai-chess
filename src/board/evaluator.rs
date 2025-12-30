@@ -11,15 +11,16 @@ const KING: i32 = 0; // King material is not counted; PST handles its safety/act
 
 // Piece-Square Tables (from White's perspective, row 0 = White back rank)
 // Values in centipawns; lightweight, generic PSTs
+// Flipped vertically so that advancing pawns are rewarded toward promotion
 const PST_PAWN: [[i32; 8]; 8] = [
-    [  0,   0,   0,   0,   0,   0,   0,   0],
-    [ 50,  50,  50,  50,  50,  50,  50,  50],
-    [ 10,  10,  20,  30,  30,  20,  10,  10],
-    [  5,   5,  10,  25,  25,  10,   5,   5],
-    [  0,   0,   0,  20,  20,   0,   0,   0],
+    [  0,   0,   0,   0,   0,   0,   0,   0],  // row 0
+    [  5,  10,  10, -20, -20,  10,  10,   5],  // row 1 (start rank)
     [  5,  -5, -10,   0,   0, -10,  -5,   5],
-    [  5,  10,  10, -20, -20,  10,  10,   5],
-    [  0,   0,   0,   0,   0,   0,   0,   0],
+    [  0,   0,   0,  20,  20,   0,   0,   0],
+    [  5,   5,  10,  25,  25,  10,   5,   5],
+    [ 10,  10,  20,  30,  30,  20,  10,  10],
+    [ 50,  50,  50,  50,  50,  50,  50,  50],  // advanced pawns credited
+    [  0,  0,  0,  0,  0,  0,  0,  0],         // row 7 (promotion rank)
 ];
 
 const PST_KNIGHT: [[i32; 8]; 8] = [
@@ -165,6 +166,14 @@ fn game_phase(board: &Board) -> i32 {
 pub fn evaluate_position(board: &Board) -> i32 {
     let mut score: i32 = 0;
     let phase = game_phase(board);
+    let eg = 24 - phase; // endgame weight [0..24]
+
+    // Precompute whether each side still has any pawns (used for rook-on-7th bonus)
+    let mut white_pawns = 0i32;
+    let mut black_pawns = 0i32;
+    for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) { if matches!(p.get_type(), PieceType::Pawn) {
+        if p.get_color()==Color::White { white_pawns += 1; } else { black_pawns += 1; }
+    }}}}
 
     for row in 0..8 {
         for col in 0..8 {
@@ -200,8 +209,137 @@ pub fn evaluate_position(board: &Board) -> i32 {
                     if is_isolated_pawn(board, col, color) { val -= 14; }
                     if is_passed_pawn(board, row, col, color) {
                         let advance = match color { Color::White => row as i32, Color::Black => (7 - row) as i32 };
-                        let eg = 24 - phase;
+                        // Base passer bonus grows with advancement and endgame weight
                         val += ((8 + 3 * advance) * (8 + eg)) / 24; // ~+10..+40cp
+
+                        // Additional endgame-scaled passer heuristics
+                        if eg > 0 {
+                            // Clear path to promotion bonus
+                            if has_clear_promotion_path(board, row, col, color) {
+                                val += (10 * eg) / 24; // up to +10cp
+                            }
+
+                            // King proximity and blocking king
+                            if let (Some((fk_r,fk_c)), Some((ek_r,ek_c))) = (find_king(board, color), find_king(board, opponent(color))) {
+                                let pawn_sq = (row as i32, col as i32);
+                                let fk_d = chebyshev_dist((fk_r as i32, fk_c as i32), pawn_sq);
+                                let ek_d = chebyshev_dist((ek_r as i32, ek_c as i32), pawn_sq);
+
+                                // Friendly king close to passer
+                                let prox = (12 - 2 * fk_d).max(0); // up to ~+12 when adjacent
+                                val += (prox * eg) / 48;
+
+                                // Enemy king in front of the pawn and closer than friendly king
+                                if is_king_in_front_of_pawn((ek_r,ek_c), row, col, color) && ek_d + 0 <= fk_d { // strictly closer or equal
+                                    let block_pen = (14 - 2 * (ek_d as i32)).max(0);
+                                    val -= (block_pen * eg) / 48; // up to -14 scaled
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Rook-specific endgame features
+                if pt == PieceType::Rook && eg > 0 {
+                    // Rook on opponent's 7th rank if opponent still has pawns
+                    let on_7th = match color {
+                        Color::White => row == 6 && black_pawns > 0,
+                        Color::Black => row == 1 && white_pawns > 0,
+                    };
+                    if on_7th { val += (30 * eg) / 24; } // up to +30cp
+
+                    // Rook behind own passed pawn (same file, in the direction of promotion, clear line)
+                    if let Some((pp_r, _)) = find_passed_pawn_on_file(board, col, color) {
+                        let behind = match color { Color::White => row < pp_r, Color::Black => row > pp_r };
+                        if behind && file_clear_between(board, row, pp_r, col) {
+                            // Scale by pawn advancement toward promotion
+                            let adv = match color { Color::White => pp_r as i32, Color::Black => (7 - pp_r) as i32 };
+                            let bonus = 12 + 2 * adv; // ~+12..+26
+                            val += (bonus * eg) / 24;
+                        }
+                    }
+                }
+
+                // Early-opening discouragement: rook tucked behind two own pawns on back rank (Rb1/Rg1 patterns)
+                if pt == PieceType::Rook && phase > 0 {
+                    // Only consider exact back rank squares b1/g1 for White and b8/g8 for Black
+                    let is_back_rank = match color { Color::White => row == 0, Color::Black => row == 7 };
+                    if is_back_rank && (col == 1 || col == 6) {
+                        // Check if both adjacent home pawns in front remain on their initial squares
+                        let both_pawns_blocking = match (color, col) {
+                            (Color::White, 1) => {
+                                matches!(board.get(1,0).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
+                                matches!(board.get(1,1).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_))
+                            }
+                            (Color::White, 6) => {
+                                matches!(board.get(1,6).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
+                                matches!(board.get(1,7).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_))
+                            }
+                            (Color::Black, 1) => {
+                                matches!(board.get(6,0).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
+                                matches!(board.get(6,1).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_))
+                            }
+                            (Color::Black, 6) => {
+                                matches!(board.get(6,6).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
+                                matches!(board.get(6,7).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_))
+                            }
+                            _ => false,
+                        };
+                        if both_pawns_blocking {
+                            // Up to -18cp in full opening, taper to 0 by endgame
+                            val -= (18 * phase) / 24;
+                        }
+                    }
+                }
+
+                // Extra endgame pawn aggressiveness and structure nuances
+                if pt == PieceType::Pawn && eg > 0 {
+                    // Stronger advancement slope for passed pawns in deep endgames
+                    if is_passed_pawn(board, row, col, color) {
+                        // Add a small extra advancement boost when close to promotion
+                        let adv = match color { Color::White => row as i32, Color::Black => (7 - row) as i32 };
+                        let close_bonus = (adv.saturating_sub(4) * 6).max(0); // up to ~+18 when on 7th
+                        val += (close_bonus * eg) / 24;
+
+                        // Penalize blocked passers (piece directly ahead)
+                        let next_r_opt = match color { Color::White => if row < 7 { Some(row + 1) } else { None },
+                                                       Color::Black => if row > 0 { Some(row - 1) } else { None } };
+                        if let Some(nr) = next_r_opt { if board.get(nr, col).is_some() { val -= (14 * eg) / 24; } }
+
+                        // Free-push incentive: next square empty and not obviously unsafe
+                        if let Some(nr) = next_r_opt {
+                            if board.get(nr, col).is_none() {
+                                // Light safety: discourage if enemy king is immediately in front, otherwise small bonus
+                                let mut safe_bonus = 0;
+                                // If enemy king is in front on adjacent file within 1 step of target, avoid bonus
+                                if let Some((ek_r, ek_c)) = find_king(board, opponent(color)) {
+                                    let dr = (ek_r as i32 - nr as i32).abs();
+                                    let dc = (ek_c as i32 - col as i32).abs();
+                                    if !(dr <= 1 && dc <= 1 && ((color==Color::White && ek_r >= nr) || (color==Color::Black && ek_r <= nr))) {
+                                        safe_bonus = 10; // nominal +10, tapered by eg
+                                    }
+                                } else { safe_bonus = 10; }
+                                val += (safe_bonus * eg) / 24;
+                            }
+                        }
+
+                        // Protected passer/connected passer nudges
+                        let mut support = 0;
+                        // Protected by own pawn diagonally behind
+                        let behind_r_opt = match color { Color::White => row.checked_sub(1), Color::Black => if row<7 { Some(row+1) } else { None } };
+                        if let Some(br) = behind_r_opt {
+                            for dc in [-1i32, 1] {
+                                let nc = (col as i32 + dc) as usize; if dc==-1 && col==0 { continue; }
+                                if dc==1 && col==7 { continue; }
+                                if let Some(p)=board.get(br, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { support += 1; } }
+                            }
+                        }
+                        // Connected adjacent pawn on same rank
+                        for dc in [-1i32, 1] { let nc = (col as i32 + dc) as usize; if dc==-1 && col==0 { continue; }
+                            if dc==1 && col==7 { continue; }
+                            if let Some(p)=board.get(row, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { support += 1; } }
+                        }
+                        if support > 0 { val += (8 * support as i32 * eg) / 24; }
                     }
                 }
                 match color {
@@ -312,7 +450,12 @@ pub fn evaluate_position(board: &Board) -> i32 {
 
 #[inline]
 fn is_doubled_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool {
-    for r in 0..8 { if r==row { continue; } if let Some(p)=board.get(r,col) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { return true; } } }
+    for r in 0..8 {
+        if r==row { continue; }
+        if let Some(p)=board.get(r,col) {
+            if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { return true; }
+        }
+    }
     false
 }
 
@@ -394,4 +537,67 @@ fn development_penalty_on_backrank(board: &Board, color: Color) -> i32 {
     let minors: &[(usize,usize)] = if matches!(color, Color::White) { &[(0,1),(0,6),(0,2),(0,5)] } else { &[(7,1),(7,6),(7,2),(7,5)] };
     let mut pen = 0; for &(r,c) in minors.iter() { if let Some(p)=board.get(r,c) { match p.get_type() { PieceType::Knight | PieceType::Bishop => pen += 6, _ => {} } } }
     -pen
+}
+
+// ---- New endgame helpers ----
+
+#[inline]
+fn opponent(color: Color) -> Color { if matches!(color, Color::White) { Color::Black } else { Color::White } }
+
+#[inline]
+fn chebyshev_dist(a: (i32,i32), b: (i32,i32)) -> i32 { (a.0 - b.0).abs().max((a.1 - b.1).abs()) }
+
+// Check if all squares from the pawn to the promotion rank are empty (excluding current square)
+fn has_clear_promotion_path(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    if !matches!(board.get(row,col).map(|p| p.get_type()), Some(PieceType::Pawn)) { return false; }
+    let (start, end, step): (i32, i32, i32) = match color {
+        Color::White => (row as i32 + 1, 7, 1),
+        Color::Black => (row as i32 - 1, 0, -1),
+    };
+    let mut r = start; while (step>0 && r<=end) || (step<0 && r>=end) {
+        if board.get(r as usize, col).is_some() { return false; }
+        r += step;
+    }
+    true
+}
+
+// True if enemy king stands on a square in front of the pawn along its file or adjacent files ahead
+fn is_king_in_front_of_pawn(king: (usize,usize), pawn_r: usize, pawn_c: usize, pawn_color: Color) -> bool {
+    let (kr,kc) = king; let pr = pawn_r as i32; let pc = pawn_c as i32;
+    match pawn_color {
+        Color::White => {
+            let kr_i = kr as i32; let kc_i = kc as i32;
+            kr_i > pr && (kc_i - pc).abs() <= 1
+        }
+        Color::Black => {
+            let kr_i = kr as i32; let kc_i = kc as i32;
+            kr_i < pr && (kc_i - pc).abs() <= 1
+        }
+    }
+}
+
+// Find a passed pawn on a given file for the color, preferring the most advanced toward promotion
+fn find_passed_pawn_on_file(board: &Board, file: usize, color: Color) -> Option<(usize,usize)> {
+    let mut best: Option<(usize,usize)> = None;
+    for r in 0..8 {
+        if let Some(p)=board.get(r, file) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) {
+            if is_passed_pawn(board, r, file, color) {
+                best = Some(match (best, color) {
+                    (None, _) => (r,file),
+                    (Some((br,_)), Color::White) => if r > br { (r,file) } else { (br,file) },
+                    (Some((br,_)), Color::Black) => if r < br { (r,file) } else { (br,file) },
+                });
+            }
+        } }
+    }
+    best
+}
+
+// Check that squares strictly between r1 and r2 on the same file are empty
+fn file_clear_between(board: &Board, r1: usize, r2: usize, file: usize) -> bool {
+    if r1==r2 { return true; }
+    let (lo, hi) = if r1 < r2 { (r1+1, r2-1) } else { (r2+1, r1-1) };
+    if hi < lo { return true; }
+    for r in lo..=hi { if board.get(r, file).is_some() { return false; } }
+    true
 }

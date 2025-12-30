@@ -152,14 +152,16 @@ pub(crate) fn find_move_with_info(
     // Map playing_strength [1..1000] to an effective depth to intentionally weaken play at low strengths.
     // Rough mapping: at ~300 strength, cap to ~3 ply; at 1000 keep requested depth.
     let ps = if playing_strength == 0 { 1 } else { playing_strength.min(1000) } as i32;
-    let depth_min = 2i32; // never search less than 2 ply to avoid outright blunders like hanging queen immediately
+
+    /*let depth_min = 2i32; // never search less than 2 ply to avoid outright blunders like hanging queen immediately
     let depth_max = search_depth as i32;
     let effective_depth = if depth_max <= depth_min { depth_max } else {
         // linear interpolation between depth_min (weak) and depth_max (strong)
         let t = ps as f32 / 1000.0;
         let d = (depth_min as f32 + t * (depth_max as f32 - depth_min as f32)).round() as i32;
         d.clamp(depth_min, depth_max)
-    } as usize;
+    } as usize;*/
+    let effective_depth = search_depth;
 
     // initialize root alpha/beta for potential root-level cutoffs
     let mut alpha = MIN_EVAL_VALUE + 1;
@@ -466,6 +468,45 @@ fn opposite_color(c: Color) -> Color {
     match c { Color::White => Color::Black, Color::Black => Color::White }
 }
 
+// --- Lightweight helpers for selective extensions ---
+// Compute a simple material-based game phase similar to evaluator (0..24)
+#[inline]
+fn game_phase_light(board: &Board) -> i32 {
+    const PHASE_KNIGHT: i32 = 1;
+    const PHASE_BISHOP: i32 = 1;
+    const PHASE_ROOK: i32 = 2;
+    const PHASE_QUEEN: i32 = 4;
+    let mut phase: i32 = 0;
+    for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+        phase += match p.get_type() {
+            PieceType::Knight => PHASE_KNIGHT,
+            PieceType::Bishop => PHASE_BISHOP,
+            PieceType::Rook => PHASE_ROOK,
+            PieceType::Queen => PHASE_QUEEN,
+            _ => 0,
+        };
+    }}}
+    if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
+}
+
+// Determine if a pawn at (row,col) for color is a passed pawn (no enemy pawns ahead on same/adjacent files)
+#[inline]
+fn is_passed_pawn_simple(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    let dir: i32 = if color == Color::White { 1 } else { -1 };
+    let mut r = row as i32 + dir;
+    while r >= 0 && r < 8 {
+        for dc in [-1i32, 0, 1] {
+            let nc = col as i32 + dc;
+            if nc < 0 || nc >= 8 { continue; }
+            if let Some(p) = board.get(r as usize, nc as usize) {
+                if p.get_color() != color && p.get_type() == PieceType::Pawn { return false; }
+            }
+        }
+        r += dir;
+    }
+    true
+}
+
 // Alpha-beta pruning search. Returns evaluation in centipawns (positive is better for White).
 fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32, ply: i32, tt: &mut TranspositionTable) -> i32 {
     // Count every node we enter
@@ -539,8 +580,25 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
     let value = if to_move == Color::White {
         let mut value = MIN_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
+            // Detect moved piece before making the move
+            let moved_piece = board.get(from.0, from.1);
             let u = make_move_simple(board, from, to);
-            let score = alphabeta(board, Color::Black, depth - 1, alpha, beta, ply + 1, tt);
+            // Passed-pawn push extension (B5): If a pawn move results in a passed pawn
+            // reaching the 6th/7th rank (relative to the side) in a near-endgame, extend by +1 ply.
+            let mut child_depth = depth.saturating_sub(1);
+            if let Some(p) = moved_piece {
+                if p.get_type() == PieceType::Pawn {
+                    let color = p.get_color();
+                    let r = to.0; let c = to.1;
+                    if game_phase_light(board) <= 8 && is_passed_pawn_simple(board, r, c, color) {
+                        let adv: i32 = match color { Color::White => r as i32, Color::Black => (7 - r) as i32 };
+                        if adv >= 5 { // 6th or 7th rank
+                            child_depth = child_depth.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            let score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt);
             unmake_move_simple(board, u);
             if score > value { value = score; }
             if value > alpha { alpha = value; best_from_to = Some((from, to)); }
@@ -550,8 +608,24 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
     } else {
         let mut value = MAX_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
+            // Detect moved piece before making the move
+            let moved_piece = board.get(from.0, from.1);
             let u = make_move_simple(board, from, to);
-            let score = alphabeta(board, Color::White, depth - 1, alpha, beta, ply + 1, tt);
+            // Passed-pawn push extension (B5)
+            let mut child_depth = depth.saturating_sub(1);
+            if let Some(p) = moved_piece {
+                if p.get_type() == PieceType::Pawn {
+                    let color = p.get_color();
+                    let r = to.0; let c = to.1;
+                    if game_phase_light(board) <= 8 && is_passed_pawn_simple(board, r, c, color) {
+                        let adv: i32 = match color { Color::White => r as i32, Color::Black => (7 - r) as i32 };
+                        if adv >= 5 {
+                            child_depth = child_depth.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            let score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt);
             unmake_move_simple(board, u);
             if score < value { value = score; }
             if value < beta { beta = value; best_from_to = Some((from, to)); }
@@ -587,6 +661,49 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 
     let mut moves = find_all_valid_moves(&*board, to_move);
     if !in_check {
         moves.retain(|&(_f, to)| board.get(to.0, to.1).is_some());
+    }
+
+    // Selective endgame pawn-push quiescence: allow a few safe passer pushes
+    // to stabilize eval around promotion races. Tight gating to avoid explosion.
+    if !in_check {
+        let phase = game_phase_light(&*board);
+        if phase <= 8 {
+            // collect up to N safe quiet pushes
+            const MAX_QUIET_PUSHES: usize = 2;
+            let mut added: usize = 0;
+            'outer: for r in 0..8 {
+                for c in 0..8 {
+                    if let Some(p) = board.get(r, c) {
+                        if p.get_color() != to_move || p.get_type() != PieceType::Pawn { continue; }
+                        // only consider passed pawns on 5th–7th ranks (relative to side)
+                        let adv: i32 = match to_move { Color::White => r as i32, Color::Black => (7 - r) as i32 };
+                        if adv < 4 { continue; }
+                        if !is_passed_pawn_simple(&*board, r, c, to_move) { continue; }
+                        // one-step push target
+                        let (nr_opt, to_sq) = match to_move {
+                            Color::White => (if r < 7 { Some(r + 1) } else { None }, (r.saturating_add(1), c)),
+                            Color::Black => (if r > 0 { Some(r - 1) } else { None }, (r.saturating_sub(1), c)),
+                        };
+                        let nr = if let Some(nr) = nr_opt { nr } else { continue; };
+                        if board.get(nr, c).is_some() { continue; }
+                        // simulate and verify safety and legality
+                        let from = (r, c);
+                        let to = to_sq;
+                        let u = make_move_simple(board, from, to);
+                        // move must not leave own king in check
+                        let illegal = is_side_in_check(board, to_move);
+                        // target square should not be immediately attacked by opponent
+                        use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+                        let attacked = is_square_attacked_by_opponent(board, to, to_move);
+                        unmake_move_simple(board, u);
+                        if illegal || attacked { continue; }
+                        moves.push((from, to));
+                        added += 1;
+                        if added >= MAX_QUIET_PUSHES { break 'outer; }
+                    }
+                }
+            }
+        }
     }
 
     // Delta pruning: if not in check and clearly below alpha, prune.

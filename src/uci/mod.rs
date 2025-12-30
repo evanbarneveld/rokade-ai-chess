@@ -84,7 +84,7 @@ pub fn run_uci() -> io::Result<()> {
             reset_search_telemetry();
             // Install a temporary info callback so we can emit progress while searching.
             // The callback prints UCI-compliant info lines with current best root move scores.
-            let info_cb = Arc::new(move |mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>| {
+            let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>| {
                 let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
                 for (f, t) in pv_moves {
                     pv_parts.push(as_move_str(f, t));
@@ -203,7 +203,7 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
 
 pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
-    let mut depth = parse_depth(line).unwrap_or(6);
+    let mut depth = parse_depth(line).unwrap_or(4);
     if depth > 12 { depth = 12; }
 
     let gs_copy = { *engine.get_game_state() };
