@@ -19,8 +19,8 @@ pub fn run_cli() {
     let mut mode = GameMode::PlayerVsPlayer;
     let mut white_bot_strength: usize = 1000;
     let mut black_bot_strength: usize = 1000;
-    let mut white_bot_search_depth: usize = 7;
-    let mut black_bot_search_depth: usize = 7;
+    let mut white_bot_search_depth: usize = 6;
+    let mut black_bot_search_depth: usize = 6;
 
     println!("Welcome to chess. Type 'help' for help, enter move, or 'quit' to quit.\n");
 

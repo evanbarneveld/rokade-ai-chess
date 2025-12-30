@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_move_with_info, set_info_callback};
+use crate::search::search::{find_move_with_info, set_info_callback, get_nodes, reset_search_telemetry};
 
 // Minimal UCI interface implementation.
 // Supported commands:
@@ -79,14 +79,19 @@ pub fn run_uci() -> io::Result<()> {
                 }
             }
 
-            // Measure elapsed time for info line
+            // Measure elapsed time and reset telemetry for info lines
             let start = std::time::Instant::now();
+            reset_search_telemetry();
             // Install a temporary info callback so we can emit progress while searching.
             // The callback prints UCI-compliant info lines with current best root move scores.
             let info_cb = Arc::new(move |mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize| {
                 let pv = as_move_str(mv.0, mv.1);
+                // Compute current nodes and nps
+                let nodes = get_nodes();
+                let ms = start.elapsed().as_millis().max(1);
+                let nps = (nodes as u128 * 1000u128) / ms;
                 // Print directly to stdout; ignore logging for async updates
-                let _ = writeln!(io::stdout(), "info depth {} score cp {} pv {}", depth_used, score_cp, pv);
+                let _ = writeln!(io::stdout(), "info depth {} score cp {} nodes {} nps {} pv {}", depth_used, score_cp, nodes, nps, pv);
             });
             set_info_callback(Some(info_cb));
 
@@ -94,10 +99,12 @@ pub fn run_uci() -> io::Result<()> {
             // Clear the callback after search completes
             set_info_callback(None);
             let elapsed_ms = start.elapsed().as_millis();
+            let nodes = get_nodes();
+            let nps = if elapsed_ms == 0 { 0 } else { ((nodes as u128 * 1000u128) / elapsed_ms) as u128 };
 
             // If we have extra info from the search, emit a UCI info line
             if let Some((score_cp, depth_used)) = info_opt {
-                let info = format!("info depth {} score cp {} time {} pv {}", depth_used, (score_cp as f32)/3.0f32, elapsed_ms, best_move_str);
+                let info = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp as f32)/3.0f32, elapsed_ms, nodes, nps, best_move_str);
                 writeln!(stdout, "{}", info)?; log_io(&mut log, "OUT", &info);
             }
 
@@ -192,8 +199,8 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
 
 pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
-    let mut depth = parse_depth(line).unwrap_or(7);
-    if depth > 7 { depth = 7; }
+    let mut depth = parse_depth(line).unwrap_or(6);
+    if depth > 12 { depth = 12; }
 
     let gs_copy = { *engine.get_game_state() };
     let history_clone = { engine.get_history().clone() };

@@ -17,6 +17,7 @@ use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn init_rayon_pool_if_needed() {
     static INIT: OnceLock<()> = OnceLock::new();
@@ -55,6 +56,29 @@ fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used
     if let Some(cb) = info_cb_cell().lock().unwrap().as_ref().cloned() {
         (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used)
     }
+}
+
+// --- Simple global telemetry (nodes visited) for UCI info reporting ---
+static NODE_COUNT: OnceLock<AtomicU64> = OnceLock::new();
+
+#[inline]
+fn node_count_cell() -> &'static AtomicU64 {
+    NODE_COUNT.get_or_init(|| AtomicU64::new(0))
+}
+
+#[inline]
+pub(crate) fn reset_search_telemetry() {
+    node_count_cell().store(0, Ordering::Relaxed);
+}
+
+#[inline]
+pub(crate) fn get_nodes() -> u64 {
+    node_count_cell().load(Ordering::Relaxed)
+}
+
+#[inline]
+fn bump_node() {
+    let _ = node_count_cell().fetch_add(1, Ordering::Relaxed);
 }
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
@@ -142,7 +166,7 @@ pub(crate) fn find_move_with_info(
     let first_score_raw = if effective_depth <= 1 {
         evaluate_position(&tmp_first)
     } else {
-        alphabeta(&tmp_first, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt)
+        alphabeta(&mut tmp_first, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt)
     };
     // restore board
     unmake_move_simple(&mut tmp_first, undo_first);
@@ -212,7 +236,7 @@ pub(crate) fn find_move_with_info(
             let search_score = if effective_depth <= 1 {
                 evaluate_position(&simulation_board)
             } else {
-                alphabeta(&simulation_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut local_tt)
+                alphabeta(&mut simulation_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut local_tt)
             };
             // unmake for cleanliness (not strictly required since board goes out of scope)
             unmake_move_simple(&mut simulation_board, u);
@@ -405,23 +429,23 @@ fn opposite_color(c: Color) -> Color {
 }
 
 // Alpha-beta pruning search. Returns evaluation in centipawns (positive is better for White).
-fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32, ply: i32, tt: &mut TranspositionTable) -> i32 {
+fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32, ply: i32, tt: &mut TranspositionTable) -> i32 {
+    // Count every node we enter
+    bump_node();
 
     // print board
     //println!("alpha-beta\n{}", board.get_board_display_string(None));
 
     if depth == 0 {
-        let score = evaluate_position(board);
+        /*let score = evaluate_position(board);
         //println!("score: {}", score);
-        return score;
-        /*
-                // At leaf: switch to quiescence to avoid horizon effects
-                return qsearch(board, to_move, alpha, beta);
-         */
+        return score;*/
+        // At leaf: switch to quiescence to avoid horizon effects
+        return qsearch(board, to_move, alpha, beta);
     }
 
     // TT probe
-    let key = compute_zobrist(board, to_move);
+    let key = compute_zobrist(&*board, to_move);
     if let Some(entry) = tt.probe(key) {
         if entry.depth as usize >= depth {
             let tt_score = from_tt_score(entry.score, ply);
@@ -439,7 +463,7 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         }
     }
 
-    let mut moves = find_all_valid_moves(board, to_move);
+    let mut moves = find_all_valid_moves(&*board, to_move);
     // If TT has a best move, try it first
     if let Some(entry) = tt.probe(key) {
         let bm = decode_move(entry.best_from, entry.best_to);
@@ -452,7 +476,7 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
     if moves.len() > 1 {
         // Stable-partition: keep index 0 (possibly TT move) in place, sort the tail
         let (head, tail) = moves.split_at_mut(1);
-        let board_ref = board;
+        let board_ref = &*board;
         tail.sort_by_key(|&(from, to)| -move_score_mvv_lva(board_ref, from, to));
         // head is unused, only here to make split_at_mut compile
         let _ = head;
@@ -476,11 +500,10 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
     let value = if to_move == Color::White {
         let mut value = i32::MIN;
-        let mut tmp = board.clone();
         for (from, to) in moves.into_iter() {
-            let u = make_move_simple(&mut tmp, from, to);
-            let score = alphabeta(&tmp, Color::Black, depth - 1, alpha, beta, ply + 1, tt);
-            unmake_move_simple(&mut tmp, u);
+            let u = make_move_simple(board, from, to);
+            let score = alphabeta(board, Color::Black, depth - 1, alpha, beta, ply + 1, tt);
+            unmake_move_simple(board, u);
             if score > value { value = score; }
             if value > alpha { alpha = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
@@ -488,11 +511,10 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         value
     } else {
         let mut value = i32::MAX;
-        let mut tmp = board.clone();
         for (from, to) in moves.into_iter() {
-            let u = make_move_simple(&mut tmp, from, to);
-            let score = alphabeta(&tmp, Color::White, depth - 1, alpha, beta, ply + 1, tt);
-            unmake_move_simple(&mut tmp, u);
+            let u = make_move_simple(board, from, to);
+            let score = alphabeta(board, Color::White, depth - 1, alpha, beta, ply + 1, tt);
+            unmake_move_simple(board, u);
             if score < value { value = score; }
             if value < beta { beta = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
@@ -511,44 +533,65 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
 }
 
 // Quiescence search: consider only tactical continuations (captures) unless in check.
-fn qsearch(board: &Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 {
-    // Stand-pat (static) evaluation
-    let stand_pat = evaluate_position(board);
-    if to_move == Color::White {
+fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 {
+    // Stand-pat (static) evaluation. Suppress stand-pat only when in check.
+    let in_check = is_side_in_check(board, to_move);
+    let stand_pat = evaluate_position(&*board);
+    if !in_check {
+        // Uniform alpha/beta semantics regardless of side-to-move.
         if stand_pat >= beta { return stand_pat; }
         if stand_pat > alpha { alpha = stand_pat; }
-    } else {
-        if stand_pat <= -beta { return stand_pat; }
-        if stand_pat < -alpha { alpha = stand_pat; }
     }
 
-    // If in check, allow all legal moves to escape check in qsearch; otherwise only captures
-    let in_check = is_side_in_check(board, to_move);
-    let mut moves = find_all_valid_moves(board, to_move);
+    // Generate moves. If not in check, restrict to captures (quiescence).
+    // NOTE: For speed we currently generate all and filter; consider adding
+    // a dedicated capture generator to avoid the extra work.
+    let mut moves = find_all_valid_moves(&*board, to_move);
     if !in_check {
         moves.retain(|&(_f, to)| board.get(to.0, to.1).is_some());
+    }
+
+    // Delta pruning: if not in check and clearly below alpha, prune.
+    // Start with a conservative constant margin; tune empirically.
+    const DELTA_MARGIN: i32 = 150; // centipawns
+    if !in_check && stand_pat + DELTA_MARGIN <= alpha {
+        return stand_pat;
     }
 
     if moves.is_empty() {
         return stand_pat;
     }
 
-    // Order captures by MVV-LVA to improve cutoffs
+    // Order captures by MVV-LVA to improve cutoffs (only matters for captures branch)
     if !in_check {
-        let b = board;
-        moves.sort_by_key(|&(from, to)| -move_score_mvv_lva(b, from, to));
+        let b = &*board;
+        moves.sort_by_key(|&(from, to)| -move_score_mvv_lva(&b, from, to));
+    }
+
+    // Simple capture SEE-like filter: skip obviously losing captures when not in check.
+    // Uses basic piece values; this is a cheap approximation, not true SEE.
+    #[inline]
+    fn piece_simple_value(p: PieceType) -> i32 {
+        use crate::piece::pieces::PieceType::*;
+        match p { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 }
     }
 
     let mut a = alpha;
     let mut bnd = beta;
-
     if to_move == Color::White {
         let mut best = i32::MIN;
-        let mut tmp = board.clone();
         for (from, to) in moves.into_iter() {
-            let u = make_move_simple(&mut tmp, from, to);
-            let score = qsearch(&tmp, Color::Black, a, bnd);
-            unmake_move_simple(&mut tmp, u);
+            if !in_check {
+                if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
+                    let att_v = piece_simple_value(att.get_type());
+                    let vic_v = piece_simple_value(vic.get_type());
+                    // Skip "bad" captures where attacker is significantly more valuable than victim
+                    if vic_v + 50 < att_v { continue; }
+                }
+            }
+            let u = make_move_simple(board, from, to);
+            let score = qsearch(board, Color::Black, a, bnd);
+            unmake_move_simple(board, u);
             if score > best { best = score; }
             if best > a { a = best; }
             if a >= bnd { break; }
@@ -556,11 +599,17 @@ fn qsearch(board: &Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 {
         best
     } else {
         let mut best = i32::MAX;
-        let mut tmp = board.clone();
         for (from, to) in moves.into_iter() {
-            let u = make_move_simple(&mut tmp, from, to);
-            let score = qsearch(&tmp, Color::White, a, bnd);
-            unmake_move_simple(&mut tmp, u);
+            if !in_check {
+                if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
+                    let att_v = piece_simple_value(att.get_type());
+                    let vic_v = piece_simple_value(vic.get_type());
+                    if vic_v + 50 < att_v { continue; }
+                }
+            }
+            let u = make_move_simple(board, from, to);
+            let score = qsearch(board, Color::White, a, bnd);
+            unmake_move_simple(board, u);
             if score < best { best = score; }
             if best < bnd { bnd = best; }
             if a >= bnd { break; }
@@ -582,12 +631,10 @@ fn move_score_mvv_lva(board: &Board, from: (usize, usize), to: (usize, usize)) -
 }
 
 /// Helper: is the given side to move currently in check on this board state?
-fn is_side_in_check(board: &Board, side: Color) -> bool {
+fn is_side_in_check(board: &mut Board, side: Color) -> bool {
     use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-    // We need a mutable Board to call existing helpers in some places, so clone.
-    let mut tmp = board.clone();
-    let king_sq = tmp.get_king_location(side);
-    is_square_attacked_by_opponent(&mut tmp, king_sq, side)
+    let king_sq = board.get_king_location(side);
+    is_square_attacked_by_opponent(board, king_sq, side)
 }
 
 // Lightweight, reversible move helpers for search. These intentionally do not
