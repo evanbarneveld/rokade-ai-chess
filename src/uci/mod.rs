@@ -17,7 +17,7 @@ use crate::search::search::{find_move_with_info, set_info_callback, get_nodes, r
 // Notes:
 // - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
 
-const DEFAULT_SEARCH_DEPTH: usize = 7;
+const DEFAULT_SEARCH_DEPTH: usize = 30;
 
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
@@ -209,7 +209,7 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
 pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, _move_time: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
     let mut depth = parse_depth(line).unwrap_or(DEFAULT_SEARCH_DEPTH);
-    if depth > 12 { depth = 12; }
+    if depth > DEFAULT_SEARCH_DEPTH { depth = DEFAULT_SEARCH_DEPTH; }
 
     let gs_copy = { *engine.get_game_state() };
     let history_clone = { engine.get_history().clone() };

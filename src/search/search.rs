@@ -15,6 +15,7 @@ use crate::state::fen::writer::game_state_to_fen_string;
 use crate::search::zobrist::compute_zobrist;
 use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
 use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -198,16 +199,7 @@ fn bump_node() {
 }
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
-///
-pub (crate) fn find_move(game_state: GameState, history: &History, search_depth: usize, playing_strength:usize) -> Option<((usize, usize), (usize, usize))> {
-    // Keep existing API by delegating to the info-enabled variant
-    match find_move_with_info(game_state, history, search_depth, playing_strength) {
-        Some((from, to, _score_cp, _depth_used)) => Some((from, to)),
-        None => None,
-    }
-}
-
-/// Like `find_move` but also returns the evaluated score (in centipawns) for the selected move
+/// returns the evaluated score (in centipawns) for the selected move
 /// and the effective search depth that was actually used internally.
 pub(crate) fn find_move_with_info(
     game_state: GameState,
@@ -310,13 +302,121 @@ pub(crate) fn find_move_with_info(
                 }
             }
 
-            // Search sequentially over root moves
-            for &(from, to) in &ordered {
-                let mut tmp = board.clone();
-                let u = make_move_simple(&mut tmp, from, to);
-                let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
-                let is_capture = board.get(to.0, to.1).is_some();
-                let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+            let enable_parallel = depth_now >= 6 && ordered.len() >= 4;
+            if enable_parallel {
+                // 1) Search the first (best-ordered) move serially to establish PV and bounds
+                let &(pv_from, pv_to) = ordered.first().unwrap();
+                {
+                    let mut tmp = board.clone();
+                    let u = make_move_simple(&mut tmp, pv_from, pv_to);
+                    let moved_is_pawn = board.get(pv_from.0, pv_from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                    let is_capture = board.get(pv_to.0, pv_to.1).is_some();
+                    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+                    let score_raw = if depth_now <= 1 {
+                        evaluate_position(&tmp)
+                    } else {
+                        let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
+                        alphabeta(&mut tmp, opposite_color(active_color), depth_now - 1, a, b, 1, &mut tt, child_hmc, &mut rep_stack)
+                    };
+                    unmake_move_simple(&mut tmp, u);
+
+                    // Adjust score for root-only heuristics
+                    let mut adjusted = score_raw + root_move_bonus(&board, pv_from, pv_to, active_color);
+                    if let Some(captured) = board.get(pv_to.0, pv_to.1) {
+                        use crate::piece::pieces::PieceType::*;
+                        let cap_val = match captured.get_type() {
+                            Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
+                        };
+                        adjusted += cap_val / 10;
+                    }
+                    let side_adv = if active_color == Color::White { score_raw } else { -score_raw };
+                    if side_adv > 150 && base_hmc >= 80 {
+                        if is_capture || moved_is_pawn {
+                            let scale = (base_hmc as i32 - 79).min(21);
+                            adjusted += 15 * scale;
+                        } else {
+                            let scale = (base_hmc as i32 - 79).min(21);
+                            adjusted -= 8 * scale;
+                        }
+                    }
+                    let sigma = strength_noise_sigma(ps as usize);
+                    if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted += n; }
+
+                    best_from_to = Some((pv_from, pv_to));
+                    best_adjusted = adjusted;
+                    best_score_raw = score_raw;
+                }
+
+                // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
+                let base_board = board.clone();
+                let base_hmc_loc = base_hmc;
+                let a_loc = a; let b_loc = b;
+                let side = active_color;
+                let results = ordered[1..].par_iter().map(|&(from, to)| {
+                    let mut tmp = base_board.clone();
+                    let u = make_move_simple(&mut tmp, from, to);
+                    let moved_is_pawn = base_board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                    let is_capture = base_board.get(to.0, to.1).is_some();
+                    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc_loc.saturating_add(1) };
+                    let score_raw = if depth_now <= 1 {
+                        evaluate_position(&tmp)
+                    } else {
+                        // local TT per task
+                        let mut local_tt = TranspositionTable::new_with_default_size();
+                        let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
+                        alphabeta(&mut tmp, opposite_color(side), depth_now - 1, a_loc, b_loc, 1, &mut local_tt, child_hmc, &mut rep_stack)
+                    };
+                    unmake_move_simple(&mut tmp, u);
+
+                    // Root adjustments (skip repetition-history check to keep parallel code simple)
+                    let mut adjusted = score_raw + root_move_bonus(&base_board, from, to, side);
+                    if let Some(captured) = base_board.get(to.0, to.1) {
+                        use crate::piece::pieces::PieceType::*;
+                        let cap_val = match captured.get_type() {
+                            Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
+                        };
+                        adjusted += cap_val / 10;
+                    }
+                    let side_adv = if side == Color::White { score_raw } else { -score_raw };
+                    if side_adv > 150 && base_hmc_loc >= 80 {
+                        if is_capture || moved_is_pawn {
+                            let scale = (base_hmc_loc as i32 - 79).min(21);
+                            adjusted += 15 * scale;
+                        } else {
+                            let scale = (base_hmc_loc as i32 - 79).min(21);
+                            adjusted -= 8 * scale;
+                        }
+                    }
+                    let sigma = strength_noise_sigma(ps as usize);
+                    if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted += n; }
+                    (from, to, adjusted, score_raw)
+                }).reduce(|| {
+                    // Identity: invalid move placeholder not used; return extreme sentinel
+                    ((0usize,0usize), (0usize,0usize), if side==Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE }, if side==Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE })
+                }, |acc, x| {
+                    let better = if side == Color::White { x.2 > acc.2 } else { x.2 < acc.2 };
+                    if better { x } else { acc }
+                });
+
+                // Update best with parallel results if better
+                let (pf, pt, padj, praw) = results;
+                // Ignore identity placeholder
+                if !(pf == (0,0) && pt == (0,0)) {
+                    let better = if active_color == Color::White { padj > best_adjusted } else { padj < best_adjusted };
+                    if better {
+                        best_from_to = Some((pf, pt));
+                        best_adjusted = padj;
+                        best_score_raw = praw;
+                    }
+                }
+            } else {
+                // Search sequentially over root moves
+                for &(from, to) in &ordered {
+                    let mut tmp = board.clone();
+                    let u = make_move_simple(&mut tmp, from, to);
+                    let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                    let is_capture = board.get(to.0, to.1).is_some();
+                    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
                 let score_raw = if depth_now <= 1 {
                     evaluate_position(&tmp)
                 } else {
@@ -378,8 +478,9 @@ pub(crate) fn find_move_with_info(
                     best_score_raw = score_raw;
                 }
                 // Aspiration cutoffs help ordering mid-loop too
-                if active_color == Color::White && score_raw >= b { break; }
-                if active_color == Color::Black && score_raw <= a { break; }
+                    if active_color == Color::White && score_raw >= b { break; }
+                    if active_color == Color::Black && score_raw <= a { break; }
+                }
             }
 
             // Check aspiration result

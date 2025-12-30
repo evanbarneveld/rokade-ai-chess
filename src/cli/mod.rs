@@ -7,7 +7,7 @@ use crate::pgn_player::pgn_player::PgnPlayer;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 
-const DEFAULT_SEARCH_DEPTH: usize = 7;
+const DEFAULT_SEARCH_DEPTH: usize = 30;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum GameMode {
@@ -23,6 +23,8 @@ pub fn run_cli() {
     let mut black_bot_strength: usize = 1000;
     let mut white_bot_search_depth: usize = DEFAULT_SEARCH_DEPTH;
     let mut black_bot_search_depth: usize = DEFAULT_SEARCH_DEPTH;
+    // Default movetime in milliseconds (CLI command sets it in seconds)
+    let mut movetime = 5000;
 
     println!("Welcome to chess. Type 'help' for help, enter move, or 'quit' to quit.\n");
 
@@ -107,6 +109,12 @@ pub fn run_cli() {
                 }
             }
 
+            if some_input.starts_with("movetime") {
+                if handle_movetime(some_input.clone(), &mut movetime) {
+                    continue
+                }
+            }
+
             if some_input.eq_ignore_ascii_case("eval") {
                 let score = evaluate_position(game.board());
                 println ! ("Evaluation: {}", score as f32 / 100.0);
@@ -131,7 +139,7 @@ pub fn run_cli() {
             let search_depth = if game.active_color_is_white() { white_bot_search_depth } else { black_bot_search_depth };
             let gs_copy = *game.get_game_state();
             let history_clone = game.get_history().clone();
-            if let Some(generated_move) = generate_move_as_san(gs_copy, &history_clone, search_depth, strength) {
+            if let Some(generated_move) = generate_move_as_san(gs_copy, &history_clone, search_depth, movetime, strength) {
                 println ! ("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {
@@ -272,6 +280,31 @@ fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_stre
     }
 }
 
+fn handle_movetime(input: String, movetime_ms: &mut usize) -> bool {
+    let mut parts = input.split_whitespace();
+    let _ = parts.next(); // consume 'movetime'
+    match parts.next() {
+        None => {
+            let secs = *movetime_ms / 1000;
+            println!("Movetime: {} seconds ({} ms)", secs, *movetime_ms);
+            true
+        }
+        Some(s) => {
+            match s.parse::<usize>() {
+                Ok(sec) if sec > 0 && sec <= 3600 => {
+                    *movetime_ms = sec.saturating_mul(1000);
+                    println!("Set movetime to {} seconds ({} ms).", sec, *movetime_ms);
+                    true
+                }
+                _ => {
+                    println!("Invalid movetime. Use: movetime <seconds 1..3600>");
+                    true
+                }
+            }
+        }
+    }
+}
+
 fn handle_reset(game: &mut Chess, input: String) {
     // Handle "reset <fen>" to reinitialize the board from a FEN string
     let mut parts = input.splitn(2, char::is_whitespace);
@@ -377,6 +410,8 @@ fn print_help() {
     println!("depth <0..10>            - set both bots' search dept");
     println!("depth white <0..10>      - set white bot search dept");
     println!("depth black <0..10>      - set black bot search dept");
+    println!("movetime                 - get current movetime (seconds)");
+    println!("movetime <seconds>       - set time per move (in seconds)");
     println!("strength                 - get the strength of the bots (higher = stronger)");
     println!("strength <0..1000>       - set both bots' playing strength");
     println!("strength white <0..1000> - set white bot playing strength");
