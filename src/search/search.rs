@@ -217,6 +217,11 @@ pub(crate) fn find_move_with_info(
 ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
     init_rayon_pool_if_needed();
 
+    // Persistent Transposition Table across searches: initialize once and reuse.
+    // We keep it behind a Mutex to allow mutable access in this serial root search.
+    static TT_CELL: OnceLock<Mutex<TranspositionTable>> = OnceLock::new();
+    let tt_mutex = TT_CELL.get_or_init(|| Mutex::new(TranspositionTable::new_with_default_size()));
+
     // collect all legal moves for the side to move
     let board = game_state.board();
     let active_color = game_state.active_color();
@@ -271,7 +276,8 @@ pub(crate) fn find_move_with_info(
     };
 
     // Iterative Deepening + Aspiration windows at root (serial evaluation for stability)
-    let mut tt = TranspositionTable::new_with_default_size();
+    // Reuse persistent TT
+    let mut tt = tt_mutex.lock().unwrap();
     let base_hmc = game_state.half_move_clock();
     let mut last_score: i32 = 0;
     let mut chosen: Option<((usize, usize), (usize, usize), i32, usize)> = None;

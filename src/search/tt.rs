@@ -39,7 +39,7 @@ impl TranspositionTable {
         Self { entries, mask: size - 1, age: 0, used_slots: 0 }
     }
 
-    pub fn new_with_default_size() -> Self { Self::with_capacity_pow2(24) }
+    pub fn new_with_default_size() -> Self { Self::with_capacity_pow2(20) }
 
     #[inline]
     fn index(&self, key: u64) -> usize { (key as usize) & self.mask }
@@ -70,7 +70,7 @@ impl TranspositionTable {
             if was_empty { self.used_slots = self.used_slots.saturating_add(1); }
         }
     }
-    
+
     // Return UCI-style hashfull (permill 0..1000) based on approximate occupancy.
     #[inline]
     pub fn hashfull_permille(&self) -> u16 {
