@@ -24,8 +24,12 @@ fn init_rayon_pool_if_needed() {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(default_threads);
+        // Increase worker thread stack size to avoid stack overflows in deep searches.
+        // Use a conservative 16 MiB per worker.
+        let stack_bytes: usize = 32 * 1024 * 1024;
         let _ = ThreadPoolBuilder::new()
             .num_threads(num_threads)
+            .stack_size(stack_bytes)
             .build_global();
     });
 }
@@ -99,14 +103,18 @@ pub(crate) fn find_move_with_info(
 
     // First: search one move serially (YBWC-lite) to seed bounds and provide good ordering
     let (first_from, first_to) = moves[0];
-    let first_board = move_piece_on_board(&board, first_from, first_to);
-    let mut first_tt = TranspositionTable::new_size_18();
+    // Use make/unmake on a single temporary board instead of cloning per move
+    let mut tmp_first = board.clone();
+    let undo_first = make_move_simple(&mut tmp_first, first_from, first_to);
+    let mut first_tt = TranspositionTable::new_with_default_size();
     first_tt.next_age();
     let first_score_raw = if effective_depth <= 1 {
-        evaluate_position(&first_board)
+        evaluate_position(&tmp_first)
     } else {
-        alphabeta(&first_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt)
+        alphabeta(&tmp_first, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt)
     };
+    // restore board
+    unmake_move_simple(&mut tmp_first, undo_first);
     // Apply root-only adjustments identical to the original code
     let mut first_adjusted = first_score_raw + root_move_bonus(&board, first_from, first_to, active_color);
     if let Some(captured) = board.get(first_to.0, first_to.1) {
@@ -138,14 +146,18 @@ pub(crate) fn find_move_with_info(
 
     let _results: Vec<_> = rest.par_iter()
         .map(|&(from, to)| {
-            let simulation_board = move_piece_on_board(&board, from, to);
-            let mut local_tt = TranspositionTable::new_size_18();
+            // For parallel evals, each task uses its own temporary board copy with make/unmake
+            let mut simulation_board = board.clone();
+            let u = make_move_simple(&mut simulation_board, from, to);
+            let mut local_tt = TranspositionTable::new_with_default_size();
             local_tt.next_age();
             let search_score = if effective_depth <= 1 {
                 evaluate_position(&simulation_board)
             } else {
                 alphabeta(&simulation_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut local_tt)
             };
+            // unmake for cleanliness (not strictly required since board goes out of scope)
+            unmake_move_simple(&mut simulation_board, u);
             let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
             if let Some(captured) = board.get(to.0, to.1) {
                 use crate::piece::pieces::PieceType::*;
@@ -321,6 +333,10 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         let score = evaluate_position(board);
         //println!("score: {}", score);
         return score;
+        /*
+                // At leaf: switch to quiescence to avoid horizon effects
+                return qsearch(board, to_move, alpha, beta);
+         */
     }
 
     // TT probe
@@ -345,6 +361,15 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
             moves.insert(0, first);
         }
     }
+    // Basic move ordering: after TT move, sort captures first using MVV-LVA heuristic
+    if moves.len() > 1 {
+        // Stable-partition: keep index 0 (possibly TT move) in place, sort the tail
+        let (head, tail) = moves.split_at_mut(1);
+        let board_ref = board;
+        tail.sort_by_key(|&(from, to)| -move_score_mvv_lva(board_ref, from, to));
+        // head is unused, only here to make split_at_mut compile
+        let _ = head;
+    }
     if moves.is_empty() {
         // No legal moves: checkmate or stalemate
         let in_check = is_side_in_check(board, to_move);
@@ -360,12 +385,15 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
     }
 
     let original_alpha = alpha;
+    let original_beta = beta;
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
     let value = if to_move == Color::White {
         let mut value = i32::MIN;
+        let mut tmp = board.clone();
         for (from, to) in moves.into_iter() {
-            let b = move_piece_on_board(board, from, to);
-            let score = alphabeta(&b, Color::Black, depth - 1, alpha, beta, ply + 1, tt);
+            let u = make_move_simple(&mut tmp, from, to);
+            let score = alphabeta(&tmp, Color::Black, depth - 1, alpha, beta, ply + 1, tt);
+            unmake_move_simple(&mut tmp, u);
             if score > value { value = score; }
             if value > alpha { alpha = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
@@ -373,9 +401,11 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
         value
     } else {
         let mut value = i32::MAX;
+        let mut tmp = board.clone();
         for (from, to) in moves.into_iter() {
-            let b = move_piece_on_board(board, from, to);
-            let score = alphabeta(&b, Color::White, depth - 1, alpha, beta, ply + 1, tt);
+            let u = make_move_simple(&mut tmp, from, to);
+            let score = alphabeta(&tmp, Color::White, depth - 1, alpha, beta, ply + 1, tt);
+            unmake_move_simple(&mut tmp, u);
             if score < value { value = score; }
             if value < beta { beta = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
@@ -385,12 +415,83 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
 
     // Store to TT
     let bound = if value <= original_alpha { Bound::Upper }
-                else if value >= beta { Bound::Lower }
+                else if value >= original_beta { Bound::Lower }
                 else { Bound::Exact };
     let (bf, bt) = if let Some((f, t)) = best_from_to { let (ff, tt2) = encode_move(f, t); (Some(ff), Some(tt2)) } else { (None, None) };
     let tt_score = to_tt_score(value, ply);
     tt.store(key, depth as i16, bound, tt_score, bf, bt);
     value
+}
+
+// Quiescence search: consider only tactical continuations (captures) unless in check.
+fn qsearch(board: &Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 {
+    // Stand-pat (static) evaluation
+    let stand_pat = evaluate_position(board);
+    if to_move == Color::White {
+        if stand_pat >= beta { return stand_pat; }
+        if stand_pat > alpha { alpha = stand_pat; }
+    } else {
+        if stand_pat <= -beta { return stand_pat; }
+        if stand_pat < -alpha { alpha = stand_pat; }
+    }
+
+    // If in check, allow all legal moves to escape check in qsearch; otherwise only captures
+    let in_check = is_side_in_check(board, to_move);
+    let mut moves = find_all_valid_moves(board, to_move);
+    if !in_check {
+        moves.retain(|&(_f, to)| board.get(to.0, to.1).is_some());
+    }
+
+    if moves.is_empty() {
+        return stand_pat;
+    }
+
+    // Order captures by MVV-LVA to improve cutoffs
+    if !in_check {
+        let b = board;
+        moves.sort_by_key(|&(from, to)| -move_score_mvv_lva(b, from, to));
+    }
+
+    let mut a = alpha;
+    let mut bnd = beta;
+
+    if to_move == Color::White {
+        let mut best = i32::MIN;
+        let mut tmp = board.clone();
+        for (from, to) in moves.into_iter() {
+            let u = make_move_simple(&mut tmp, from, to);
+            let score = qsearch(&tmp, Color::Black, a, bnd);
+            unmake_move_simple(&mut tmp, u);
+            if score > best { best = score; }
+            if best > a { a = best; }
+            if a >= bnd { break; }
+        }
+        best
+    } else {
+        let mut best = i32::MAX;
+        let mut tmp = board.clone();
+        for (from, to) in moves.into_iter() {
+            let u = make_move_simple(&mut tmp, from, to);
+            let score = qsearch(&tmp, Color::White, a, bnd);
+            unmake_move_simple(&mut tmp, u);
+            if score < best { best = score; }
+            if best < bnd { bnd = best; }
+            if a >= bnd { break; }
+        }
+        best
+    }
+}
+
+// Heuristic score for move ordering: MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+#[inline]
+fn move_score_mvv_lva(board: &Board, from: (usize, usize), to: (usize, usize)) -> i32 {
+    use crate::piece::pieces::PieceType::*;
+    let victim = board.get(to.0, to.1);
+    let attacker = board.get(from.0, from.1);
+    let v = victim.map(|p| match p.get_type() { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 }).unwrap_or(0);
+    let a = attacker.map(|p| match p.get_type() { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 }).unwrap_or(0);
+    // Higher is better for ordering. Captures first; quiets get 0 or negative.
+    if victim.is_some() { v * 100 - a } else { -1 }
 }
 
 /// Helper: is the given side to move currently in check on this board state?
@@ -402,18 +503,33 @@ fn is_side_in_check(board: &Board, side: Color) -> bool {
     is_square_attacked_by_opponent(&mut tmp, king_sq, side)
 }
 
-fn move_piece_on_board(current: &Board, from: (usize, usize), to: (usize, usize)) -> Board {
-    let mut clone = current.clone();
-    // move the piece on the cloned board (no special moves handling here)
-    // if it's a pawn, use move_pawn API; otherwise generic move_piece
-    if let Some(p) = clone.get(from.0, from.1) {
-        if p.get_type() == PieceType::Pawn {
-            let _ = clone.move_pawn(from, to, None);
-        } else {
-            let _ = clone.move_piece(from, to);
-        }
-    }
-    clone
+// Lightweight, reversible move helpers for search. These intentionally do not
+// handle special moves (castling, en-passant, promotions) because our search
+// move generator and validators do not invoke them through this path either.
+// They mirror the simple behavior of Board::move_piece/move_pawn above.
+#[derive(Clone, Copy)]
+struct UndoMove {
+    from: (usize, usize),
+    to: (usize, usize),
+    moved: Option<Piece>,
+    captured: Option<Piece>,
+}
+
+#[inline]
+fn make_move_simple(board: &mut Board, from: (usize, usize), to: (usize, usize)) -> UndoMove {
+    let moved = board.get(from.0, from.1);
+    let captured = board.get(to.0, to.1);
+    // apply move directly
+    board.set(to.0, to.1, moved);
+    board.set(from.0, from.1, None);
+    UndoMove { from, to, moved, captured }
+}
+
+#[inline]
+fn unmake_move_simple(board: &mut Board, undo: UndoMove) {
+    // restore original squares
+    board.set(undo.from.0, undo.from.1, undo.moved);
+    board.set(undo.to.0, undo.to.1, undo.captured);
 }
 
 // Sorts the move table by score in ascending order and returns a cloned, sorted vector.
