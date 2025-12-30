@@ -17,6 +17,7 @@ use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 
@@ -59,6 +60,33 @@ fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used
     if let Some(cb) = info_cb_cell().lock().unwrap().as_ref().cloned() {
         (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used, pv)
     }
+}
+
+// --- Global time budget (deadline) for search ---
+static DEADLINE_CELL: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+#[inline]
+fn deadline_cell() -> &'static Mutex<Option<Instant>> {
+    DEADLINE_CELL.get_or_init(|| Mutex::new(None))
+}
+
+/// Set a hard time budget for the ongoing search. Passing 0 disables the budget.
+pub(crate) fn set_time_budget_ms(ms: usize) {
+    let mut guard = deadline_cell().lock().unwrap();
+    if ms == 0 { *guard = None; } else { *guard = Some(Instant::now() + std::time::Duration::from_millis(ms as u64)); }
+}
+
+/// Clear any active time budget (search will run to completion by depth).
+pub(crate) fn clear_time_budget() {
+    let mut guard = deadline_cell().lock().unwrap();
+    *guard = None;
+}
+
+#[inline]
+fn time_is_up() -> bool {
+    if let Some(dl) = *deadline_cell().lock().unwrap() {
+        Instant::now() >= dl
+    } else { false }
 }
 
 #[inline]
@@ -194,190 +222,163 @@ pub(crate) fn find_move_with_info(
         if v.is_empty() { moves.clone() } else { v }
     };
 
-    // First: search one move serially (YBWC-lite) to seed bounds and provide good ordering
-    let (first_from, first_to) = root_moves[0];
-    // Use make/unmake on a single temporary board instead of cloning per move
-    let mut tmp_first = board.clone();
-    let undo_first = make_move_simple(&mut tmp_first, first_from, first_to);
-    let mut first_tt = TranspositionTable::new_with_default_size();
-    first_tt.next_age();
+    // Iterative Deepening + Aspiration windows at root (serial evaluation for stability)
+    let mut tt = TranspositionTable::new_with_default_size();
     let base_hmc = game_state.half_move_clock();
-    let root_moved_is_pawn = board.get(first_from.0, first_from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
-    let root_is_capture = board.get(first_to.0, first_to.1).is_some();
-    let child_hmc_first: u32 = if root_is_capture || root_moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
-    let first_score_raw = if effective_depth <= 1 {
-        evaluate_position(&tmp_first)
-    } else {
-        let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
-        alphabeta(&mut tmp_first, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt, child_hmc_first, &mut rep_stack)
-    };
-    // restore board
-    unmake_move_simple(&mut tmp_first, undo_first);
-    // Apply root-only adjustments identical to the original code
-    let mut first_adjusted = first_score_raw + root_move_bonus(&board, first_from, first_to, active_color);
-    if let Some(captured) = board.get(first_to.0, first_to.1) {
-        use crate::piece::pieces::PieceType::*;
-        let cap_val = match captured.get_type() {
-            Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
-        };
-        first_adjusted += cap_val / 10;
-    }
-    // DTZ-like incentive at root: if clearly winning and 50-move clock is high, strongly prefer clock-resetting moves
-    let side_adv = if active_color == Color::White { first_score_raw } else { -first_score_raw };
-    if side_adv > 150 && base_hmc >= 80 {
-        if root_is_capture || root_moved_is_pawn {
-            // scale bonus by proximity to 100 plies
-            let scale = (base_hmc as i32 - 79).min(21); // 1..21
-            first_adjusted += 15 * scale; // up to ~+315cp
-        } else {
-            // mild penalty to non-resetting moves near 50-move horizon
-            let scale = (base_hmc as i32 - 79).min(21);
-            first_adjusted -= 8 * scale;
-        }
-    }
-    // Inject random evaluation noise based on strength (weaker -> more noise)
-    let sigma = strength_noise_sigma(ps as usize);
-    if sigma > 0 {
-        let n: i32 = rng().random_range(-sigma..=sigma);
-        first_adjusted += n;
-    }
+    let mut last_score: i32 = 0;
+    let mut chosen: Option<((usize, usize), (usize, usize), i32, usize)> = None;
+    let mut window: i32 = 50; // cp
 
-    // Repetition-avoidance at root: if making this move would cause a 3-fold repetition
-    // and the side to move currently stands better than a draw, penalize strongly.
-    {
-        let is_capture = board.get(first_to.0, first_to.1).is_some();
-        let mut gs = game_state; // GameState is Copy
-        let mut promote: Option<Piece> = None;
-        // naive promotion to queen if a pawn reaches last rank
-        if let Some(p) = gs.board().get(first_from.0, first_from.1) {
-            if p.get_type() == PieceType::Pawn {
-                if (active_color == Color::White && first_to.0 == 7) || (active_color == Color::Black && first_to.0 == 0) {
-                    promote = Some(Piece::new(PieceType::Queen, active_color));
+    for depth_now in 1..=effective_depth {
+        tt.next_age();
+        let mut a = MIN_EVAL_VALUE + 1;
+        let mut b = MAX_EVAL_VALUE - 1;
+        if depth_now > 1 {
+            a = (last_score - window).max(MIN_EVAL_VALUE + 1);
+            b = (last_score + window).min(MAX_EVAL_VALUE - 1);
+        }
+
+        // Retry loop on aspiration fail
+        let mut tried = 0;
+        let best_tuple = loop {
+            tried += 1;
+            let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
+            let mut best_score_raw = if active_color == Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE };
+            let mut best_adjusted = best_score_raw;
+
+            // Order: if TT has a move at root, try to place it first
+            let mut ordered = root_moves.clone();
+            if let Some(entry) = tt.probe(compute_zobrist(&*board, active_color)) {
+                let bm = decode_move(entry.best_from, entry.best_to);
+                if let Some(pos) = ordered.iter().position(|m| *m == bm) {
+                    let first = ordered.remove(pos);
+                    ordered.insert(0, first);
                 }
             }
-        }
-        if PieceMover::move_piece(&mut gs, first_from, first_to, is_capture, promote) {
-            gs.switch_player_turn();
-            let fen = game_state_to_fen_string(gs);
-            let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
-            let count = history.fen_repetition_count(&truncated);
-            let side_adv = if active_color == Color::White { first_adjusted } else { -first_adjusted };
-            if count >= 2 && side_adv > 0 {
-                // strong penalty to avoid draw when better
-                first_adjusted -= if active_color == Color::White { 50_000 } else { -50_000 };
-            }
-        }
-    }
 
-    // Emit info for the first (seed) move
-    let first_pv = build_pv_for_root(board, active_color, first_from, first_to, &first_tt, effective_depth);
-    emit_info(first_from, first_to, first_adjusted, effective_depth, first_pv);
-
-    // Update alpha/beta according to side to move
-    if active_color == Color::White { if first_score_raw > alpha { alpha = first_score_raw; } }
-
-    // Collect scored moves
-    let mut move_table: Vec<((usize, usize), (usize, usize), i32)> = Vec::with_capacity(root_moves.len());
-    move_table.push((first_from, first_to, first_adjusted));
-
-    // Remaining moves
-    let rest = &root_moves[1..];
-
-    let _results: Vec<_> = rest.par_iter()
-        .map(|&(from, to)| {
-            // For parallel evals, each task uses its own temporary board copy with make/unmake
-            let mut simulation_board = board.clone();
-            let u = make_move_simple(&mut simulation_board, from, to);
-            let mut local_tt = TranspositionTable::new_with_default_size();
-            local_tt.next_age();
-            let search_score = if effective_depth <= 1 {
-                evaluate_position(&simulation_board)
-            } else {
-                let base_hmc = game_state.half_move_clock();
+            // Search sequentially over root moves
+            for &(from, to) in &ordered {
+                let mut tmp = board.clone();
+                let u = make_move_simple(&mut tmp, from, to);
                 let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
                 let is_capture = board.get(to.0, to.1).is_some();
                 let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
-                let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
-                alphabeta(&mut simulation_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut local_tt, child_hmc, &mut rep_stack)
-            };
-            // unmake for cleanliness (not strictly required since board goes out of scope)
-            unmake_move_simple(&mut simulation_board, u);
-            let mut adjusted_score = search_score + root_move_bonus(&board, from, to, active_color);
-            if let Some(captured) = board.get(to.0, to.1) {
-                use crate::piece::pieces::PieceType::*;
-                let cap_val = match captured.get_type() {
-                    Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
-                };
-                adjusted_score += cap_val / 10;
-            }
-            // DTZ-like incentive for parallel root moves
-            let side_adv = if active_color == Color::White { search_score } else { -search_score };
-            if side_adv > 150 && base_hmc >= 80 {
-                let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
-                let is_capture = board.get(to.0, to.1).is_some();
-                if is_capture || moved_is_pawn {
-                    let scale = (base_hmc as i32 - 79).min(21);
-                    adjusted_score += 15 * scale;
+                let score_raw = if depth_now <= 1 {
+                    evaluate_position(&tmp)
                 } else {
-                    let scale = (base_hmc as i32 - 79).min(21);
-                    adjusted_score -= 8 * scale;
+                    let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
+                    alphabeta(&mut tmp, opposite_color(active_color), depth_now - 1, a, b, 1, &mut tt, child_hmc, &mut rep_stack)
+                };
+                unmake_move_simple(&mut tmp, u);
+
+                // Adjust score for root-only heuristics
+                let mut adjusted = score_raw + root_move_bonus(&board, from, to, active_color);
+                if let Some(captured) = board.get(to.0, to.1) {
+                    use crate::piece::pieces::PieceType::*;
+                    let cap_val = match captured.get_type() {
+                        Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
+                    };
+                    adjusted += cap_val / 10;
                 }
-            }
-            let sigma = strength_noise_sigma(ps as usize);
-            if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted_score += n; }
-            // repetition-avoidance at root for parallel moves
-            {
-                let is_capture = board.get(to.0, to.1).is_some();
-                let mut gs = game_state; // Copy
-                let mut promote: Option<Piece> = None;
-                if let Some(p) = gs.board().get(from.0, from.1) {
-                    if p.get_type() == PieceType::Pawn {
-                        if (active_color == Color::White && to.0 == 7) || (active_color == Color::Black && to.0 == 0) {
-                            promote = Some(Piece::new(PieceType::Queen, active_color));
+                let side_adv = if active_color == Color::White { score_raw } else { -score_raw };
+                if side_adv > 150 && base_hmc >= 80 {
+                    if is_capture || moved_is_pawn {
+                        let scale = (base_hmc as i32 - 79).min(21);
+                        adjusted += 15 * scale;
+                    } else {
+                        let scale = (base_hmc as i32 - 79).min(21);
+                        adjusted -= 8 * scale;
+                    }
+                }
+                let sigma = strength_noise_sigma(ps as usize);
+                if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted += n; }
+                // repetition-avoidance at root
+                {
+                    let is_capture = board.get(to.0, to.1).is_some();
+                    let mut gs = game_state; // Copy
+                    let mut promote: Option<Piece> = None;
+                    if let Some(p) = gs.board().get(from.0, from.1) {
+                        if p.get_type() == PieceType::Pawn {
+                            if (active_color == Color::White && to.0 == 7) || (active_color == Color::Black && to.0 == 0) {
+                                promote = Some(Piece::new(PieceType::Queen, active_color));
+                            }
+                        }
+                    }
+                    if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
+                        gs.switch_player_turn();
+                        let fen = game_state_to_fen_string(gs);
+                        let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+                        let count = history.fen_repetition_count(&truncated);
+                        let sa = if active_color == Color::White { adjusted } else { -adjusted };
+                        if count >= 2 && sa > 0 {
+                            adjusted -= if active_color == Color::White { 50_000 } else { -50_000 };
                         }
                     }
                 }
-                if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
-                    gs.switch_player_turn();
-                    let fen = game_state_to_fen_string(gs);
-                    let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
-                    let count = history.fen_repetition_count(&truncated);
-                    let side_adv = if active_color == Color::White { adjusted_score } else { -adjusted_score };
-                    if count >= 2 && side_adv > 0 {
-                        adjusted_score -= if active_color == Color::White { 50_000 } else { -50_000 };
-                    }
+
+                // Track best
+                let better = if active_color == Color::White { adjusted > best_adjusted } else { adjusted < best_adjusted };
+                if better || best_from_to.is_none() {
+                    best_from_to = Some((from, to));
+                    best_adjusted = adjusted;
+                    best_score_raw = score_raw;
                 }
+                // Aspiration cutoffs help ordering mid-loop too
+                if active_color == Color::White && score_raw >= b { break; }
+                if active_color == Color::Black && score_raw <= a { break; }
             }
-            // Emit info for each evaluated root move
-            let pv = build_pv_for_root(board, active_color, from, to, &local_tt, effective_depth);
-            emit_info(from, to, adjusted_score, effective_depth, pv);
-            (from, to, adjusted_score)
-        })
-        .collect();
-    move_table.extend(_results);
 
-    if move_table.is_empty() { return None; }
-
-    let mut sorted_moves = sort_moves_on_score_asc(&mut move_table);
-    if active_color == Color::White { sorted_moves.reverse(); }
-
-    if playing_strength >= 1000 {
-        let bm = &sorted_moves.first().unwrap();
-        Some((bm.0, bm.1, bm.2, effective_depth))
-    } else {
-        // When selecting based on strength randomness, we still want to report the chosen move's score
-        if let Some((from, to)) = select_move_based_using_strength(&sorted_moves, playing_strength) {
-            // Find the associated score in sorted_moves (there will be exactly one matching entry)
-            if let Some((_, _, sc)) = sorted_moves.iter().find_map(|e| if e.0 == from && e.1 == to { Some((e.0, e.1, e.2)) } else { None }) {
-                Some((from, to, sc, effective_depth))
-            } else {
-                // Fallback: if not found (shouldn't happen), use 0 score
-                Some((from, to, 0, effective_depth))
+            // Check aspiration result
+            if best_score_raw <= a {
+                // fail-low: widen down
+                window = (window * 2).min(800);
+                a = (last_score - window).max(MIN_EVAL_VALUE + 1);
+                if tried < 3 { continue; }
+            } else if best_score_raw >= b {
+                // fail-high: widen up
+                window = (window * 2).min(800);
+                b = (last_score + window).min(MAX_EVAL_VALUE - 1);
+                if tried < 3 { continue; }
             }
-        } else {
-            None
-        }
+            break (best_from_to.unwrap(), best_adjusted, best_score_raw);
+        };
+
+        let ((bf, bt), best_adj, best_raw) = best_tuple;
+        last_score = best_raw;
+        // Emit PV/info for this iteration
+        let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
+        emit_info(bf, bt, best_adj, depth_now, pv);
+        chosen = Some((bf, bt, best_adj, depth_now));
     }
+
+    // Final selection based on playing_strength from the last iteration
+    if let Some((bf, bt, sc, used_depth)) = chosen {
+        if playing_strength >= 1000 {
+            Some((bf, bt, sc, used_depth))
+        } else {
+            // Re-evaluate top K moves for stochastic selection at final depth
+            let mut scored: Vec<((usize, usize), (usize, usize), i32)> = Vec::new();
+            for &(from, to) in &root_moves {
+                // Use TT best estimates (no re-search) for quick ranking
+                let mut tmp = board.clone();
+                let u = make_move_simple(&mut tmp, from, to);
+                let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                let is_capture = board.get(to.0, to.1).is_some();
+                let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+                let mut rep_stack: Vec<u64> = Vec::with_capacity(64);
+                let sr = if effective_depth <= 1 { evaluate_position(&tmp) } else { alphabeta(&mut tmp, opposite_color(active_color), effective_depth - 1, MIN_EVAL_VALUE+1, MAX_EVAL_VALUE-1, 1, &mut tt, child_hmc, &mut rep_stack) };
+                unmake_move_simple(&mut tmp, u);
+                let adj = sr + root_move_bonus(&board, from, to, active_color);
+                scored.push((from, to, adj));
+            }
+            let mut sorted = sort_moves_on_score_asc(&mut scored);
+            if active_color == Color::White { sorted.reverse(); }
+            if let Some((from, to)) = select_move_based_using_strength(&sorted, playing_strength) {
+                let sc = sorted.iter().find(|e| e.0==from && e.1==to).map(|e| e.2).unwrap_or(sc);
+                Some((from, to, sc, used_depth))
+            } else { Some((bf, bt, sc, used_depth)) }
+        }
+    } else { None }
 }
 
 pub(crate) fn find_all_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
@@ -558,6 +559,12 @@ fn alphabeta(
     // Count every node we enter
     bump_node();
 
+    // Time cutoff: on timeout, return a static evaluation of the current node.
+    // This ensures callers can still use best-so-far information gathered so far.
+    if time_is_up() {
+        return evaluate_position(&*board);
+    }
+
     // print board
     //println!("alpha-beta\n{}", board.get_board_display_string(None));
 
@@ -575,6 +582,51 @@ fn alphabeta(
     if depth == 0 {
         // At leaf: switch to quiescence to avoid horizon effects
         return qsearch(board, to_move, alpha, beta, halfmove_clock, rep_stack);
+    }
+
+    // -----------------
+    // Null-move pruning
+    // -----------------
+    // Conditions to attempt null move:
+    // - Sufficient remaining depth
+    // - Side to move is not in check
+    // - Halfmove clock not already at draw threshold
+    // - Avoid in likely zugzwang scenarios (very low material) — here we approximate by requiring some non-pawn material
+    if depth >= 3 {
+        let in_check = is_side_in_check(board, to_move);
+        if !in_check && halfmove_clock < 100 {
+            // Quick material heuristic: require presence of any piece other than kings/pawns
+            let mut has_non_pawn_minor = false;
+            'scan: for r in 0..8 {
+                for c in 0..8 {
+                    if let Some(p) = board.get(r, c) {
+                        if p.get_color() == to_move {
+                            match p.get_type() {
+                                PieceType::Knight | PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
+                                    has_non_pawn_minor = true; break 'scan;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            if has_non_pawn_minor {
+                // Reduction R: base on depth (deeper search -> larger R)
+                let r = if depth >= 6 { 3 } else { 2 } as usize;
+                let mut undo: Option<()> = None;
+                // Make a null move: switch side to move without changing board, but we still push repetition key
+                // We reuse halfmove_clock (null move does not reset it)
+                // To keep Book/Board API simple, emulate by switching to_move only in recursive call
+                // and NOT modifying the board.
+                // Probe a null-window search; use (beta-1, beta) window which is standard for NMP
+                let score = alphabeta(board, opposite_color(to_move), depth.saturating_sub(1 + r), beta - 1, beta, ply + 1, tt, halfmove_clock.saturating_add(1), rep_stack);
+                let _ = undo; // placeholder for symmetry with real moves; no board change was made
+                if score >= beta {
+                    return score; // null-move cutoff
+                }
+            }
+        }
     }
 
     // TT probe
@@ -649,6 +701,8 @@ fn alphabeta(
 
     let value = if to_move == Color::White {
         let mut value = MIN_EVAL_VALUE;
+        let mut is_first_move = true; // PVS: first move searched with full window
+        let mut move_index: i32 = 0;  // LMR: track move order
         for (from, to) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
@@ -673,15 +727,42 @@ fn alphabeta(
                 }
             }
             if target_piece.is_some() { child_hmc = 0; }
-            let score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+
+            // Principal Variation Search (PVS) + Late Move Reductions (LMR)
+            let mut score;
+            if is_first_move {
+                // Full window on the first move
+                score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                is_first_move = false;
+            } else {
+                // Late Move Reduction
+                let is_capture = target_piece.is_some();
+                let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                let quiet = !is_capture && !is_pawn_move; // simple quiet heuristic
+                let mut reduced_depth = child_depth;
+                if quiet && child_depth >= 3 && move_index >= 3 {
+                    // Basic reduction formula: grows with move index and depth
+                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1);
+                    reduced_depth = reduced_depth.saturating_sub(r);
+                }
+                // Null-window search for subsequent moves (PVS window)
+                score = alphabeta(board, Color::Black, reduced_depth, alpha, alpha + 1, ply + 1, tt, child_hmc, rep_stack);
+                if score > alpha && score < beta {
+                    // Re-search with full window on fail-high/improvement inside window
+                    score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                }
+            }
             unmake_move_simple(board, u);
             if score > value { value = score; }
             if value > alpha { alpha = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
+            move_index += 1;
         }
         value
     } else {
         let mut value = MAX_EVAL_VALUE;
+        let mut is_first_move = true; // PVS for minimizing side too
+        let mut move_index: i32 = 0;  // LMR index
         for (from, to) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
@@ -705,11 +786,32 @@ fn alphabeta(
                 }
             }
             if target_piece.is_some() { child_hmc = 0; }
-            let score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+            // PVS + LMR for minimizing side
+            let mut score;
+            if is_first_move {
+                score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                is_first_move = false;
+            } else {
+                // Late Move Reduction
+                let is_capture = target_piece.is_some();
+                let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                let quiet = !is_capture && !is_pawn_move;
+                let mut reduced_depth = child_depth;
+                if quiet && child_depth >= 3 && move_index >= 3 {
+                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1);
+                    reduced_depth = reduced_depth.saturating_sub(r);
+                }
+                // For the minimizing side, a null-window around beta-1 .. beta works equivalently
+                score = alphabeta(board, Color::White, reduced_depth, beta - 1, beta, ply + 1, tt, child_hmc, rep_stack);
+                if score < beta && score > alpha {
+                    score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                }
+            }
             unmake_move_simple(board, u);
             if score < value { value = score; }
             if value < beta { beta = value; best_from_to = Some((from, to)); }
             if alpha >= beta { break; }
+            move_index += 1;
         }
         value
     };
@@ -729,6 +831,10 @@ fn alphabeta(
 
 // Quiescence search: consider only tactical continuations (captures) unless in check.
 fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmove_clock: u32, rep_stack: &mut Vec<u64>) -> i32 {
+    // Time cutoff in quiescence as well: return a quick static eval
+    if time_is_up() {
+        return evaluate_position(&*board);
+    }
     // Draw checks in quiescence as well
     let key_here = compute_zobrist(&*board, to_move);
     if rep_stack.iter().any(|&k| k == key_here) { return 0; }

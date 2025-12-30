@@ -7,7 +7,7 @@ use crate::pgn_player::pgn_player::PgnPlayer;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 
-const DEFAULT_SEARCH_DEPTH: usize = 5;
+const DEFAULT_SEARCH_DEPTH: usize = 7;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum GameMode {

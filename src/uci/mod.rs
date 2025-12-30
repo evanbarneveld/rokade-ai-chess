@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_move_with_info, set_info_callback, get_nodes, reset_search_telemetry};
+use crate::search::search::{find_move_with_info, set_info_callback, get_nodes, reset_search_telemetry, set_time_budget_ms, clear_time_budget};
 
 // Minimal UCI interface implementation.
 // Supported commands:
@@ -17,7 +17,7 @@ use crate::search::search::{find_move_with_info, set_info_callback, get_nodes, r
 // Notes:
 // - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
 
-const DEFAULT_SEARCH_DEPTH: usize = 5;
+const DEFAULT_SEARCH_DEPTH: usize = 7;
 
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
@@ -71,7 +71,7 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line.starts_with("go ") || line == "go" {
-            let mut movetime = 1000;
+            let mut movetime = 10_000; // default 10 seconds per move
 
             let line_parts: Vec<&str> = line.split(' ').filter(|w| !w.is_empty()).collect();
             if line_parts.len() > 1 && line_parts[1] == "movetime" {
@@ -101,7 +101,10 @@ pub fn run_uci() -> io::Result<()> {
             });
             set_info_callback(Some(info_cb));
 
+            // Apply a time budget for this search
+            set_time_budget_ms(movetime);
             let (best_move_str, info_opt) = go_bestmove_with_info(&mut engine, line, movetime);
+            clear_time_budget();
             // Clear the callback after search completes
             set_info_callback(None);
             let elapsed_ms = start.elapsed().as_millis();
@@ -203,14 +206,15 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
     engine.move_piece(from_idx, to_idx)
 }
 
-pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time: usize) -> (String, Option<(i32, usize)>) {
+pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, _move_time: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
     let mut depth = parse_depth(line).unwrap_or(DEFAULT_SEARCH_DEPTH);
     if depth > 12 { depth = 12; }
 
     let gs_copy = { *engine.get_game_state() };
     let history_clone = { engine.get_history().clone() };
-    let playing_strength = move_time;
+    // Use maximum playing strength by default; time control will be enforced by search budget.
+    let playing_strength = 1000usize;
 
     let best = find_move_with_info(gs_copy, &history_clone, depth, playing_strength);
     if let Some(((fr, fc), (tr, tc), score_cp, depth_used)) = best {

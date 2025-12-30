@@ -30,14 +30,14 @@ pub struct TranspositionTable {
 }
 
 impl TranspositionTable {
-    // Target ~128MB. With Entry ~24 bytes (after alignment), choose 2^22 ≈ 4,194,304 entries (~100MB).
+    // 22 ~128MB. With Entry ~24 bytes (after alignment), choose 2^22 ≈ 4,194,304 entries (~100MB).
     pub fn with_capacity_pow2(pow2: u32) -> Self {
         let size = 1usize << pow2;
         let entries = vec![Entry::default(); size].into_boxed_slice();
         Self { entries, mask: size - 1, age: 0 }
     }
 
-    pub fn new_with_default_size() -> Self { Self::with_capacity_pow2(22) }
+    pub fn new_with_default_size() -> Self { Self::with_capacity_pow2(24) }
 
     #[inline]
     fn index(&self, key: u64) -> usize { (key as usize) & self.mask }
