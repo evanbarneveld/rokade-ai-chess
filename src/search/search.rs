@@ -14,11 +14,62 @@ use crate::piece::piece_mover::PieceMover;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::search::zobrist::compute_zobrist;
 use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
-use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+// History and Killer tables for move ordering
+struct SearchHeuristics {
+    // history[side][from][to] -> score
+    history: [[[i32; 64]; 64]; 2],
+    // two killer moves per ply, stored as (from*8+to)
+    killers: Vec<[i16; 2]>,
+}
+
+impl SearchHeuristics {
+    fn new(max_ply: usize) -> Self {
+        SearchHeuristics {
+            history: [[[0; 64]; 64]; 2],
+            killers: vec![[ -1, -1 ]; max_ply.max(64)],
+        }
+    }
+    #[inline]
+    fn idx_side(side: Color) -> usize { if let Color::White = side { 0 } else { 1 } }
+    #[inline]
+    fn flat(from: (usize, usize), to: (usize, usize)) -> i16 { ((from.0*8 + from.1)*8 + (to.0*8 + to.1)) as i16 }
+
+    fn add_killer(&mut self, ply: usize, from: (usize, usize), to: (usize, usize)) {
+        if ply >= self.killers.len() { return; }
+        let m = Self::flat(from, to);
+        let k = &mut self.killers[ply];
+        if k[0] != m {
+            k[1] = k[0];
+            k[0] = m;
+        }
+    }
+    fn is_killer(&self, ply: usize, from: (usize, usize), to: (usize, usize)) -> bool {
+        if ply >= self.killers.len() { return false; }
+        let m = Self::flat(from, to);
+        let k = self.killers[ply];
+        k[0] == m || k[1] == m
+    }
+    fn add_history(&mut self, side: Color, from: (usize, usize), to: (usize, usize), bonus: i32) {
+        let s = Self::idx_side(side);
+        let f = from.0*8 + from.1; let t = to.0*8 + to.1;
+        let entry = &mut self.history[s][f][t];
+        *entry += bonus;
+        // cap to avoid runaway values
+        let cap = 1_000_000;
+        if *entry > cap { *entry = cap; }
+        if *entry < -cap { *entry = -cap; }
+    }
+    fn history_score(&self, side: Color, from: (usize, usize), to: (usize, usize)) -> i32 {
+        let s = Self::idx_side(side);
+        let f = from.0*8 + from.1; let t = to.0*8 + to.1;
+        self.history[s][f][t]
+    }
+}
 
 
 const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000i32;
@@ -190,10 +241,6 @@ pub(crate) fn find_move_with_info(
         d.clamp(depth_min, depth_max)
     } as usize;*/
     let effective_depth = search_depth;
-
-    // initialize root alpha/beta for potential root-level cutoffs
-    let mut alpha = MIN_EVAL_VALUE + 1;
-    let beta = MAX_EVAL_VALUE - 1;
 
     // Root-level hard 3-fold avoidance: filter out any root move that would create
     // a third occurrence of the same position (per truncated FEN used in History).
@@ -614,7 +661,7 @@ fn alphabeta(
             if has_non_pawn_minor {
                 // Reduction R: base on depth (deeper search -> larger R)
                 let r = if depth >= 6 { 3 } else { 2 } as usize;
-                let mut undo: Option<()> = None;
+                let undo: Option<()> = None;
                 // Make a null move: switch side to move without changing board, but we still push repetition key
                 // We reuse halfmove_clock (null move does not reset it)
                 // To keep Book/Board API simple, emulate by switching to_move only in recursive call
@@ -657,22 +704,39 @@ fn alphabeta(
             moves.insert(0, first);
         }
     }
-    // Basic move ordering: after TT move, sort captures first using MVV-LVA heuristic
+    // Basic move ordering with heuristics: after TT move, sort by composite key
     if moves.len() > 1 {
         // Stable-partition: keep index 0 (possibly TT move) in place, sort the tail
         let (head, tail) = moves.split_at_mut(1);
         let board_ref = &*board;
         let hmc = halfmove_clock;
+        // Access history/killer tables
+        thread_local! {
+            static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
+        }
         tail.sort_by_key(|&(from, to)| {
             // Base MVV-LVA score
             let mut key = move_score_mvv_lva(board_ref, from, to);
+            let moved_is_pawn = board_ref.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+            let is_capture = board_ref.get(to.0, to.1).is_some();
             // DTZ-like ordering bump: near 50-move horizon, prioritize pawn moves and captures
             if hmc >= 80 {
-                let moved_is_pawn = board_ref.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
-                let is_capture = board_ref.get(to.0, to.1).is_some();
-                if moved_is_pawn || is_capture {
-                    key += 100_000; // large bump to bring forward
-                }
+                if moved_is_pawn || is_capture { key += 100_000; }
+            }
+            // Killer move bonus (only for quiets)
+            if !is_capture && !moved_is_pawn {
+                let is_killer = HEUR.with(|h| {
+                    let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    m.is_killer(ply as usize, from, to)
+                });
+                if is_killer { key += 200_000; }
+                // History bonus
+                let hist = HEUR.with(|h| {
+                    let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    m.history_score(to_move, from, to)
+                });
+                // Scale down history to be commensurate with MVV-LVA units
+                key += (hist / 32).clamp(-200_000, 200_000);
             }
             -key
         });
@@ -699,6 +763,13 @@ fn alphabeta(
     // Push current position to repetition stack for descendants
     rep_stack.push(key_here);
 
+    // Create/extend search heuristics container (stack-allocated per call chain depth)
+    // We pass it implicitly via thread-local static since function signatures are fixed; for simplicity,
+    // keep a single heuristics instance at root using OnceLock. This is conservative but effective.
+    thread_local! {
+        static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
+    }
+    let value_holder;
     let value = if to_move == Color::White {
         let mut value = MIN_EVAL_VALUE;
         let mut is_first_move = true; // PVS: first move searched with full window
@@ -728,6 +799,11 @@ fn alphabeta(
             }
             if target_piece.is_some() { child_hmc = 0; }
 
+            // History/Killer move ordering boost for quiet moves (after initial TT/MVV ordering)
+            let is_capture = target_piece.is_some();
+            let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+            let quiet = !is_capture && !is_pawn_move;
+
             // Principal Variation Search (PVS) + Late Move Reductions (LMR)
             let mut score;
             if is_first_move {
@@ -736,13 +812,16 @@ fn alphabeta(
                 is_first_move = false;
             } else {
                 // Late Move Reduction
-                let is_capture = target_piece.is_some();
-                let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
-                let quiet = !is_capture && !is_pawn_move; // simple quiet heuristic
                 let mut reduced_depth = child_depth;
                 if quiet && child_depth >= 3 && move_index >= 3 {
                     // Basic reduction formula: grows with move index and depth
-                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1);
+                    // Use history to avoid over-reducing historically good moves
+                    let hist = HEUR.with(|h| {
+                        let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        m.history_score(to_move, from, to)
+                    });
+                    let hist_good = hist > 10_000; // tuned threshold
+                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1) - if hist_good { 1 } else { 0 };
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // Null-window search for subsequent moves (PVS window)
@@ -754,11 +833,26 @@ fn alphabeta(
             }
             unmake_move_simple(board, u);
             if score > value { value = score; }
-            if value > alpha { alpha = value; best_from_to = Some((from, to)); }
+            if value > alpha { 
+                alpha = value; best_from_to = Some((from, to));
+                // On alpha improvement, update history for quiets
+                if quiet {
+                    HEUR.with(|h| {
+                        let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        m.add_history(to_move, from, to, (depth as i32) * (depth as i32));
+                    });
+                }
+            } else if quiet && score >= beta {
+                // Beta cutoffs are handled by loop break, but record killer before break
+                HEUR.with(|h| {
+                    let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    m.add_killer(ply as usize, from, to);
+                });
+            }
             if alpha >= beta { break; }
             move_index += 1;
         }
-        value
+        value_holder = value; value_holder
     } else {
         let mut value = MAX_EVAL_VALUE;
         let mut is_first_move = true; // PVS for minimizing side too
@@ -787,18 +881,23 @@ fn alphabeta(
             }
             if target_piece.is_some() { child_hmc = 0; }
             // PVS + LMR for minimizing side
+            let is_capture = target_piece.is_some();
+            let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+            let quiet = !is_capture && !is_pawn_move;
             let mut score;
             if is_first_move {
                 score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
                 is_first_move = false;
             } else {
                 // Late Move Reduction
-                let is_capture = target_piece.is_some();
-                let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
-                let quiet = !is_capture && !is_pawn_move;
                 let mut reduced_depth = child_depth;
                 if quiet && child_depth >= 3 && move_index >= 3 {
-                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1);
+                    let hist = HEUR.with(|h| {
+                        let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        m.history_score(to_move, from, to)
+                    });
+                    let hist_good = hist < -10_000; // minimizing side: negative is good for minimizing? keep symmetric for simplicity
+                    let r = 1 + ((move_index as usize) / 6).min(2) + ((child_depth as usize) / 6).min(1) - if hist_good { 1 } else { 0 };
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // For the minimizing side, a null-window around beta-1 .. beta works equivalently
@@ -809,11 +908,24 @@ fn alphabeta(
             }
             unmake_move_simple(board, u);
             if score < value { value = score; }
-            if value < beta { beta = value; best_from_to = Some((from, to)); }
+            if value < beta { 
+                beta = value; best_from_to = Some((from, to));
+                if quiet {
+                    HEUR.with(|h| {
+                        let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        m.add_history(to_move, from, to, (depth as i32) * (depth as i32));
+                    });
+                }
+            } else if quiet && score <= alpha {
+                HEUR.with(|h| {
+                    let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    m.add_killer(ply as usize, from, to);
+                });
+            }
             if alpha >= beta { break; }
             move_index += 1;
         }
-        value
+        value_holder = value; value_holder
     };
 
     // Pop this node key
