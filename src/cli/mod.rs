@@ -22,7 +22,7 @@ pub fn run_cli() {
     let mut white_bot_search_depth: usize = 7;
     let mut black_bot_search_depth: usize = 7;
 
-    println!("Welcome to chess. Type 'help' for help, enter move, or 'exit' to exit.\n");
+    println!("Welcome to chess. Type 'help' for help, enter move, or 'quit' to quit.\n");
 
     let mut game = Chess::new();
 
@@ -46,7 +46,7 @@ pub fn run_cli() {
 
         if input.is_some() {
             let some_input = input.unwrap();
-            if some_input.eq_ignore_ascii_case("exit") {
+            if some_input.eq_ignore_ascii_case("quit") {
                 println!("Bye!");
                 break;
             }
@@ -363,7 +363,7 @@ fn print_help() {
     println!("list                     - list all moves");
     println!("pvsb                     - set playing mode 'player vs bot'");
     println!("bvsp                     - set playing mode 'bot vs player'");
-    println!("exit                     - exit the program");
+    println!("quit                     - quit the program");
     println!("?                        - automatic move");
     println!("reset <fen>              - set initial position to the FEN position, and reset the board");
     println!("reset standard           - set the initial position to the standard position and reset the board");
