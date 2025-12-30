@@ -13,9 +13,9 @@ use crate::search::zobrist::compute_zobrist;
 use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use std::sync::{Arc, Mutex, OnceLock};
 
 fn init_rayon_pool_if_needed() {
-    use std::sync::OnceLock;
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
         // Prefer 12 threads by default; allow env override via RAYON_NUM_THREADS
@@ -30,9 +30,43 @@ fn init_rayon_pool_if_needed() {
     });
 }
 
+// --- Lightweight info callback support to report progress while searching ---
+type InfoCb = dyn Fn(((usize, usize), (usize, usize)), i32, usize) + Send + Sync + 'static;
+static INFO_CB: OnceLock<Mutex<Option<Arc<InfoCb>>>> = OnceLock::new();
+
+fn info_cb_cell() -> &'static Mutex<Option<Arc<InfoCb>>> {
+    INFO_CB.get_or_init(|| Mutex::new(None))
+}
+
+pub(crate) fn set_info_callback(cb: Option<Arc<InfoCb>>) {
+    let cell = info_cb_cell();
+    let mut guard = cell.lock().unwrap();
+    *guard = cb;
+}
+
+fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used: usize) {
+    if let Some(cb) = info_cb_cell().lock().unwrap().as_ref().cloned() {
+        (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used)
+    }
+}
+
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 ///
 pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize) -> Option<((usize, usize), (usize, usize))> {
+    // Keep existing API by delegating to the info-enabled variant
+    match find_move_with_info(game_state, search_depth, playing_strength) {
+        Some((from, to, _score_cp, _depth_used)) => Some((from, to)),
+        None => None,
+    }
+}
+
+/// Like `find_move` but also returns the evaluated score (in centipawns) for the selected move
+/// and the effective search depth that was actually used internally.
+pub(crate) fn find_move_with_info(
+    game_state: GameState,
+    search_depth: usize,
+    playing_strength: usize,
+) -> Option<((usize, usize), (usize, usize), i32, usize)> {
     init_rayon_pool_if_needed();
 
     // collect all legal moves for the side to move
@@ -89,6 +123,9 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
         first_adjusted += n;
     }
 
+    // Emit info for the first (seed) move
+    emit_info(first_from, first_to, first_adjusted, effective_depth);
+
     // Update alpha/beta according to side to move
     if active_color == Color::White { if first_score_raw > alpha { alpha = first_score_raw; } }
 
@@ -119,6 +156,8 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
             }
             let sigma = strength_noise_sigma(ps as usize);
             if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted_score += n; }
+            // Emit info for each evaluated root move
+            emit_info(from, to, adjusted_score, effective_depth);
             (from, to, adjusted_score)
         })
         .collect();
@@ -130,10 +169,21 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
     if active_color == Color::White { sorted_moves.reverse(); }
 
     if playing_strength >= 1000 {
-        let best_move = &sorted_moves.first().unwrap();
-        Some((best_move.0, best_move.1))
+        let bm = &sorted_moves.first().unwrap();
+        Some((bm.0, bm.1, bm.2, effective_depth))
     } else {
-        select_move_based_using_strength(&sorted_moves, playing_strength)
+        // When selecting based on strength randomness, we still want to report the chosen move's score
+        if let Some((from, to)) = select_move_based_using_strength(&sorted_moves, playing_strength) {
+            // Find the associated score in sorted_moves (there will be exactly one matching entry)
+            if let Some((_, _, sc)) = sorted_moves.iter().find_map(|e| if e.0 == from && e.1 == to { Some((e.0, e.1, e.2)) } else { None }) {
+                Some((from, to, sc, effective_depth))
+            } else {
+                // Fallback: if not found (shouldn't happen), use 0 score
+                Some((from, to, 0, effective_depth))
+            }
+        } else {
+            None
+        }
     }
 }
 

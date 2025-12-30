@@ -1,8 +1,9 @@
 use std::io::{self, BufRead, Write};
+use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::find_move;
+use crate::search::search::{find_move, find_move_with_info, set_info_callback};
 
 // Minimal UCI interface implementation.
 // Supported commands:
@@ -75,11 +76,32 @@ pub fn run_uci() -> io::Result<()> {
                 if line_parts.len() > 2 {
                     //convert line_parts[2] to a number
                     movetime = line_parts[2].parse::<usize>().unwrap();
-
                 }
             }
-            let best = go_bestmove(&mut engine, line, movetime);
-            let out = format!("bestmove {}", best);
+
+            // Measure elapsed time for info line
+            let start = std::time::Instant::now();
+            // Install a temporary info callback so we can emit progress while searching.
+            // The callback prints UCI-compliant info lines with current best root move scores.
+            let info_cb = Arc::new(move |mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize| {
+                let pv = as_move_str(mv.0, mv.1);
+                // Print directly to stdout; ignore logging for async updates
+                let _ = writeln!(io::stdout(), "info depth {} score cp {} pv {}", depth_used, score_cp, pv);
+            });
+            set_info_callback(Some(info_cb));
+
+            let (best_move_str, info_opt) = go_bestmove_with_info(&mut engine, line, movetime);
+            // Clear the callback after search completes
+            set_info_callback(None);
+            let elapsed_ms = start.elapsed().as_millis();
+
+            // If we have extra info from the search, emit a UCI info line
+            if let Some((score_cp, depth_used)) = info_opt {
+                let info = format!("info depth {} score cp {} time {} pv {}", depth_used, score_cp, elapsed_ms, best_move_str);
+                writeln!(stdout, "{}", info)?; log_io(&mut log, "OUT", &info);
+            }
+
+            let out = format!("bestmove {}", best_move_str);
             writeln!(stdout, "{}", out)?; log_io(&mut log, "OUT", &out);
             stdout.flush()?;
             continue;
@@ -185,6 +207,22 @@ fn go_bestmove(engine: &mut Chess, line: &str, move_time:usize) -> String {
 
     // No legal moves; signal no move.
     String::from("0000")
+}
+
+pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time: usize) -> (String, Option<(i32, usize)>) {
+    // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
+    let mut depth = parse_depth(line).unwrap_or(7);
+    if depth > 7 { depth = 7; }
+
+    let game_state = engine.get_game_state();
+    let playing_strength = move_time;
+
+    let best = find_move_with_info(*game_state, depth, playing_strength);
+    if let Some(((fr, fc), (tr, tc), score_cp, depth_used)) = best {
+        let mv = as_move_str((fr, fc), (tr, tc));
+        return (mv, Some((score_cp, depth_used)));
+    }
+    (String::from("0000"), None)
 }
 
 fn parse_depth(s: &str) -> Option<usize> {
