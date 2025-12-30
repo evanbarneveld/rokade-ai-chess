@@ -19,6 +19,10 @@ use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+
+const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000i32;
+const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000i32;
+
 fn init_rayon_pool_if_needed() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
@@ -29,7 +33,6 @@ fn init_rayon_pool_if_needed() {
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(default_threads);
         // Increase worker thread stack size to avoid stack overflows in deep searches.
-        // Use a conservative 16 MiB per worker.
         let stack_bytes: usize = 32 * 1024 * 1024;
         let _ = ThreadPoolBuilder::new()
             .num_threads(num_threads)
@@ -126,8 +129,8 @@ pub(crate) fn find_move_with_info(
     } as usize;
 
     // initialize root alpha/beta for potential root-level cutoffs
-    let mut alpha = i32::MIN + 1;
-    let beta = i32::MAX - 1;
+    let mut alpha = MIN_EVAL_VALUE + 1;
+    let beta = MAX_EVAL_VALUE - 1;
 
     // Root-level hard 3-fold avoidance: filter out any root move that would create
     // a third occurrence of the same position (per truncated FEN used in History).
@@ -499,7 +502,7 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
     let original_beta = beta;
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
     let value = if to_move == Color::White {
-        let mut value = i32::MIN;
+        let mut value = MIN_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
             let u = make_move_simple(board, from, to);
             let score = alphabeta(board, Color::Black, depth - 1, alpha, beta, ply + 1, tt);
@@ -510,7 +513,7 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
         }
         value
     } else {
-        let mut value = i32::MAX;
+        let mut value = MAX_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
             let u = make_move_simple(board, from, to);
             let score = alphabeta(board, Color::White, depth - 1, alpha, beta, ply + 1, tt);
@@ -579,7 +582,7 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 
     let mut a = alpha;
     let mut bnd = beta;
     if to_move == Color::White {
-        let mut best = i32::MIN;
+        let mut best = MIN_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
             if !in_check {
                 if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
@@ -598,7 +601,7 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 
         }
         best
     } else {
-        let mut best = i32::MAX;
+        let mut best = MAX_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
             if !in_check {
                 if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
@@ -647,16 +650,28 @@ struct UndoMove {
     to: (usize, usize),
     moved: Option<Piece>,
     captured: Option<Piece>,
+    // Save king locations to restore accurately on unmake
+    prev_white_king: (usize, usize),
+    prev_black_king: (usize, usize),
 }
 
 #[inline]
 fn make_move_simple(board: &mut Board, from: (usize, usize), to: (usize, usize)) -> UndoMove {
     let moved = board.get(from.0, from.1);
     let captured = board.get(to.0, to.1);
+    // snapshot king locations before move
+    let prev_white_king = board.get_king_location(Color::White);
+    let prev_black_king = board.get_king_location(Color::Black);
     // apply move directly
     board.set(to.0, to.1, moved);
     board.set(from.0, from.1, None);
-    UndoMove { from, to, moved, captured }
+    // update king location cache if a king moved
+    if let Some(p) = moved {
+        if p.get_type() == PieceType::King {
+            board.set_king_location(p.get_color(), to);
+        }
+    }
+    UndoMove { from, to, moved, captured, prev_white_king, prev_black_king }
 }
 
 #[inline]
@@ -664,6 +679,9 @@ fn unmake_move_simple(board: &mut Board, undo: UndoMove) {
     // restore original squares
     board.set(undo.from.0, undo.from.1, undo.moved);
     board.set(undo.to.0, undo.to.1, undo.captured);
+    // restore king location cache from snapshot
+    board.set_king_location(Color::White, undo.prev_white_king);
+    board.set_king_location(Color::Black, undo.prev_black_king);
 }
 
 // Sorts the move table by score in ascending order and returns a cloned, sorted vector.
