@@ -127,7 +127,9 @@ pub fn run_cli() {
         if must_generate_move(&mut game, &mut mode, move_is_bot_move) {
             let strength = if game.active_color_is_white() { white_bot_strength } else { black_bot_strength };
             let search_depth = if game.active_color_is_white() { white_bot_search_depth } else { black_bot_search_depth };
-            if let Some(generated_move) = generate_move_as_san(*game.get_game_state(), search_depth, strength) {
+            let gs_copy = *game.get_game_state();
+            let history_clone = game.get_history().clone();
+            if let Some(generated_move) = generate_move_as_san(gs_copy, &history_clone, search_depth, strength) {
                 println ! ("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {

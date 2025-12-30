@@ -9,6 +9,9 @@ use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
+use crate::history::history::History;
+use crate::piece::piece_mover::PieceMover;
+use crate::state::fen::writer::game_state_to_fen_string;
 use crate::search::zobrist::compute_zobrist;
 use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
 use rayon::prelude::*;
@@ -56,9 +59,9 @@ fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 ///
-pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_strength:usize) -> Option<((usize, usize), (usize, usize))> {
+pub (crate) fn find_move(game_state: GameState, history: &History, search_depth: usize, playing_strength:usize) -> Option<((usize, usize), (usize, usize))> {
     // Keep existing API by delegating to the info-enabled variant
-    match find_move_with_info(game_state, search_depth, playing_strength) {
+    match find_move_with_info(game_state, history, search_depth, playing_strength) {
         Some((from, to, _score_cp, _depth_used)) => Some((from, to)),
         None => None,
     }
@@ -68,6 +71,7 @@ pub (crate) fn find_move(game_state: GameState, search_depth: usize, playing_str
 /// and the effective search depth that was actually used internally.
 pub(crate) fn find_move_with_info(
     game_state: GameState,
+    history: &History,
     search_depth: usize,
     playing_strength: usize,
 ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
@@ -101,8 +105,35 @@ pub(crate) fn find_move_with_info(
     let mut alpha = i32::MIN + 1;
     let beta = i32::MAX - 1;
 
+    // Root-level hard 3-fold avoidance: filter out any root move that would create
+    // a third occurrence of the same position (per truncated FEN used in History).
+    // If filtering removes all moves (e.g., only repetition saves a loss), fall back to all moves.
+    let root_moves: Vec<((usize, usize), (usize, usize))> = {
+        let mut v = Vec::with_capacity(moves.len());
+        for &(from, to) in &moves {
+            let is_capture = board.get(to.0, to.1).is_some();
+            let mut gs = game_state; // GameState is Copy
+            let mut promote: Option<Piece> = None;
+            if let Some(p) = gs.board().get(from.0, from.1) {
+                if p.get_type() == PieceType::Pawn {
+                    if (active_color == Color::White && to.0 == 7) || (active_color == Color::Black && to.0 == 0) {
+                        promote = Some(Piece::new(PieceType::Queen, active_color));
+                    }
+                }
+            }
+            let makes_threefold = if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
+                gs.switch_player_turn();
+                let fen = game_state_to_fen_string(gs);
+                let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+                history.fen_repetition_count(&truncated) >= 2
+            } else { false };
+            if !makes_threefold { v.push((from, to)); }
+        }
+        if v.is_empty() { moves.clone() } else { v }
+    };
+
     // First: search one move serially (YBWC-lite) to seed bounds and provide good ordering
-    let (first_from, first_to) = moves[0];
+    let (first_from, first_to) = root_moves[0];
     // Use make/unmake on a single temporary board instead of cloning per move
     let mut tmp_first = board.clone();
     let undo_first = make_move_simple(&mut tmp_first, first_from, first_to);
@@ -131,6 +162,33 @@ pub(crate) fn find_move_with_info(
         first_adjusted += n;
     }
 
+    // Repetition-avoidance at root: if making this move would cause a 3-fold repetition
+    // and the side to move currently stands better than a draw, penalize strongly.
+    {
+        let is_capture = board.get(first_to.0, first_to.1).is_some();
+        let mut gs = game_state; // GameState is Copy
+        let mut promote: Option<Piece> = None;
+        // naive promotion to queen if a pawn reaches last rank
+        if let Some(p) = gs.board().get(first_from.0, first_from.1) {
+            if p.get_type() == PieceType::Pawn {
+                if (active_color == Color::White && first_to.0 == 7) || (active_color == Color::Black && first_to.0 == 0) {
+                    promote = Some(Piece::new(PieceType::Queen, active_color));
+                }
+            }
+        }
+        if PieceMover::move_piece(&mut gs, first_from, first_to, is_capture, promote) {
+            gs.switch_player_turn();
+            let fen = game_state_to_fen_string(gs);
+            let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+            let count = history.fen_repetition_count(&truncated);
+            let side_adv = if active_color == Color::White { first_adjusted } else { -first_adjusted };
+            if count >= 2 && side_adv > 0 {
+                // strong penalty to avoid draw when better
+                first_adjusted -= if active_color == Color::White { 50_000 } else { -50_000 };
+            }
+        }
+    }
+
     // Emit info for the first (seed) move
     emit_info(first_from, first_to, first_adjusted, effective_depth);
 
@@ -138,11 +196,11 @@ pub(crate) fn find_move_with_info(
     if active_color == Color::White { if first_score_raw > alpha { alpha = first_score_raw; } }
 
     // Collect scored moves
-    let mut move_table: Vec<((usize, usize), (usize, usize), i32)> = Vec::with_capacity(moves.len());
+    let mut move_table: Vec<((usize, usize), (usize, usize), i32)> = Vec::with_capacity(root_moves.len());
     move_table.push((first_from, first_to, first_adjusted));
 
     // Remaining moves
-    let rest = &moves[1..];
+    let rest = &root_moves[1..];
 
     let _results: Vec<_> = rest.par_iter()
         .map(|&(from, to)| {
@@ -168,6 +226,29 @@ pub(crate) fn find_move_with_info(
             }
             let sigma = strength_noise_sigma(ps as usize);
             if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted_score += n; }
+            // repetition-avoidance at root for parallel moves
+            {
+                let is_capture = board.get(to.0, to.1).is_some();
+                let mut gs = game_state; // Copy
+                let mut promote: Option<Piece> = None;
+                if let Some(p) = gs.board().get(from.0, from.1) {
+                    if p.get_type() == PieceType::Pawn {
+                        if (active_color == Color::White && to.0 == 7) || (active_color == Color::Black && to.0 == 0) {
+                            promote = Some(Piece::new(PieceType::Queen, active_color));
+                        }
+                    }
+                }
+                if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
+                    gs.switch_player_turn();
+                    let fen = game_state_to_fen_string(gs);
+                    let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+                    let count = history.fen_repetition_count(&truncated);
+                    let side_adv = if active_color == Color::White { adjusted_score } else { -adjusted_score };
+                    if count >= 2 && side_adv > 0 {
+                        adjusted_score -= if active_color == Color::White { 50_000 } else { -50_000 };
+                    }
+                }
+            }
             // Emit info for each evaluated root move
             emit_info(from, to, adjusted_score, effective_depth);
             (from, to, adjusted_score)
@@ -346,8 +427,14 @@ fn alphabeta(board: &Board, to_move: Color, depth: usize, mut alpha: i32, mut be
             let tt_score = from_tt_score(entry.score, ply);
             match entry.bound {
                 Bound::Exact => { return tt_score; }
-                Bound::Lower => { if tt_score >= beta { return tt_score; } if tt_score > alpha { alpha = tt_score; } }
-                Bound::Upper => { if tt_score <= alpha { return tt_score; } if tt_score < beta { beta = tt_score; } }
+                Bound::Lower => {
+                    if tt_score >= beta { return tt_score; }
+                    if tt_score > alpha { alpha = tt_score; }
+                }
+                Bound::Upper => {
+                    if tt_score <= alpha { return tt_score; }
+                    if tt_score < beta { beta = tt_score; }
+                }
             }
         }
     }

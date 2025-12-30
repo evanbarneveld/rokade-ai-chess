@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_move, find_move_with_info, set_info_callback};
+use crate::search::search::{find_move_with_info, set_info_callback};
 
 // Minimal UCI interface implementation.
 // Supported commands:
@@ -97,7 +97,7 @@ pub fn run_uci() -> io::Result<()> {
 
             // If we have extra info from the search, emit a UCI info line
             if let Some((score_cp, depth_used)) = info_opt {
-                let info = format!("info depth {} score cp {} time {} pv {}", depth_used, score_cp, elapsed_ms, best_move_str);
+                let info = format!("info depth {} score cp {} time {} pv {}", depth_used, (score_cp as f32)/3.0f32, elapsed_ms, best_move_str);
                 writeln!(stdout, "{}", info)?; log_io(&mut log, "OUT", &info);
             }
 
@@ -190,34 +190,16 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
     engine.move_piece(from_idx, to_idx)
 }
 
-fn go_bestmove(engine: &mut Chess, line: &str, move_time:usize) -> String {
-    // Currently we only support depth-limited instant move selection: pick the first legal move.
-    // Parse optional depth but ignore for now.
-    let mut depth = parse_depth(line).unwrap_or(7);
-    if depth > 7 { depth = 7; }
-
-    let game_state = engine.get_game_state();
-    let playing_strength = move_time;
-    let best_move = find_move(*game_state, depth, playing_strength);
-
-    if best_move.is_some() {
-        let mv = best_move.unwrap();
-        return as_move_str(mv.0, mv.1);
-    }
-
-    // No legal moves; signal no move.
-    String::from("0000")
-}
-
 pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
     let mut depth = parse_depth(line).unwrap_or(7);
     if depth > 7 { depth = 7; }
 
-    let game_state = engine.get_game_state();
+    let gs_copy = { *engine.get_game_state() };
+    let history_clone = { engine.get_history().clone() };
     let playing_strength = move_time;
 
-    let best = find_move_with_info(*game_state, depth, playing_strength);
+    let best = find_move_with_info(gs_copy, &history_clone, depth, playing_strength);
     if let Some(((fr, fc), (tr, tc), score_cp, depth_used)) = best {
         let mv = as_move_str((fr, fc), (tr, tc));
         return (mv, Some((score_cp, depth_used)));
