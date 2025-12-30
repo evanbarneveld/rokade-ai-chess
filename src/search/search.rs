@@ -201,10 +201,15 @@ pub(crate) fn find_move_with_info(
     let undo_first = make_move_simple(&mut tmp_first, first_from, first_to);
     let mut first_tt = TranspositionTable::new_with_default_size();
     first_tt.next_age();
+    let base_hmc = game_state.half_move_clock();
+    let root_moved_is_pawn = board.get(first_from.0, first_from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+    let root_is_capture = board.get(first_to.0, first_to.1).is_some();
+    let child_hmc_first: u32 = if root_is_capture || root_moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
     let first_score_raw = if effective_depth <= 1 {
         evaluate_position(&tmp_first)
     } else {
-        alphabeta(&mut tmp_first, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt)
+        let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
+        alphabeta(&mut tmp_first, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut first_tt, child_hmc_first, &mut rep_stack)
     };
     // restore board
     unmake_move_simple(&mut tmp_first, undo_first);
@@ -216,6 +221,19 @@ pub(crate) fn find_move_with_info(
             Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
         };
         first_adjusted += cap_val / 10;
+    }
+    // DTZ-like incentive at root: if clearly winning and 50-move clock is high, strongly prefer clock-resetting moves
+    let side_adv = if active_color == Color::White { first_score_raw } else { -first_score_raw };
+    if side_adv > 150 && base_hmc >= 80 {
+        if root_is_capture || root_moved_is_pawn {
+            // scale bonus by proximity to 100 plies
+            let scale = (base_hmc as i32 - 79).min(21); // 1..21
+            first_adjusted += 15 * scale; // up to ~+315cp
+        } else {
+            // mild penalty to non-resetting moves near 50-move horizon
+            let scale = (base_hmc as i32 - 79).min(21);
+            first_adjusted -= 8 * scale;
+        }
     }
     // Inject random evaluation noise based on strength (weaker -> more noise)
     let sigma = strength_noise_sigma(ps as usize);
@@ -275,7 +293,12 @@ pub(crate) fn find_move_with_info(
             let search_score = if effective_depth <= 1 {
                 evaluate_position(&simulation_board)
             } else {
-                alphabeta(&mut simulation_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut local_tt)
+                let base_hmc = game_state.half_move_clock();
+                let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                let is_capture = board.get(to.0, to.1).is_some();
+                let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+                let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
+                alphabeta(&mut simulation_board, opposite_color(active_color), effective_depth - 1, alpha, beta, 1, &mut local_tt, child_hmc, &mut rep_stack)
             };
             // unmake for cleanliness (not strictly required since board goes out of scope)
             unmake_move_simple(&mut simulation_board, u);
@@ -286,6 +309,19 @@ pub(crate) fn find_move_with_info(
                     Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
                 };
                 adjusted_score += cap_val / 10;
+            }
+            // DTZ-like incentive for parallel root moves
+            let side_adv = if active_color == Color::White { search_score } else { -search_score };
+            if side_adv > 150 && base_hmc >= 80 {
+                let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                let is_capture = board.get(to.0, to.1).is_some();
+                if is_capture || moved_is_pawn {
+                    let scale = (base_hmc as i32 - 79).min(21);
+                    adjusted_score += 15 * scale;
+                } else {
+                    let scale = (base_hmc as i32 - 79).min(21);
+                    adjusted_score -= 8 * scale;
+                }
             }
             let sigma = strength_noise_sigma(ps as usize);
             if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted_score += n; }
@@ -508,23 +544,41 @@ fn is_passed_pawn_simple(board: &Board, row: usize, col: usize, color: Color) ->
 }
 
 // Alpha-beta pruning search. Returns evaluation in centipawns (positive is better for White).
-fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mut beta: i32, ply: i32, tt: &mut TranspositionTable) -> i32 {
+fn alphabeta(
+    board: &mut Board,
+    to_move: Color,
+    depth: usize,
+    mut alpha: i32,
+    mut beta: i32,
+    ply: i32,
+    tt: &mut TranspositionTable,
+    halfmove_clock: u32,
+    rep_stack: &mut Vec<u64>,
+) -> i32 {
     // Count every node we enter
     bump_node();
 
     // print board
     //println!("alpha-beta\n{}", board.get_board_display_string(None));
 
+    // Repetition/50-move draw checks at node entry
+    let key_here = compute_zobrist(&*board, to_move);
+    // If this key already exists in the current line, it's a repetition -> draw
+    if rep_stack.iter().any(|&k| k == key_here) {
+        return 0;
+    }
+    // 50-move rule
+    if halfmove_clock >= 100 {
+        return 0;
+    }
+
     if depth == 0 {
-        /*let score = evaluate_position(board);
-        //println!("score: {}", score);
-        return score;*/
         // At leaf: switch to quiescence to avoid horizon effects
-        return qsearch(board, to_move, alpha, beta);
+        return qsearch(board, to_move, alpha, beta, halfmove_clock, rep_stack);
     }
 
     // TT probe
-    let key = compute_zobrist(&*board, to_move);
+    let key = key_here;
     if let Some(entry) = tt.probe(key) {
         if entry.depth as usize >= depth {
             let tt_score = from_tt_score(entry.score, ply);
@@ -556,7 +610,20 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
         // Stable-partition: keep index 0 (possibly TT move) in place, sort the tail
         let (head, tail) = moves.split_at_mut(1);
         let board_ref = &*board;
-        tail.sort_by_key(|&(from, to)| -move_score_mvv_lva(board_ref, from, to));
+        let hmc = halfmove_clock;
+        tail.sort_by_key(|&(from, to)| {
+            // Base MVV-LVA score
+            let mut key = move_score_mvv_lva(board_ref, from, to);
+            // DTZ-like ordering bump: near 50-move horizon, prioritize pawn moves and captures
+            if hmc >= 80 {
+                let moved_is_pawn = board_ref.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                let is_capture = board_ref.get(to.0, to.1).is_some();
+                if moved_is_pawn || is_capture {
+                    key += 100_000; // large bump to bring forward
+                }
+            }
+            -key
+        });
         // head is unused, only here to make split_at_mut compile
         let _ = head;
     }
@@ -577,17 +644,24 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
     let original_alpha = alpha;
     let original_beta = beta;
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
+    // Push current position to repetition stack for descendants
+    rep_stack.push(key_here);
+
     let value = if to_move == Color::White {
         let mut value = MIN_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
+            let target_piece = board.get(to.0, to.1);
             let u = make_move_simple(board, from, to);
             // Passed-pawn push extension (B5): If a pawn move results in a passed pawn
             // reaching the 6th/7th rank (relative to the side) in a near-endgame, extend by +1 ply.
             let mut child_depth = depth.saturating_sub(1);
+            // Track halfmove clock: reset on pawn move or capture
+            let mut child_hmc = halfmove_clock + 1;
             if let Some(p) = moved_piece {
                 if p.get_type() == PieceType::Pawn {
+                    child_hmc = 0;
                     let color = p.get_color();
                     let r = to.0; let c = to.1;
                     if game_phase_light(board) <= 8 && is_passed_pawn_simple(board, r, c, color) {
@@ -598,7 +672,8 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
                     }
                 }
             }
-            let score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt);
+            if target_piece.is_some() { child_hmc = 0; }
+            let score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
             unmake_move_simple(board, u);
             if score > value { value = score; }
             if value > alpha { alpha = value; best_from_to = Some((from, to)); }
@@ -610,11 +685,15 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
         for (from, to) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
+            let target_piece = board.get(to.0, to.1);
             let u = make_move_simple(board, from, to);
             // Passed-pawn push extension (B5)
             let mut child_depth = depth.saturating_sub(1);
+            // Track halfmove clock for child
+            let mut child_hmc = halfmove_clock + 1;
             if let Some(p) = moved_piece {
                 if p.get_type() == PieceType::Pawn {
+                    child_hmc = 0;
                     let color = p.get_color();
                     let r = to.0; let c = to.1;
                     if game_phase_light(board) <= 8 && is_passed_pawn_simple(board, r, c, color) {
@@ -625,7 +704,8 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
                     }
                 }
             }
-            let score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt);
+            if target_piece.is_some() { child_hmc = 0; }
+            let score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
             unmake_move_simple(board, u);
             if score < value { value = score; }
             if value < beta { beta = value; best_from_to = Some((from, to)); }
@@ -633,6 +713,9 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
         }
         value
     };
+
+    // Pop this node key
+    let _ = rep_stack.pop();
 
     // Store to TT
     let bound = if value <= original_alpha { Bound::Upper }
@@ -645,7 +728,12 @@ fn alphabeta(board: &mut Board, to_move: Color, depth: usize, mut alpha: i32, mu
 }
 
 // Quiescence search: consider only tactical continuations (captures) unless in check.
-fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 {
+fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmove_clock: u32, rep_stack: &mut Vec<u64>) -> i32 {
+    // Draw checks in quiescence as well
+    let key_here = compute_zobrist(&*board, to_move);
+    if rep_stack.iter().any(|&k| k == key_here) { return 0; }
+    if halfmove_clock >= 100 { return 0; }
+
     // Stand-pat (static) evaluation. Suppress stand-pat only when in check.
     let in_check = is_side_in_check(board, to_move);
     let stand_pat = evaluate_position(&*board);
@@ -744,8 +832,11 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 
                     if vic_v + 50 < att_v { continue; }
                 }
             }
+            let was_capture = board.get(to.0, to.1).is_some();
             let u = make_move_simple(board, from, to);
-            let score = qsearch(board, Color::Black, a, bnd);
+            let mut child_hmc = halfmove_clock + 1;
+            if was_capture { child_hmc = 0; }
+            let score = qsearch(board, Color::Black, a, bnd, child_hmc, rep_stack);
             unmake_move_simple(board, u);
             if score > best { best = score; }
             if best > a { a = best; }
@@ -762,8 +853,11 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32) -> i32 
                     if vic_v + 50 < att_v { continue; }
                 }
             }
+            let was_capture = board.get(to.0, to.1).is_some();
             let u = make_move_simple(board, from, to);
-            let score = qsearch(board, Color::White, a, bnd);
+            let mut child_hmc = halfmove_clock + 1;
+            if was_capture { child_hmc = 0; }
+            let score = qsearch(board, Color::White, a, bnd, child_hmc, rep_stack);
             unmake_move_simple(board, u);
             if score < best { best = score; }
             if best < bnd { bnd = best; }

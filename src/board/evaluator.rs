@@ -258,6 +258,24 @@ pub fn evaluate_position(board: &Board) -> i32 {
                             val += (bonus * eg) / 24;
                         }
                     }
+
+                    // Cut-off king heuristic: rook cutting the enemy king along file or rank with empty squares between
+                    if let Some((ek_r, ek_c)) = find_king(board, opponent(color)) {
+                        // Same file cut-off
+                        if col == ek_c {
+                            if file_clear_between(board, row, ek_r, col) {
+                                let dist = (row as i32 - ek_r as i32).abs() as i32;
+                                if dist >= 2 { val += (10 * eg) / 24; }
+                            }
+                        }
+                        // Same rank cut-off
+                        if row == ek_r {
+                            if rank_clear_between(board, col, ek_c, row) {
+                                let dist = (col as i32 - ek_c as i32).abs() as i32;
+                                if dist >= 2 { val += (10 * eg) / 24; }
+                            }
+                        }
+                    }
                 }
 
                 // Early-opening discouragement: rook tucked behind two own pawns on back rank (Rb1/Rg1 patterns)
@@ -599,5 +617,14 @@ fn file_clear_between(board: &Board, r1: usize, r2: usize, file: usize) -> bool 
     let (lo, hi) = if r1 < r2 { (r1+1, r2-1) } else { (r2+1, r1-1) };
     if hi < lo { return true; }
     for r in lo..=hi { if board.get(r, file).is_some() { return false; } }
+    true
+}
+
+// Check that squares strictly between c1 and c2 on the same rank are empty
+fn rank_clear_between(board: &Board, c1: usize, c2: usize, rank: usize) -> bool {
+    if c1==c2 { return true; }
+    let (lo, hi) = if c1 < c2 { (c1+1, c2-1) } else { (c2+1, c1-1) };
+    if hi < lo { return true; }
+    for c in lo..=hi { if board.get(rank, c).is_some() { return false; } }
     true
 }
