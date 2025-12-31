@@ -60,7 +60,7 @@ const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 /// returns the evaluated score (in centipawns) for the selected move
 /// and the effective search depth that was actually used internally.
-pub(crate) fn find_move_with_info(
+pub fn find_best_move(
     game_state: GameState,
     history: &History,
     search_depth: usize,

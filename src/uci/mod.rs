@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_move_with_info, DEFAULT_SEARCH_DEPTH};
+use crate::search::search::{find_best_move, DEFAULT_SEARCH_DEPTH};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 use crate::search::uci_feedback::set_info_callback;
@@ -217,7 +217,7 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, _move_time: usize) 
     // Use maximum playing strength by default; time control will be enforced by search budget.
     let playing_strength = 1000usize;
 
-    let best = find_move_with_info(gs_copy, &history_clone, depth, playing_strength);
+    let best = find_best_move(gs_copy, &history_clone, depth, playing_strength);
     if let Some(((fr, fc), (tr, tc), score_cp, depth_used)) = best {
         let mv = as_move_str((fr, fc), (tr, tc));
         return (mv, Some((score_cp, depth_used)));
