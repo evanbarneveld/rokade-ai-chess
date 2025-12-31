@@ -57,6 +57,137 @@ const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
 
 
 
+// ==========================
+// Small helpers extracted to simplify `find_best_move`
+// ==========================
+
+#[inline]
+fn reorder_with_tt_hint(
+    ordered: &mut Vec<((usize, usize), (usize, usize))>,
+    tt: &TranspositionTable,
+    board: &Board,
+    side: Color,
+) {
+    if let Some(entry) = tt.probe(compute_zobrist(board, side)) {
+        let bm = decode_move(entry.best_from, entry.best_to);
+        if let Some(pos) = ordered.iter().position(|m| *m == bm) {
+            let first = ordered.remove(pos);
+            ordered.insert(0, first);
+        }
+    }
+}
+
+#[inline]
+fn is_square_pawn_attacked_by(board: &Board, attacker: Color, sq: (usize, usize)) -> bool {
+    let (r, c) = sq;
+    if attacker == Color::White {
+        if r >= 1 {
+            if c >= 1 {
+                if let Some(p) = board.get(r - 1, c - 1) {
+                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                        return true;
+                    }
+                }
+            }
+            if c + 1 < 8 {
+                if let Some(p) = board.get(r - 1, c + 1) {
+                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                        return true;
+                    }
+                }
+            }
+        }
+    } else {
+        if r + 1 < 8 {
+            if c >= 1 {
+                if let Some(p) = board.get(r + 1, c - 1) {
+                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                        return true;
+                    }
+                }
+            }
+            if c + 1 < 8 {
+                if let Some(p) = board.get(r + 1, c + 1) {
+                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+#[inline]
+fn adjust_root_score(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    base_hmc: u32,
+    is_capture: bool,
+    moved_is_pawn: bool,
+    score_raw: i32,
+    strength_ps: i32,
+) -> i32 {
+    // Base root bonus
+    let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
+
+    // SEE-based root penalty with queen special handling
+    {
+        let mut post = base_board.clone();
+        let moved_piece = base_board.get(from.0, from.1);
+        let captured = base_board.get(to.0, to.1);
+        if let Some(mp) = moved_piece {
+            post.set(from.0, from.1, None);
+            post.set(to.0, to.1, Some(mp));
+            let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
+            let see = see_dest_estimate(&post, side, to, cap_val);
+            if see < 0 {
+                if mp.get_type() == PieceType::Queen {
+                    let opp = opposite_color(side);
+                    let mut pen = (-see).max(QUEEN_LOSING_PEN_BASE_CP);
+                    if is_square_pawn_attacked_by(&post, opp, to) {
+                        pen += QUEEN_PAWN_ATTACK_EXTRA_CP;
+                    }
+                    adjusted -= pen;
+                } else {
+                    let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
+                    adjusted -= pen;
+                }
+            }
+        }
+    }
+
+    // Small capture bonus at root
+    if let Some(captured) = base_board.get(to.0, to.1) {
+        let cap_val = capture_value_cp(captured.get_type());
+        adjusted += cap_val / ROOT_CAPTURE_BONUS_DIV;
+    }
+
+    // Endgame/50-move rule pressure scaling
+    let side_adv = if side == Color::White { score_raw } else { -score_raw };
+    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD {
+        let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1)).min(ENDGAME_SCALE_MAX);
+        if is_capture || moved_is_pawn {
+            adjusted += ENDGAME_CAPTURE_SCALE_BONUS_CP * scale;
+        } else {
+            adjusted -= ENDGAME_NONCAP_SCALE_PENALTY_CP * scale;
+        }
+    }
+
+    // Playing-strength noise
+    let sigma = strength_noise_sigma(strength_ps as usize);
+    if sigma > 0 {
+        let n: i32 = rng().random_range(-sigma..=sigma);
+        adjusted += n;
+    }
+
+    adjusted
+}
+
+
+
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 /// returns the evaluated score (in centipawns) for the selected move
 /// and the effective search depth that was actually used internally.
@@ -146,13 +277,7 @@ pub fn find_best_move(
 
             // Order: if TT has a move at root, try to place it first
             let mut ordered = root_moves.clone();
-            if let Some(entry) = tt.probe(compute_zobrist(&*board, active_color)) {
-                let bm = decode_move(entry.best_from, entry.best_to);
-                if let Some(pos) = ordered.iter().position(|m| *m == bm) {
-                    let first = ordered.remove(pos);
-                    ordered.insert(0, first);
-                }
-            }
+            reorder_with_tt_hint(&mut ordered, &tt, &board, active_color);
 
             let enable_parallel =
                 depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
@@ -190,107 +315,17 @@ pub fn find_best_move(
                     };
                     tmp.unmake_move_simple(u);
 
-                    // Adjust score for root-only heuristics
-                    let mut adjusted =
-                        score_raw + root_move_bonus(&board, pv_from, pv_to, active_color);
-                    // Root SEE gate: penalize moves with negative SEE on destination
-                    {
-                        let mut post = board.clone();
-                        let moved_piece = board.get(pv_from.0, pv_from.1);
-                        let captured = board.get(pv_to.0, pv_to.1);
-                        if let Some(mp) = moved_piece {
-                            post.set(pv_from.0, pv_from.1, None);
-                            post.set(pv_to.0, pv_to.1, Some(mp));
-                            let cap_val =
-                                captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-                            let see = see_dest_estimate(&post, active_color, pv_to, cap_val);
-                            if see < 0 {
-                                // Hard demotion for losing queen moves at root
-                                if mp.get_type() == PieceType::Queen {
-                                    let mut pawn_attacked = false;
-                                    let opp = opposite_color(active_color);
-                                    let (r, c) = (pv_to.0, pv_to.1);
-                                    if opp == Color::White {
-                                        if r >= 1 {
-                                            if c >= 1 {
-                                                if let Some(p) = post.get(r - 1, c - 1) {
-                                                    if p.get_color() == opp
-                                                        && p.get_type() == PieceType::Pawn
-                                                    {
-                                                        pawn_attacked = true;
-                                                    }
-                                                }
-                                            }
-                                            if c + 1 < 8 {
-                                                if let Some(p) = post.get(r - 1, c + 1) {
-                                                    if p.get_color() == opp
-                                                        && p.get_type() == PieceType::Pawn
-                                                    {
-                                                        pawn_attacked = true;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        if r + 1 < 8 {
-                                            if c >= 1 {
-                                                if let Some(p) = post.get(r + 1, c - 1) {
-                                                    if p.get_color() == opp
-                                                        && p.get_type() == PieceType::Pawn
-                                                    {
-                                                        pawn_attacked = true;
-                                                    }
-                                                }
-                                            }
-                                            if c + 1 < 8 {
-                                                if let Some(p) = post.get(r + 1, c + 1) {
-                                                    if p.get_color() == opp
-                                                        && p.get_type() == PieceType::Pawn
-                                                    {
-                                                        pawn_attacked = true;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    let mut pen = (-see).max(QUEEN_LOSING_PEN_BASE_CP); // decisive ban at root
-                                    if pawn_attacked {
-                                        pen += QUEEN_PAWN_ATTACK_EXTRA_CP;
-                                    }
-                                    adjusted -= pen;
-                                } else {
-                                    let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
-                                    adjusted -= pen;
-                                }
-                            }
-                        }
-                    }
-                    if let Some(captured) = board.get(pv_to.0, pv_to.1) {
-                        let cap_val = capture_value_cp(captured.get_type());
-                        adjusted += cap_val / ROOT_CAPTURE_BONUS_DIV;
-                    }
-                    let side_adv = if active_color == Color::White {
-                        score_raw
-                    } else {
-                        -score_raw
-                    };
-                    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD
-                    {
-                        if is_capture || moved_is_pawn {
-                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
-                                .min(ENDGAME_SCALE_MAX);
-                            adjusted += ENDGAME_CAPTURE_SCALE_BONUS_CP * scale;
-                        } else {
-                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
-                                .min(ENDGAME_SCALE_MAX);
-                            adjusted -= ENDGAME_NONCAP_SCALE_PENALTY_CP * scale;
-                        }
-                    }
-                    let sigma = strength_noise_sigma(ps as usize);
-                    if sigma > 0 {
-                        let n: i32 = rng().random_range(-sigma..=sigma);
-                        adjusted += n;
-                    }
+                    let adjusted = adjust_root_score(
+                        &board,
+                        active_color,
+                        pv_from,
+                        pv_to,
+                        base_hmc,
+                        is_capture,
+                        moved_is_pawn,
+                        score_raw,
+                        ps,
+                    );
 
                     best_from_to = Some((pv_from, pv_to));
                     best_adjusted = adjusted;
@@ -339,101 +374,17 @@ pub fn find_best_move(
                         tmp.unmake_move_simple(u);
 
                         // Root adjustments (skip repetition-history check to keep parallel code simple)
-                        let mut adjusted = score_raw + root_move_bonus(&base_board, from, to, side);
-                        // Root SEE gate: penalize moves with negative SEE on destination
-                        {
-                            let mut post = base_board.clone();
-                            let moved_piece = base_board.get(from.0, from.1);
-                            let captured = base_board.get(to.0, to.1);
-                            if let Some(mp) = moved_piece {
-                                post.set(from.0, from.1, None);
-                                post.set(to.0, to.1, Some(mp));
-                                let cap_val =
-                                    captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-                                let see = see_dest_estimate(&post, side, to, cap_val);
-                                if see < 0 {
-                                    if mp.get_type() == PieceType::Queen {
-                                        let mut pawn_attacked = false;
-                                        let opp = opposite_color(side);
-                                        let (r, c) = (to.0, to.1);
-                                        if opp == Color::White {
-                                            if r >= 1 {
-                                                if c >= 1 {
-                                                    if let Some(p) = post.get(r - 1, c - 1) {
-                                                        if p.get_color() == opp
-                                                            && p.get_type() == PieceType::Pawn
-                                                        {
-                                                            pawn_attacked = true;
-                                                        }
-                                                    }
-                                                }
-                                                if c + 1 < 8 {
-                                                    if let Some(p) = post.get(r - 1, c + 1) {
-                                                        if p.get_color() == opp
-                                                            && p.get_type() == PieceType::Pawn
-                                                        {
-                                                            pawn_attacked = true;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            if r + 1 < 8 {
-                                                if c >= 1 {
-                                                    if let Some(p) = post.get(r + 1, c - 1) {
-                                                        if p.get_color() == opp
-                                                            && p.get_type() == PieceType::Pawn
-                                                        {
-                                                            pawn_attacked = true;
-                                                        }
-                                                    }
-                                                }
-                                                if c + 1 < 8 {
-                                                    if let Some(p) = post.get(r + 1, c + 1) {
-                                                        if p.get_color() == opp
-                                                            && p.get_type() == PieceType::Pawn
-                                                        {
-                                                            pawn_attacked = true;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        let mut pen = (-see).max(1000);
-                                        if pawn_attacked {
-                                            pen += 500;
-                                        }
-                                        adjusted -= pen;
-                                    } else {
-                                        let pen = (-see).clamp(80, 300);
-                                        adjusted -= pen;
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(captured) = base_board.get(to.0, to.1) {
-                            let cap_val = capture_value_cp(captured.get_type());
-                            adjusted += cap_val / 10;
-                        }
-                        let side_adv = if side == Color::White {
-                            score_raw
-                        } else {
-                            -score_raw
-                        };
-                        if side_adv > 150 && base_hmc_loc >= 80 {
-                            if is_capture || moved_is_pawn {
-                                let scale = (base_hmc_loc as i32 - 79).min(21);
-                                adjusted += 15 * scale;
-                            } else {
-                                let scale = (base_hmc_loc as i32 - 79).min(21);
-                                adjusted -= 8 * scale;
-                            }
-                        }
-                        let sigma = strength_noise_sigma(ps as usize);
-                        if sigma > 0 {
-                            let n: i32 = rng().random_range(-sigma..=sigma);
-                            adjusted += n;
-                        }
+                        let adjusted = adjust_root_score(
+                            &base_board,
+                            side,
+                            from,
+                            to,
+                            base_hmc_loc,
+                            is_capture,
+                            moved_is_pawn,
+                            score_raw,
+                            ps,
+                        );
                         (from, to, adjusted, score_raw)
                     })
                     .reduce(
@@ -513,33 +464,17 @@ pub fn find_best_move(
                     tmp.unmake_move_simple(u);
 
                     // Adjust score for root-only heuristics
-                    let mut adjusted = score_raw + root_move_bonus(&board, from, to, active_color);
-                    if let Some(captured) = board.get(to.0, to.1) {
-                        let cap_val = capture_value_cp(captured.get_type());
-                        adjusted += cap_val / ROOT_CAPTURE_BONUS_DIV;
-                    }
-                    let side_adv = if active_color == Color::White {
-                        score_raw
-                    } else {
-                        -score_raw
-                    };
-                    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD
-                    {
-                        if is_capture || moved_is_pawn {
-                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
-                                .min(ENDGAME_SCALE_MAX);
-                            adjusted += ENDGAME_CAPTURE_SCALE_BONUS_CP * scale;
-                        } else {
-                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
-                                .min(ENDGAME_SCALE_MAX);
-                            adjusted -= ENDGAME_NONCAP_SCALE_PENALTY_CP * scale;
-                        }
-                    }
-                    let sigma = strength_noise_sigma(ps as usize);
-                    if sigma > 0 {
-                        let n: i32 = rng().random_range(-sigma..=sigma);
-                        adjusted += n;
-                    }
+                    let mut adjusted = adjust_root_score(
+                        &board,
+                        active_color,
+                        from,
+                        to,
+                        base_hmc,
+                        is_capture,
+                        moved_is_pawn,
+                        score_raw,
+                        ps,
+                    );
                     // repetition-avoidance at root
                     {
                         let is_capture = board.get(to.0, to.1).is_some();
