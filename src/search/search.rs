@@ -188,6 +188,105 @@ fn adjust_root_score(
 
 
 
+#[inline]
+fn evaluate_after_root_move(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    depth_now: usize,
+    a: i32,
+    b: i32,
+    tt: &mut TranspositionTable,
+    base_hmc: u32,
+) -> (i32, bool, bool) {
+    let mut tmp = base_board.clone();
+    let u = tmp.make_move_simple(from, to);
+    let moved_is_pawn = base_board
+        .get(from.0, from.1)
+        .map(|p| p.get_type() == PieceType::Pawn)
+        .unwrap_or(false);
+    let is_capture = base_board.get(to.0, to.1).is_some();
+    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+    let score_raw = if depth_now <= 1 {
+        evaluate_position(&tmp)
+    } else {
+        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
+        alphabeta(
+            &mut tmp,
+            opposite_color(side),
+            depth_now - 1,
+            a,
+            b,
+            1,
+            tt,
+            child_hmc,
+            &mut rep_stack,
+        )
+    };
+    tmp.unmake_move_simple(u);
+    (score_raw, is_capture, moved_is_pawn)
+}
+
+#[inline]
+fn adjusted_root_eval_for_move(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    base_hmc: u32,
+    score_raw: i32,
+    is_capture: bool,
+    moved_is_pawn: bool,
+    ps: i32,
+) -> i32 {
+    adjust_root_score(
+        base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw, ps,
+    )
+}
+
+#[inline]
+fn apply_repetition_avoidance_bias(
+    adjusted: i32,
+    game_state: GameState,
+    history: &History,
+    board: &Board,
+    active_color: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+) -> i32 {
+    let mut adjusted = adjusted;
+    let is_capture = board.get(to.0, to.1).is_some();
+    let mut gs = game_state; // Copy
+    let mut promote: Option<Piece> = None;
+    if let Some(p) = gs.board().get(from.0, from.1) {
+        if p.get_type() == PieceType::Pawn {
+            if (active_color == Color::White && to.0 == 7)
+                || (active_color == Color::Black && to.0 == 0)
+            {
+                promote = Some(Piece::new(PieceType::Queen, active_color));
+            }
+        }
+    }
+    if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
+        gs.switch_player_turn();
+        let fen = game_state_to_fen_string(gs);
+        let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+        let count = history.fen_repetition_count(&truncated);
+        let sa = if active_color == Color::White { adjusted } else { -adjusted };
+        if count >= 2 && sa > 0 {
+            adjusted -= if active_color == Color::White {
+                REP_AVOIDANCE_BIAS_CP
+            } else {
+                -REP_AVOIDANCE_BIAS_CP
+            };
+        }
+    }
+    adjusted
+}
+
+
+
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 /// returns the evaluated score (in centipawns) for the selected move
 /// and the effective search depth that was actually used internally.
@@ -285,45 +384,27 @@ pub fn find_best_move(
                 // 1) Search the first (best-ordered) move serially to establish PV and bounds
                 let &(pv_from, pv_to) = ordered.first().unwrap();
                 {
-                    let mut tmp = board.clone();
-                    let u = tmp.make_move_simple(pv_from, pv_to);
-                    let moved_is_pawn = board
-                        .get(pv_from.0, pv_from.1)
-                        .map(|p| p.get_type() == PieceType::Pawn)
-                        .unwrap_or(false);
-                    let is_capture = board.get(pv_to.0, pv_to.1).is_some();
-                    let child_hmc: u32 = if is_capture || moved_is_pawn {
-                        0
-                    } else {
-                        base_hmc.saturating_add(1)
-                    };
-                    let score_raw = if depth_now <= 1 {
-                        evaluate_position(&tmp)
-                    } else {
-                        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
-                        alphabeta(
-                            &mut tmp,
-                            opposite_color(active_color),
-                            depth_now - 1,
-                            a,
-                            b,
-                            1,
-                            &mut tt,
-                            child_hmc,
-                            &mut rep_stack,
-                        )
-                    };
-                    tmp.unmake_move_simple(u);
+                    let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                        &board,
+                        active_color,
+                        pv_from,
+                        pv_to,
+                        depth_now,
+                        a,
+                        b,
+                        &mut tt,
+                        base_hmc,
+                    );
 
-                    let adjusted = adjust_root_score(
+                    let adjusted = adjusted_root_eval_for_move(
                         &board,
                         active_color,
                         pv_from,
                         pv_to,
                         base_hmc,
+                        score_raw,
                         is_capture,
                         moved_is_pawn,
-                        score_raw,
                         ps,
                     );
 
@@ -341,48 +422,30 @@ pub fn find_best_move(
                 let results = ordered[1..]
                     .par_iter()
                     .map(|&(from, to)| {
-                        let mut tmp = base_board.clone();
-                        let u = tmp.make_move_simple(from, to);
-                        let moved_is_pawn = base_board
-                            .get(from.0, from.1)
-                            .map(|p| p.get_type() == PieceType::Pawn)
-                            .unwrap_or(false);
-                        let is_capture = base_board.get(to.0, to.1).is_some();
-                        let child_hmc: u32 = if is_capture || moved_is_pawn {
-                            0
-                        } else {
-                            base_hmc_loc.saturating_add(1)
-                        };
-                        let score_raw = if depth_now <= 1 {
-                            evaluate_position(&tmp)
-                        } else {
-                            // local TT per task
-                            let mut local_tt = TranspositionTable::new_with_default_size();
-                            let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
-                            alphabeta(
-                                &mut tmp,
-                                opposite_color(side),
-                                depth_now - 1,
-                                a_loc,
-                                b_loc,
-                                1,
-                                &mut local_tt,
-                                child_hmc,
-                                &mut rep_stack,
-                            )
-                        };
-                        tmp.unmake_move_simple(u);
+                        // local TT per task
+                        let mut local_tt = TranspositionTable::new_with_default_size();
+                        let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                            &base_board,
+                            side,
+                            from,
+                            to,
+                            depth_now,
+                            a_loc,
+                            b_loc,
+                            &mut local_tt,
+                            base_hmc_loc,
+                        );
 
                         // Root adjustments (skip repetition-history check to keep parallel code simple)
-                        let adjusted = adjust_root_score(
+                        let adjusted = adjusted_root_eval_for_move(
                             &base_board,
                             side,
                             from,
                             to,
                             base_hmc_loc,
+                            score_raw,
                             is_capture,
                             moved_is_pawn,
-                            score_raw,
                             ps,
                         );
                         (from, to, adjusted, score_raw)
@@ -433,81 +496,41 @@ pub fn find_best_move(
             } else {
                 // Search sequentially over root moves
                 for &(from, to) in &ordered {
-                    let mut tmp = board.clone();
-                    let u = tmp.make_move_simple(from, to);
-                    let moved_is_pawn = board
-                        .get(from.0, from.1)
-                        .map(|p| p.get_type() == PieceType::Pawn)
-                        .unwrap_or(false);
-                    let is_capture = board.get(to.0, to.1).is_some();
-                    let child_hmc: u32 = if is_capture || moved_is_pawn {
-                        0
-                    } else {
-                        base_hmc.saturating_add(1)
-                    };
-                    let score_raw = if depth_now <= 1 {
-                        evaluate_position(&tmp)
-                    } else {
-                        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
-                        alphabeta(
-                            &mut tmp,
-                            opposite_color(active_color),
-                            depth_now - 1,
-                            a,
-                            b,
-                            1,
-                            &mut tt,
-                            child_hmc,
-                            &mut rep_stack,
-                        )
-                    };
-                    tmp.unmake_move_simple(u);
+                    let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                        &board,
+                        active_color,
+                        from,
+                        to,
+                        depth_now,
+                        a,
+                        b,
+                        &mut tt,
+                        base_hmc,
+                    );
 
                     // Adjust score for root-only heuristics
-                    let mut adjusted = adjust_root_score(
+                    let mut adjusted = adjusted_root_eval_for_move(
                         &board,
                         active_color,
                         from,
                         to,
                         base_hmc,
+                        score_raw,
                         is_capture,
                         moved_is_pawn,
-                        score_raw,
                         ps,
                     );
                     // repetition-avoidance at root
                     {
-                        let is_capture = board.get(to.0, to.1).is_some();
-                        let mut gs = game_state; // Copy
-                        let mut promote: Option<Piece> = None;
-                        if let Some(p) = gs.board().get(from.0, from.1) {
-                            if p.get_type() == PieceType::Pawn {
-                                if (active_color == Color::White && to.0 == 7)
-                                    || (active_color == Color::Black && to.0 == 0)
-                                {
-                                    promote = Some(Piece::new(PieceType::Queen, active_color));
-                                }
-                            }
-                        }
-                        if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
-                            gs.switch_player_turn();
-                            let fen = game_state_to_fen_string(gs);
-                            let truncated =
-                                fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
-                            let count = history.fen_repetition_count(&truncated);
-                            let sa = if active_color == Color::White {
-                                adjusted
-                            } else {
-                                -adjusted
-                            };
-                            if count >= 2 && sa > 0 {
-                                adjusted -= if active_color == Color::White {
-                                    REP_AVOIDANCE_BIAS_CP
-                                } else {
-                                    -REP_AVOIDANCE_BIAS_CP
-                                };
-                            }
-                        }
+                        adjusted = apply_repetition_avoidance_bias(
+                            adjusted,
+                            game_state,
+                            history,
+                            &board,
+                            active_color,
+                            from,
+                            to,
+                        );
                     }
 
                     // Track best
@@ -567,108 +590,28 @@ pub fn find_best_move(
             // Re-evaluate top K moves for stochastic selection at final depth
             let mut scored: Vec<((usize, usize), (usize, usize), i32)> = Vec::new();
             for &(from, to) in &root_moves {
-                // Use TT best estimates (no re-search) for quick ranking
-                let mut tmp = board.clone();
-                let u = tmp.make_move_simple(from, to);
-                let moved_is_pawn = board
-                    .get(from.0, from.1)
-                    .map(|p| p.get_type() == PieceType::Pawn)
-                    .unwrap_or(false);
-                let is_capture = board.get(to.0, to.1).is_some();
-                let child_hmc: u32 = if is_capture || moved_is_pawn {
-                    0
-                } else {
-                    base_hmc.saturating_add(1)
-                };
-                let mut rep_stack: Vec<u64> = Vec::with_capacity(64);
-                let sr = if effective_depth <= 1 {
-                    evaluate_position(&tmp)
-                } else {
-                    alphabeta(
-                        &mut tmp,
-                        opposite_color(active_color),
-                        effective_depth - 1,
-                        MIN_EVAL_VALUE + 1,
-                        MAX_EVAL_VALUE - 1,
-                        1,
-                        &mut tt,
-                        child_hmc,
-                        &mut rep_stack,
-                    )
-                };
-                tmp.unmake_move_simple(u);
-                // Apply root_move_bonus plus SEE-based penalty same as earlier paths
-                let mut adj = sr + root_move_bonus(&board, from, to, active_color);
-                {
-                    let mut post = board.clone();
-                    let moved_piece = board.get(from.0, from.1);
-                    let captured = board.get(to.0, to.1);
-                    if let Some(mp) = moved_piece {
-                        post.set(from.0, from.1, None);
-                        post.set(to.0, to.1, Some(mp));
-                        let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-                        let see = see_dest_estimate(&post, active_color, to, cap_val);
-                        if see < 0 {
-                            if mp.get_type() == PieceType::Queen {
-                                // extra demotion for losing queen moves at root
-                                let mut pawn_attacked = false;
-                                let opp = opposite_color(active_color);
-                                let (r, c) = (to.0, to.1);
-                                if opp == Color::White {
-                                    if r >= 1 {
-                                        if c >= 1 {
-                                            if let Some(p) = post.get(r - 1, c - 1) {
-                                                if p.get_color() == opp
-                                                    && p.get_type() == PieceType::Pawn
-                                                {
-                                                    pawn_attacked = true;
-                                                }
-                                            }
-                                        }
-                                        if c + 1 < 8 {
-                                            if let Some(p) = post.get(r - 1, c + 1) {
-                                                if p.get_color() == opp
-                                                    && p.get_type() == PieceType::Pawn
-                                                {
-                                                    pawn_attacked = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    if r + 1 < 8 {
-                                        if c >= 1 {
-                                            if let Some(p) = post.get(r + 1, c - 1) {
-                                                if p.get_color() == opp
-                                                    && p.get_type() == PieceType::Pawn
-                                                {
-                                                    pawn_attacked = true;
-                                                }
-                                            }
-                                        }
-                                        if c + 1 < 8 {
-                                            if let Some(p) = post.get(r + 1, c + 1) {
-                                                if p.get_color() == opp
-                                                    && p.get_type() == PieceType::Pawn
-                                                {
-                                                    pawn_attacked = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                let mut pen = (-see).max(1000);
-                                if pawn_attacked {
-                                    pen += 500;
-                                }
-                                adj -= pen;
-                            } else {
-                                let pen = (-see).clamp(80, 300);
-                                adj -= pen;
-                            }
-                        }
-                    }
-                }
+                let (sr, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                    &board,
+                    active_color,
+                    from,
+                    to,
+                    effective_depth,
+                    MIN_EVAL_VALUE + 1,
+                    MAX_EVAL_VALUE - 1,
+                    &mut tt,
+                    base_hmc,
+                );
+                let adj = adjusted_root_eval_for_move(
+                    &board,
+                    active_color,
+                    from,
+                    to,
+                    base_hmc,
+                    sr,
+                    is_capture,
+                    moved_is_pawn,
+                    ps,
+                );
                 scored.push((from, to, adj));
             }
 
