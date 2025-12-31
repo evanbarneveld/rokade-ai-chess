@@ -1,103 +1,120 @@
-use rand::{rng, Rng};
 use crate::board::Board;
 use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::board::evaluator::evaluate_position;
+use crate::history::history::History;
 use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
 use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
 use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
 use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
-use crate::piece::pieces::{Color, Piece, PieceType};
-use crate::state::game_state::GameState;
-use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
-use crate::state::fen::writer::game_state_to_fen_string;
+use crate::piece::pieces::{Color, Piece, PieceType};
+use crate::search::search_heuristics::SearchHeuristics;
+use crate::search::tt::{
+    Bound, MATE_VALUE, TranspositionTable, decode_move, encode_move, from_tt_score, to_tt_score,
+};
 use crate::search::zobrist::compute_zobrist;
-use crate::search::tt::{TranspositionTable, Bound, encode_move, decode_move, to_tt_score, from_tt_score, MATE_VALUE};
+use crate::state::fen::writer::game_state_to_fen_string;
+use crate::state::game_state::GameState;
+use rand::{Rng, rng};
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
-use std::sync::atomic::{AtomicU64, Ordering};
+use crate::search::playing_strength::{select_move_based_using_strength, strength_noise_sigma};
 
-// History and Killer tables for move ordering
-struct SearchHeuristics {
-    // history[side][from][to] -> score
-    history: [[[i32; 64]; 64]; 2],
-    // two killer moves per ply, stored as (from*8+to)
-    killers: Vec<[i16; 2]>,
-}
+const PAWN_VALUE: i32 = 100;
+const KNIGHT_VALUE: i32 = 320;
+const BISHOP_VALUE: i32 = 330;
+const ROOK_VALUE: i32 = 500;
+const QUEEN_VALUE: i32 = 900;
+const KING_VALUE: i32 = 20_000;
 
-impl SearchHeuristics {
-    fn new(max_ply: usize) -> Self {
-        SearchHeuristics {
-            history: [[[0; 64]; 64]; 2],
-            killers: vec![[ -1, -1 ]; max_ply.max(64)],
-        }
-    }
-    #[inline]
-    fn idx_side(side: Color) -> usize { if let Color::White = side { 0 } else { 1 } }
-    #[inline]
-    fn flat(from: (usize, usize), to: (usize, usize)) -> i16 { ((from.0*8 + from.1)*8 + (to.0*8 + to.1)) as i16 }
+// ==========================
+// Tunable search parameters
+// ==========================
+// Evaluation bounds used as sentinels inside search
+const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000;
+const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
 
-    fn add_killer(&mut self, ply: usize, from: (usize, usize), to: (usize, usize)) {
-        if ply >= self.killers.len() { return; }
-        let m = Self::flat(from, to);
-        let k = &mut self.killers[ply];
-        if k[0] != m {
-            k[1] = k[0];
-            k[0] = m;
-        }
-    }
-    fn is_killer(&self, ply: usize, from: (usize, usize), to: (usize, usize)) -> bool {
-        if ply >= self.killers.len() { return false; }
-        let m = Self::flat(from, to);
-        let k = self.killers[ply];
-        k[0] == m || k[1] == m
-    }
-    fn add_history(&mut self, side: Color, from: (usize, usize), to: (usize, usize), bonus: i32) {
-        let s = Self::idx_side(side);
-        let f = from.0*8 + from.1; let t = to.0*8 + to.1;
-        let entry = &mut self.history[s][f][t];
-        *entry += bonus;
-        // cap to avoid runaway values
-        let cap = 1_000_000;
-        if *entry > cap { *entry = cap; }
-        if *entry < -cap { *entry = -cap; }
-    }
-    fn history_score(&self, side: Color, from: (usize, usize), to: (usize, usize)) -> i32 {
-        let s = Self::idx_side(side);
-        let f = from.0*8 + from.1; let t = to.0*8 + to.1;
-        self.history[s][f][t]
-    }
-}
+// Threading (Rayon) defaults
+const RAYON_DEFAULT_THREADS: usize = 12; // default worker threads if env var is not set
+const RAYON_STACK_BYTES: usize = 32 * 1024 * 1024; // per-thread stack size
 
+// Iterative deepening aspiration window (in centipawns)
+const ASP_WINDOW_INIT_CP: i32 = 50; // initial aspiration half-window
+const ASP_WINDOW_MAX_CP: i32 = 800; // maximum expanded half-window
 
-const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000i32;
-const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000i32;
+// Root parallelization thresholds
+const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // enable root parallel only from this depth
+const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
+
+// Root SEE-based gating and penalties
+const SEE_MINOR_SAC_THRESHOLD_CP: i32 = -150; // filter minor-piece sacs worse than this unless checking
+const SEE_PENALTY_MIN_CP: i32 = 80; // min penalty for negative SEE (non-queen)
+const SEE_PENALTY_MAX_CP: i32 = 300; // max penalty for negative SEE (non-queen)
+const QUEEN_LOSING_PEN_BASE_CP: i32 = 1000; // base penalty for clearly losing queen moves
+const QUEEN_PAWN_ATTACK_EXTRA_CP: i32 = 500; // extra penalty if queen landing square is pawn-attacked
+
+// Root capture adjustment
+const ROOT_CAPTURE_BONUS_DIV: i32 = 10; // add captured piece value / this divisor
+
+// Endgame/50-move rule aware root adjustments
+const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150; // only apply adjustments if side advantage above this
+const ENDGAME_HMC_THRESHOLD: u32 = 80; // start scaling after this half-move clock
+const ENDGAME_SCALE_MAX: i32 = 21; // max scaling steps used in formula below
+const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15; // per-scale bonus if capture or pawn move
+const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8; // per-scale penalty if quiet move
+
+// History heuristic cap
+
+// Internal stacks/containers sizing
+const REP_STACK_CAPACITY: usize = 128; // repetition detection stack capacity hint
+// Root repetition-avoidance bias when a move would immediately create 3-fold
+const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
+
+const PHASE_KNIGHT: i32 = 1;
+const PHASE_BISHOP: i32 = 1;
+const PHASE_ROOK: i32 = 2;
+const PHASE_QUEEN: i32 = 4;
+
+const MAX_QUIET_PUSHES: usize = 2;
+
+const DELTA_MARGIN: i32 = 150; // centipawns
+
+const FUT_MARGIN: i32 = 50;
+
+// --- Global time budget (deadline) for search ---
+static DEADLINE_CELL: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+// --- Simple global telemetry (nodes visited) for UCI info reporting ---
+static NODE_COUNT: OnceLock<AtomicU64> = OnceLock::new();
+
+// --- Lightweight info callback support to report progress while searching ---
+// Include UCI hashfull (permill) so GUI can display hash usage
+type InfoCb = dyn Fn(((usize, usize), (usize, usize)), i32, usize, Vec<((usize, usize), (usize, usize))>, u16)
+    + Send
+    + Sync
+    + 'static;
+static INFO_CB: OnceLock<Mutex<Option<Arc<InfoCb>>>> = OnceLock::new();
 
 fn init_rayon_pool_if_needed() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
         // Prefer 12 threads by default; allow env override via RAYON_NUM_THREADS
-        let default_threads = 12usize;
+        let default_threads = RAYON_DEFAULT_THREADS;
         let num_threads = std::env::var("RAYON_NUM_THREADS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(default_threads);
         // Increase worker thread stack size to avoid stack overflows in deep searches.
-        let stack_bytes: usize = 32 * 1024 * 1024;
+        let stack_bytes: usize = RAYON_STACK_BYTES;
         let _ = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .stack_size(stack_bytes)
             .build_global();
     });
 }
-
-// --- Lightweight info callback support to report progress while searching ---
-// Include UCI hashfull (permill) so GUI can display hash usage
-type InfoCb = dyn Fn(((usize, usize), (usize, usize)), i32, usize, Vec<((usize, usize), (usize, usize))>, u16) + Send + Sync + 'static;
-static INFO_CB: OnceLock<Mutex<Option<Arc<InfoCb>>>> = OnceLock::new();
 
 fn info_cb_cell() -> &'static Mutex<Option<Arc<InfoCb>>> {
     INFO_CB.get_or_init(|| Mutex::new(None))
@@ -109,14 +126,24 @@ pub(crate) fn set_info_callback(cb: Option<Arc<InfoCb>>) {
     *guard = cb;
 }
 
-fn emit_info(from: (usize, usize), to: (usize, usize), score_cp: i32, depth_used: usize, pv: Vec<((usize, usize), (usize, usize))>, hashfull_permille: u16) {
+fn emit_info(
+    from: (usize, usize),
+    to: (usize, usize),
+    score_cp: i32,
+    depth_used: usize,
+    pv: Vec<((usize, usize), (usize, usize))>,
+    hashfull_permille: u16,
+) {
     if let Some(cb) = info_cb_cell().lock().unwrap().as_ref().cloned() {
-        (cb)(((from.0, from.1), (to.0, to.1)), score_cp, depth_used, pv, hashfull_permille)
+        (cb)(
+            ((from.0, from.1), (to.0, to.1)),
+            score_cp,
+            depth_used,
+            pv,
+            hashfull_permille,
+        )
     }
 }
-
-// --- Global time budget (deadline) for search ---
-static DEADLINE_CELL: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 
 #[inline]
 fn deadline_cell() -> &'static Mutex<Option<Instant>> {
@@ -126,7 +153,11 @@ fn deadline_cell() -> &'static Mutex<Option<Instant>> {
 /// Set a hard time budget for the ongoing search. Passing 0 disables the budget.
 pub(crate) fn set_time_budget_ms(ms: usize) {
     let mut guard = deadline_cell().lock().unwrap();
-    if ms == 0 { *guard = None; } else { *guard = Some(Instant::now() + std::time::Duration::from_millis(ms as u64)); }
+    if ms == 0 {
+        *guard = None;
+    } else {
+        *guard = Some(Instant::now() + std::time::Duration::from_millis(ms as u64));
+    }
 }
 
 /// Clear any active time budget (search will run to completion by depth).
@@ -139,7 +170,9 @@ pub(crate) fn clear_time_budget() {
 fn time_is_up() -> bool {
     if let Some(dl) = *deadline_cell().lock().unwrap() {
         Instant::now() >= dl
-    } else { false }
+    } else {
+        false
+    }
 }
 
 #[inline]
@@ -161,22 +194,23 @@ fn build_pv_for_root(
 
     for _ in 1..max_len {
         let key = compute_zobrist(&tmp, side);
-        let Some(entry) = tt.probe(key) else { break; };
+        let Some(entry) = tt.probe(key) else {
+            break;
+        };
         let (bf, bt) = (entry.best_from, entry.best_to);
         let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
         let next = ((nfr, nfc), (ntr, ntc));
         // Validate legality in current position to avoid garbage PV
         let legals = find_all_valid_moves(&tmp, side);
-        if !legals.contains(&next) { break; }
+        if !legals.contains(&next) {
+            break;
+        }
         pv.push(next);
         let _u = make_move_simple(&mut tmp, (nfr, nfc), (ntr, ntc));
         side = opposite_color(side);
     }
     pv
 }
-
-// --- Simple global telemetry (nodes visited) for UCI info reporting ---
-static NODE_COUNT: OnceLock<AtomicU64> = OnceLock::new();
 
 #[inline]
 fn node_count_cell() -> &'static AtomicU64 {
@@ -202,23 +236,39 @@ fn bump_node() {
 #[inline]
 fn piece_value_cp(pt: PieceType) -> i32 {
     use crate::piece::pieces::PieceType::*;
-    match pt { Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 20_000 }
+    match pt {
+        Pawn => PAWN_VALUE,
+        Knight => KNIGHT_VALUE,
+        Bishop => BISHOP_VALUE,
+        Rook => ROOK_VALUE,
+        Queen => QUEEN_VALUE,
+        King => KING_VALUE,
+    }
 }
 
 // Conservative SEE estimate on destination square.
 // Returns net material from the perspective of the side that just moved.
 // Positive => safe/profitable, Negative => likely losing material on dest.
 #[inline]
-fn see_dest_estimate(board_after: &Board, side_just_moved: Color, dest: (usize, usize), captured_val: i32) -> i32 {
+fn see_dest_estimate(
+    board_after: &Board,
+    side_just_moved: Color,
+    dest: (usize, usize),
+    captured_val: i32,
+) -> i32 {
     use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-    let moved_piece = match board_after.get(dest.0, dest.1) { Some(p) => p, None => return captured_val };
+    let moved_piece = match board_after.get(dest.0, dest.1) {
+        Some(p) => p,
+        None => return captured_val,
+    };
     let moved_val = piece_value_cp(moved_piece.get_type());
     // We need a mutable board for the attack probe helper; clone cheaply
     let mut tmp1 = board_after.clone();
     let attacked_by_opp = is_square_attacked_by_opponent(&mut tmp1, dest, side_just_moved);
     // defend check: reuse helper by swapping perspective
     let mut tmp2 = board_after.clone();
-    let defended_by_us = is_square_attacked_by_opponent(&mut tmp2, dest, opposite_color(side_just_moved));
+    let defended_by_us =
+        is_square_attacked_by_opponent(&mut tmp2, dest, opposite_color(side_just_moved));
 
     if !attacked_by_opp {
         // No immediate opponent attack: return captured gain (if any)
@@ -262,16 +312,12 @@ pub(crate) fn find_move_with_info(
 
     // Map playing_strength [1..1000] to an effective depth to intentionally weaken play at low strengths.
     // Rough mapping: at ~300 strength, cap to ~3 ply; at 1000 keep requested depth.
-    let ps = if playing_strength == 0 { 1 } else { playing_strength.min(1000) } as i32;
+    let ps = if playing_strength == 0 {
+        1
+    } else {
+        playing_strength.min(1000)
+    } as i32;
 
-    /*let depth_min = 2i32; // never search less than 2 ply to avoid outright blunders like hanging queen immediately
-    let depth_max = search_depth as i32;
-    let effective_depth = if depth_max <= depth_min { depth_max } else {
-        // linear interpolation between depth_min (weak) and depth_max (strong)
-        let t = ps as f32 / 1000.0;
-        let d = (depth_min as f32 + t * (depth_max as f32 - depth_min as f32)).round() as i32;
-        d.clamp(depth_min, depth_max)
-    } as usize;*/
     let effective_depth = search_depth;
 
     // Root-level hard 3-fold avoidance: filter out any root move that would create
@@ -285,20 +331,28 @@ pub(crate) fn find_move_with_info(
             let mut promote: Option<Piece> = None;
             if let Some(p) = gs.board().get(from.0, from.1) {
                 if p.get_type() == PieceType::Pawn {
-                    if (active_color == Color::White && to.0 == 7) || (active_color == Color::Black && to.0 == 0) {
+                    if (active_color == Color::White && to.0 == 7)
+                        || (active_color == Color::Black && to.0 == 0)
+                    {
                         promote = Some(Piece::new(PieceType::Queen, active_color));
                     }
                 }
             }
-            let makes_threefold = if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
+            let makes_threefold = if PieceMover::move_piece(&mut gs, from, to, is_capture, promote)
+            {
                 gs.switch_player_turn();
                 let fen = game_state_to_fen_string(gs);
                 let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
                 history.fen_repetition_count(&truncated) >= 2
-            } else { false };
-            if !makes_threefold { v.push((from, to)); }
+            } else {
+                false
+            };
+            if !makes_threefold {
+                v.push((from, to));
+            }
         }
-        // Hard root filter: drop unsafe queen moves (SEE<0) and unsafe minor-piece non-check sacs (SEE<=-150 and not giving check)
+        // Hard root filter: drop unsafe queen moves (SEE<0) and unsafe minor-piece non-check sacs
+        // (SEE<=SEE_MINOR_SAC_THRESHOLD_CP and not giving check)
         // If filtering removes all, keep original set.
         if !v.is_empty() {
             let mut filtered: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(v.len());
@@ -311,22 +365,35 @@ pub(crate) fn find_move_with_info(
                     let captured = board.get(to.0, to.1);
                     post.set(from.0, from.1, None);
                     post.set(to.0, to.1, Some(p));
-                    let cap_val = captured.map(|cp| piece_value_cp(cp.get_type())).unwrap_or(0);
+                    let cap_val = captured
+                        .map(|cp| piece_value_cp(cp.get_type()))
+                        .unwrap_or(0);
                     let see = see_dest_estimate(&post, active_color, to, cap_val);
                     match p.get_type() {
-                        PieceType::Queen => { if see < 0 { drop = true; } }
+                        PieceType::Queen => {
+                            if see < 0 {
+                                drop = true;
+                            }
+                        }
                         PieceType::Bishop | PieceType::Knight => {
                             // keep potential sound sacs if the move gives check; otherwise filter clearly losing ones
-                            let gives_check = is_side_in_check(&mut post, opposite_color(active_color));
-                            if see <= -150 && !gives_check { drop = true; }
+                            let gives_check =
+                                is_side_in_check(&mut post, opposite_color(active_color));
+                            if see <= SEE_MINOR_SAC_THRESHOLD_CP && !gives_check {
+                                drop = true;
+                            }
                         }
                         _ => {}
                     }
                 }
-                if !drop { filtered.push((from, to)); }
+                if !drop {
+                    filtered.push((from, to));
+                }
             }
             if filtered.is_empty() { v } else { filtered }
-        } else { v }
+        } else {
+            v
+        }
     };
 
     // Iterative Deepening + Aspiration windows at root (serial evaluation for stability)
@@ -335,7 +402,7 @@ pub(crate) fn find_move_with_info(
     let base_hmc = game_state.half_move_clock();
     let mut last_score: i32 = 0;
     let mut chosen: Option<((usize, usize), (usize, usize), i32, usize)> = None;
-    let mut window: i32 = 50; // cp
+    let mut window: i32 = ASP_WINDOW_INIT_CP; // cp
 
     for depth_now in 1..=effective_depth {
         tt.next_age();
@@ -351,7 +418,11 @@ pub(crate) fn find_move_with_info(
         let best_tuple = loop {
             tried += 1;
             let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
-            let mut best_score_raw = if active_color == Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE };
+            let mut best_score_raw = if active_color == Color::White {
+                MIN_EVAL_VALUE
+            } else {
+                MAX_EVAL_VALUE
+            };
             let mut best_adjusted = best_score_raw;
 
             // Order: if TT has a move at root, try to place it first
@@ -364,26 +435,45 @@ pub(crate) fn find_move_with_info(
                 }
             }
 
-            let enable_parallel = depth_now >= 6 && ordered.len() >= 4;
+            let enable_parallel =
+                depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
             if enable_parallel {
                 // 1) Search the first (best-ordered) move serially to establish PV and bounds
                 let &(pv_from, pv_to) = ordered.first().unwrap();
                 {
                     let mut tmp = board.clone();
                     let u = make_move_simple(&mut tmp, pv_from, pv_to);
-                    let moved_is_pawn = board.get(pv_from.0, pv_from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                    let moved_is_pawn = board
+                        .get(pv_from.0, pv_from.1)
+                        .map(|p| p.get_type() == PieceType::Pawn)
+                        .unwrap_or(false);
                     let is_capture = board.get(pv_to.0, pv_to.1).is_some();
-                    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+                    let child_hmc: u32 = if is_capture || moved_is_pawn {
+                        0
+                    } else {
+                        base_hmc.saturating_add(1)
+                    };
                     let score_raw = if depth_now <= 1 {
                         evaluate_position(&tmp)
                     } else {
-                        let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
-                        alphabeta(&mut tmp, opposite_color(active_color), depth_now - 1, a, b, 1, &mut tt, child_hmc, &mut rep_stack)
+                        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
+                        alphabeta(
+                            &mut tmp,
+                            opposite_color(active_color),
+                            depth_now - 1,
+                            a,
+                            b,
+                            1,
+                            &mut tt,
+                            child_hmc,
+                            &mut rep_stack,
+                        )
                     };
                     unmake_move_simple(&mut tmp, u);
 
                     // Adjust score for root-only heuristics
-                    let mut adjusted = score_raw + root_move_bonus(&board, pv_from, pv_to, active_color);
+                    let mut adjusted =
+                        score_raw + root_move_bonus(&board, pv_from, pv_to, active_color);
                     // Root SEE gate: penalize moves with negative SEE on destination
                     {
                         let mut post = board.clone();
@@ -392,30 +482,65 @@ pub(crate) fn find_move_with_info(
                         if let Some(mp) = moved_piece {
                             post.set(pv_from.0, pv_from.1, None);
                             post.set(pv_to.0, pv_to.1, Some(mp));
-                            let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
+                            let cap_val =
+                                captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
                             let see = see_dest_estimate(&post, active_color, pv_to, cap_val);
                             if see < 0 {
                                 // Hard demotion for losing queen moves at root
                                 if mp.get_type() == PieceType::Queen {
                                     let mut pawn_attacked = false;
                                     let opp = opposite_color(active_color);
-                                    let (r,c) = (pv_to.0, pv_to.1);
+                                    let (r, c) = (pv_to.0, pv_to.1);
                                     if opp == Color::White {
                                         if r >= 1 {
-                                            if c >= 1 { if let Some(p)=post.get(r-1,c-1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
-                                            if c+1 < 8 { if let Some(p)=post.get(r-1,c+1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
+                                            if c >= 1 {
+                                                if let Some(p) = post.get(r - 1, c - 1) {
+                                                    if p.get_color() == opp
+                                                        && p.get_type() == PieceType::Pawn
+                                                    {
+                                                        pawn_attacked = true;
+                                                    }
+                                                }
+                                            }
+                                            if c + 1 < 8 {
+                                                if let Some(p) = post.get(r - 1, c + 1) {
+                                                    if p.get_color() == opp
+                                                        && p.get_type() == PieceType::Pawn
+                                                    {
+                                                        pawn_attacked = true;
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else {
-                                        if r+1 < 8 {
-                                            if c >= 1 { if let Some(p)=post.get(r+1,c-1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
-                                            if c+1 < 8 { if let Some(p)=post.get(r+1,c+1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
+                                        if r + 1 < 8 {
+                                            if c >= 1 {
+                                                if let Some(p) = post.get(r + 1, c - 1) {
+                                                    if p.get_color() == opp
+                                                        && p.get_type() == PieceType::Pawn
+                                                    {
+                                                        pawn_attacked = true;
+                                                    }
+                                                }
+                                            }
+                                            if c + 1 < 8 {
+                                                if let Some(p) = post.get(r + 1, c + 1) {
+                                                    if p.get_color() == opp
+                                                        && p.get_type() == PieceType::Pawn
+                                                    {
+                                                        pawn_attacked = true;
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
-                                    let mut pen = (-see).max(1000); // decisive ban at root
-                                    if pawn_attacked { pen += 500; }
+                                    let mut pen = (-see).max(QUEEN_LOSING_PEN_BASE_CP); // decisive ban at root
+                                    if pawn_attacked {
+                                        pen += QUEEN_PAWN_ATTACK_EXTRA_CP;
+                                    }
                                     adjusted -= pen;
                                 } else {
-                                    let pen = (-see).clamp(80, 300);
+                                    let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
                                     adjusted -= pen;
                                 }
                             }
@@ -424,22 +549,37 @@ pub(crate) fn find_move_with_info(
                     if let Some(captured) = board.get(pv_to.0, pv_to.1) {
                         use crate::piece::pieces::PieceType::*;
                         let cap_val = match captured.get_type() {
-                            Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
+                            Pawn => 100,
+                            Knight => 320,
+                            Bishop => 330,
+                            Rook => 500,
+                            Queen => 900,
+                            King => 0,
                         };
-                        adjusted += cap_val / 10;
+                        adjusted += cap_val / ROOT_CAPTURE_BONUS_DIV;
                     }
-                    let side_adv = if active_color == Color::White { score_raw } else { -score_raw };
-                    if side_adv > 150 && base_hmc >= 80 {
+                    let side_adv = if active_color == Color::White {
+                        score_raw
+                    } else {
+                        -score_raw
+                    };
+                    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD
+                    {
                         if is_capture || moved_is_pawn {
-                            let scale = (base_hmc as i32 - 79).min(21);
-                            adjusted += 15 * scale;
+                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
+                                .min(ENDGAME_SCALE_MAX);
+                            adjusted += ENDGAME_CAPTURE_SCALE_BONUS_CP * scale;
                         } else {
-                            let scale = (base_hmc as i32 - 79).min(21);
-                            adjusted -= 8 * scale;
+                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
+                                .min(ENDGAME_SCALE_MAX);
+                            adjusted -= ENDGAME_NONCAP_SCALE_PENALTY_CP * scale;
                         }
                     }
                     let sigma = strength_noise_sigma(ps as usize);
-                    if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted += n; }
+                    if sigma > 0 {
+                        let n: i32 = rng().random_range(-sigma..=sigma);
+                        adjusted += n;
+                    }
 
                     best_from_to = Some((pv_from, pv_to));
                     best_adjusted = adjusted;
@@ -449,95 +589,187 @@ pub(crate) fn find_move_with_info(
                 // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
                 let base_board = board.clone();
                 let base_hmc_loc = base_hmc;
-                let a_loc = a; let b_loc = b;
+                let a_loc = a;
+                let b_loc = b;
                 let side = active_color;
-                let results = ordered[1..].par_iter().map(|&(from, to)| {
-                    let mut tmp = base_board.clone();
-                    let u = make_move_simple(&mut tmp, from, to);
-                    let moved_is_pawn = base_board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
-                    let is_capture = base_board.get(to.0, to.1).is_some();
-                    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc_loc.saturating_add(1) };
-                    let score_raw = if depth_now <= 1 {
-                        evaluate_position(&tmp)
-                    } else {
-                        // local TT per task
-                        let mut local_tt = TranspositionTable::new_with_default_size();
-                        let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
-                        alphabeta(&mut tmp, opposite_color(side), depth_now - 1, a_loc, b_loc, 1, &mut local_tt, child_hmc, &mut rep_stack)
-                    };
-                    unmake_move_simple(&mut tmp, u);
+                let results = ordered[1..]
+                    .par_iter()
+                    .map(|&(from, to)| {
+                        let mut tmp = base_board.clone();
+                        let u = make_move_simple(&mut tmp, from, to);
+                        let moved_is_pawn = base_board
+                            .get(from.0, from.1)
+                            .map(|p| p.get_type() == PieceType::Pawn)
+                            .unwrap_or(false);
+                        let is_capture = base_board.get(to.0, to.1).is_some();
+                        let child_hmc: u32 = if is_capture || moved_is_pawn {
+                            0
+                        } else {
+                            base_hmc_loc.saturating_add(1)
+                        };
+                        let score_raw = if depth_now <= 1 {
+                            evaluate_position(&tmp)
+                        } else {
+                            // local TT per task
+                            let mut local_tt = TranspositionTable::new_with_default_size();
+                            let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
+                            alphabeta(
+                                &mut tmp,
+                                opposite_color(side),
+                                depth_now - 1,
+                                a_loc,
+                                b_loc,
+                                1,
+                                &mut local_tt,
+                                child_hmc,
+                                &mut rep_stack,
+                            )
+                        };
+                        unmake_move_simple(&mut tmp, u);
 
-                    // Root adjustments (skip repetition-history check to keep parallel code simple)
-                    let mut adjusted = score_raw + root_move_bonus(&base_board, from, to, side);
-                    // Root SEE gate: penalize moves with negative SEE on destination
-                    {
-                        let mut post = base_board.clone();
-                        let moved_piece = base_board.get(from.0, from.1);
-                        let captured = base_board.get(to.0, to.1);
-                        if let Some(mp) = moved_piece {
-                            post.set(from.0, from.1, None);
-                            post.set(to.0, to.1, Some(mp));
-                            let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-                            let see = see_dest_estimate(&post, side, to, cap_val);
-                            if see < 0 {
-                                if mp.get_type() == PieceType::Queen {
-                                    let mut pawn_attacked = false;
-                                    let opp = opposite_color(side);
-                                    let (r,c) = (to.0, to.1);
-                                    if opp == Color::White {
-                                        if r >= 1 {
-                                            if c >= 1 { if let Some(p)=post.get(r-1,c-1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
-                                            if c+1 < 8 { if let Some(p)=post.get(r-1,c+1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
+                        // Root adjustments (skip repetition-history check to keep parallel code simple)
+                        let mut adjusted = score_raw + root_move_bonus(&base_board, from, to, side);
+                        // Root SEE gate: penalize moves with negative SEE on destination
+                        {
+                            let mut post = base_board.clone();
+                            let moved_piece = base_board.get(from.0, from.1);
+                            let captured = base_board.get(to.0, to.1);
+                            if let Some(mp) = moved_piece {
+                                post.set(from.0, from.1, None);
+                                post.set(to.0, to.1, Some(mp));
+                                let cap_val =
+                                    captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
+                                let see = see_dest_estimate(&post, side, to, cap_val);
+                                if see < 0 {
+                                    if mp.get_type() == PieceType::Queen {
+                                        let mut pawn_attacked = false;
+                                        let opp = opposite_color(side);
+                                        let (r, c) = (to.0, to.1);
+                                        if opp == Color::White {
+                                            if r >= 1 {
+                                                if c >= 1 {
+                                                    if let Some(p) = post.get(r - 1, c - 1) {
+                                                        if p.get_color() == opp
+                                                            && p.get_type() == PieceType::Pawn
+                                                        {
+                                                            pawn_attacked = true;
+                                                        }
+                                                    }
+                                                }
+                                                if c + 1 < 8 {
+                                                    if let Some(p) = post.get(r - 1, c + 1) {
+                                                        if p.get_color() == opp
+                                                            && p.get_type() == PieceType::Pawn
+                                                        {
+                                                            pawn_attacked = true;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            if r + 1 < 8 {
+                                                if c >= 1 {
+                                                    if let Some(p) = post.get(r + 1, c - 1) {
+                                                        if p.get_color() == opp
+                                                            && p.get_type() == PieceType::Pawn
+                                                        {
+                                                            pawn_attacked = true;
+                                                        }
+                                                    }
+                                                }
+                                                if c + 1 < 8 {
+                                                    if let Some(p) = post.get(r + 1, c + 1) {
+                                                        if p.get_color() == opp
+                                                            && p.get_type() == PieceType::Pawn
+                                                        {
+                                                            pawn_attacked = true;
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
+                                        let mut pen = (-see).max(1000);
+                                        if pawn_attacked {
+                                            pen += 500;
+                                        }
+                                        adjusted -= pen;
                                     } else {
-                                        if r+1 < 8 {
-                                            if c >= 1 { if let Some(p)=post.get(r+1,c-1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
-                                            if c+1 < 8 { if let Some(p)=post.get(r+1,c+1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
-                                        }
+                                        let pen = (-see).clamp(80, 300);
+                                        adjusted -= pen;
                                     }
-                                    let mut pen = (-see).max(1000);
-                                    if pawn_attacked { pen += 500; }
-                                    adjusted -= pen;
-                                } else {
-                                    let pen = (-see).clamp(80, 300);
-                                    adjusted -= pen;
                                 }
                             }
                         }
-                    }
-                    if let Some(captured) = base_board.get(to.0, to.1) {
-                        use crate::piece::pieces::PieceType::*;
-                        let cap_val = match captured.get_type() {
-                            Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
-                        };
-                        adjusted += cap_val / 10;
-                    }
-                    let side_adv = if side == Color::White { score_raw } else { -score_raw };
-                    if side_adv > 150 && base_hmc_loc >= 80 {
-                        if is_capture || moved_is_pawn {
-                            let scale = (base_hmc_loc as i32 - 79).min(21);
-                            adjusted += 15 * scale;
-                        } else {
-                            let scale = (base_hmc_loc as i32 - 79).min(21);
-                            adjusted -= 8 * scale;
+                        if let Some(captured) = base_board.get(to.0, to.1) {
+                            use crate::piece::pieces::PieceType::*;
+                            let cap_val = match captured.get_type() {
+                                Pawn => 100,
+                                Knight => 320,
+                                Bishop => 330,
+                                Rook => 500,
+                                Queen => 900,
+                                King => 0,
+                            };
+                            adjusted += cap_val / 10;
                         }
-                    }
-                    let sigma = strength_noise_sigma(ps as usize);
-                    if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted += n; }
-                    (from, to, adjusted, score_raw)
-                }).reduce(|| {
-                    // Identity: invalid move placeholder not used; return extreme sentinel
-                    ((0usize,0usize), (0usize,0usize), if side==Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE }, if side==Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE })
-                }, |acc, x| {
-                    let better = if side == Color::White { x.2 > acc.2 } else { x.2 < acc.2 };
-                    if better { x } else { acc }
-                });
+                        let side_adv = if side == Color::White {
+                            score_raw
+                        } else {
+                            -score_raw
+                        };
+                        if side_adv > 150 && base_hmc_loc >= 80 {
+                            if is_capture || moved_is_pawn {
+                                let scale = (base_hmc_loc as i32 - 79).min(21);
+                                adjusted += 15 * scale;
+                            } else {
+                                let scale = (base_hmc_loc as i32 - 79).min(21);
+                                adjusted -= 8 * scale;
+                            }
+                        }
+                        let sigma = strength_noise_sigma(ps as usize);
+                        if sigma > 0 {
+                            let n: i32 = rng().random_range(-sigma..=sigma);
+                            adjusted += n;
+                        }
+                        (from, to, adjusted, score_raw)
+                    })
+                    .reduce(
+                        || {
+                            // Identity: invalid move placeholder not used; return extreme sentinel
+                            (
+                                (0usize, 0usize),
+                                (0usize, 0usize),
+                                if side == Color::White {
+                                    MIN_EVAL_VALUE
+                                } else {
+                                    MAX_EVAL_VALUE
+                                },
+                                if side == Color::White {
+                                    MIN_EVAL_VALUE
+                                } else {
+                                    MAX_EVAL_VALUE
+                                },
+                            )
+                        },
+                        |acc, x| {
+                            let better = if side == Color::White {
+                                x.2 > acc.2
+                            } else {
+                                x.2 < acc.2
+                            };
+                            if better { x } else { acc }
+                        },
+                    );
 
                 // Update best with parallel results if better
                 let (pf, pt, padj, praw) = results;
                 // Ignore identity placeholder
-                if !(pf == (0,0) && pt == (0,0)) {
-                    let better = if active_color == Color::White { padj > best_adjusted } else { padj < best_adjusted };
+                if !(pf == (0, 0) && pt == (0, 0)) {
+                    let better = if active_color == Color::White {
+                        padj > best_adjusted
+                    } else {
+                        padj < best_adjusted
+                    };
                     if better {
                         best_from_to = Some((pf, pt));
                         best_adjusted = padj;
@@ -549,86 +781,141 @@ pub(crate) fn find_move_with_info(
                 for &(from, to) in &ordered {
                     let mut tmp = board.clone();
                     let u = make_move_simple(&mut tmp, from, to);
-                    let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                    let moved_is_pawn = board
+                        .get(from.0, from.1)
+                        .map(|p| p.get_type() == PieceType::Pawn)
+                        .unwrap_or(false);
                     let is_capture = board.get(to.0, to.1).is_some();
-                    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
-                let score_raw = if depth_now <= 1 {
-                    evaluate_position(&tmp)
-                } else {
-                    let mut rep_stack: Vec<u64> = Vec::with_capacity(128);
-                    alphabeta(&mut tmp, opposite_color(active_color), depth_now - 1, a, b, 1, &mut tt, child_hmc, &mut rep_stack)
-                };
-                unmake_move_simple(&mut tmp, u);
-
-                // Adjust score for root-only heuristics
-                let mut adjusted = score_raw + root_move_bonus(&board, from, to, active_color);
-                if let Some(captured) = board.get(to.0, to.1) {
-                    use crate::piece::pieces::PieceType::*;
-                    let cap_val = match captured.get_type() {
-                        Pawn => 100, Knight => 320, Bishop => 330, Rook => 500, Queen => 900, King => 0,
-                    };
-                    adjusted += cap_val / 10;
-                }
-                let side_adv = if active_color == Color::White { score_raw } else { -score_raw };
-                if side_adv > 150 && base_hmc >= 80 {
-                    if is_capture || moved_is_pawn {
-                        let scale = (base_hmc as i32 - 79).min(21);
-                        adjusted += 15 * scale;
+                    let child_hmc: u32 = if is_capture || moved_is_pawn {
+                        0
                     } else {
-                        let scale = (base_hmc as i32 - 79).min(21);
-                        adjusted -= 8 * scale;
+                        base_hmc.saturating_add(1)
+                    };
+                    let score_raw = if depth_now <= 1 {
+                        evaluate_position(&tmp)
+                    } else {
+                        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
+                        alphabeta(
+                            &mut tmp,
+                            opposite_color(active_color),
+                            depth_now - 1,
+                            a,
+                            b,
+                            1,
+                            &mut tt,
+                            child_hmc,
+                            &mut rep_stack,
+                        )
+                    };
+                    unmake_move_simple(&mut tmp, u);
+
+                    // Adjust score for root-only heuristics
+                    let mut adjusted = score_raw + root_move_bonus(&board, from, to, active_color);
+                    if let Some(captured) = board.get(to.0, to.1) {
+                        use crate::piece::pieces::PieceType::*;
+                        let cap_val = match captured.get_type() {
+                            Pawn => 100,
+                            Knight => 320,
+                            Bishop => 330,
+                            Rook => 500,
+                            Queen => 900,
+                            King => 0,
+                        };
+                        adjusted += cap_val / ROOT_CAPTURE_BONUS_DIV;
                     }
-                }
-                let sigma = strength_noise_sigma(ps as usize);
-                if sigma > 0 { let n: i32 = rng().random_range(-sigma..=sigma); adjusted += n; }
-                // repetition-avoidance at root
-                {
-                    let is_capture = board.get(to.0, to.1).is_some();
-                    let mut gs = game_state; // Copy
-                    let mut promote: Option<Piece> = None;
-                    if let Some(p) = gs.board().get(from.0, from.1) {
-                        if p.get_type() == PieceType::Pawn {
-                            if (active_color == Color::White && to.0 == 7) || (active_color == Color::Black && to.0 == 0) {
-                                promote = Some(Piece::new(PieceType::Queen, active_color));
+                    let side_adv = if active_color == Color::White {
+                        score_raw
+                    } else {
+                        -score_raw
+                    };
+                    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD
+                    {
+                        if is_capture || moved_is_pawn {
+                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
+                                .min(ENDGAME_SCALE_MAX);
+                            adjusted += ENDGAME_CAPTURE_SCALE_BONUS_CP * scale;
+                        } else {
+                            let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1))
+                                .min(ENDGAME_SCALE_MAX);
+                            adjusted -= ENDGAME_NONCAP_SCALE_PENALTY_CP * scale;
+                        }
+                    }
+                    let sigma = strength_noise_sigma(ps as usize);
+                    if sigma > 0 {
+                        let n: i32 = rng().random_range(-sigma..=sigma);
+                        adjusted += n;
+                    }
+                    // repetition-avoidance at root
+                    {
+                        let is_capture = board.get(to.0, to.1).is_some();
+                        let mut gs = game_state; // Copy
+                        let mut promote: Option<Piece> = None;
+                        if let Some(p) = gs.board().get(from.0, from.1) {
+                            if p.get_type() == PieceType::Pawn {
+                                if (active_color == Color::White && to.0 == 7)
+                                    || (active_color == Color::Black && to.0 == 0)
+                                {
+                                    promote = Some(Piece::new(PieceType::Queen, active_color));
+                                }
+                            }
+                        }
+                        if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
+                            gs.switch_player_turn();
+                            let fen = game_state_to_fen_string(gs);
+                            let truncated =
+                                fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+                            let count = history.fen_repetition_count(&truncated);
+                            let sa = if active_color == Color::White {
+                                adjusted
+                            } else {
+                                -adjusted
+                            };
+                            if count >= 2 && sa > 0 {
+                                adjusted -= if active_color == Color::White {
+                                    REP_AVOIDANCE_BIAS_CP
+                                } else {
+                                    -REP_AVOIDANCE_BIAS_CP
+                                };
                             }
                         }
                     }
-                    if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
-                        gs.switch_player_turn();
-                        let fen = game_state_to_fen_string(gs);
-                        let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
-                        let count = history.fen_repetition_count(&truncated);
-                        let sa = if active_color == Color::White { adjusted } else { -adjusted };
-                        if count >= 2 && sa > 0 {
-                            adjusted -= if active_color == Color::White { 50_000 } else { -50_000 };
-                        }
-                    }
-                }
 
-                // Track best
-                let better = if active_color == Color::White { adjusted > best_adjusted } else { adjusted < best_adjusted };
-                if better || best_from_to.is_none() {
-                    best_from_to = Some((from, to));
-                    best_adjusted = adjusted;
-                    best_score_raw = score_raw;
-                }
-                // Aspiration cutoffs help ordering mid-loop too
-                    if active_color == Color::White && score_raw >= b { break; }
-                    if active_color == Color::Black && score_raw <= a { break; }
+                    // Track best
+                    let better = if active_color == Color::White {
+                        adjusted > best_adjusted
+                    } else {
+                        adjusted < best_adjusted
+                    };
+                    if better || best_from_to.is_none() {
+                        best_from_to = Some((from, to));
+                        best_adjusted = adjusted;
+                        best_score_raw = score_raw;
+                    }
+                    // Aspiration cutoffs help ordering mid-loop too
+                    if active_color == Color::White && score_raw >= b {
+                        break;
+                    }
+                    if active_color == Color::Black && score_raw <= a {
+                        break;
+                    }
                 }
             }
 
             // Check aspiration result
             if best_score_raw <= a {
                 // fail-low: widen down
-                window = (window * 2).min(800);
+                window = (window * 2).min(ASP_WINDOW_MAX_CP);
                 a = (last_score - window).max(MIN_EVAL_VALUE + 1);
-                if tried < 3 { continue; }
+                if tried < 3 {
+                    continue;
+                }
             } else if best_score_raw >= b {
                 // fail-high: widen up
-                window = (window * 2).min(800);
+                window = (window * 2).min(ASP_WINDOW_MAX_CP);
                 b = (last_score + window).min(MAX_EVAL_VALUE - 1);
-                if tried < 3 { continue; }
+                if tried < 3 {
+                    continue;
+                }
             }
             break (best_from_to.unwrap(), best_adjusted, best_score_raw);
         };
@@ -653,11 +940,32 @@ pub(crate) fn find_move_with_info(
                 // Use TT best estimates (no re-search) for quick ranking
                 let mut tmp = board.clone();
                 let u = make_move_simple(&mut tmp, from, to);
-                let moved_is_pawn = board.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+                let moved_is_pawn = board
+                    .get(from.0, from.1)
+                    .map(|p| p.get_type() == PieceType::Pawn)
+                    .unwrap_or(false);
                 let is_capture = board.get(to.0, to.1).is_some();
-                let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+                let child_hmc: u32 = if is_capture || moved_is_pawn {
+                    0
+                } else {
+                    base_hmc.saturating_add(1)
+                };
                 let mut rep_stack: Vec<u64> = Vec::with_capacity(64);
-                let sr = if effective_depth <= 1 { evaluate_position(&tmp) } else { alphabeta(&mut tmp, opposite_color(active_color), effective_depth - 1, MIN_EVAL_VALUE+1, MAX_EVAL_VALUE-1, 1, &mut tt, child_hmc, &mut rep_stack) };
+                let sr = if effective_depth <= 1 {
+                    evaluate_position(&tmp)
+                } else {
+                    alphabeta(
+                        &mut tmp,
+                        opposite_color(active_color),
+                        effective_depth - 1,
+                        MIN_EVAL_VALUE + 1,
+                        MAX_EVAL_VALUE - 1,
+                        1,
+                        &mut tt,
+                        child_hmc,
+                        &mut rep_stack,
+                    )
+                };
                 unmake_move_simple(&mut tmp, u);
                 // Apply root_move_bonus plus SEE-based penalty same as earlier paths
                 let mut adj = sr + root_move_bonus(&board, from, to, active_color);
@@ -675,20 +983,54 @@ pub(crate) fn find_move_with_info(
                                 // extra demotion for losing queen moves at root
                                 let mut pawn_attacked = false;
                                 let opp = opposite_color(active_color);
-                                let (r,c) = (to.0, to.1);
+                                let (r, c) = (to.0, to.1);
                                 if opp == Color::White {
                                     if r >= 1 {
-                                        if c >= 1 { if let Some(p)=post.get(r-1,c-1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
-                                        if c+1 < 8 { if let Some(p)=post.get(r-1,c+1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
+                                        if c >= 1 {
+                                            if let Some(p) = post.get(r - 1, c - 1) {
+                                                if p.get_color() == opp
+                                                    && p.get_type() == PieceType::Pawn
+                                                {
+                                                    pawn_attacked = true;
+                                                }
+                                            }
+                                        }
+                                        if c + 1 < 8 {
+                                            if let Some(p) = post.get(r - 1, c + 1) {
+                                                if p.get_color() == opp
+                                                    && p.get_type() == PieceType::Pawn
+                                                {
+                                                    pawn_attacked = true;
+                                                }
+                                            }
+                                        }
                                     }
                                 } else {
-                                    if r+1 < 8 {
-                                        if c >= 1 { if let Some(p)=post.get(r+1,c-1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
-                                        if c+1 < 8 { if let Some(p)=post.get(r+1,c+1){ if p.get_color()==opp && p.get_type()==PieceType::Pawn { pawn_attacked = true; }}}
+                                    if r + 1 < 8 {
+                                        if c >= 1 {
+                                            if let Some(p) = post.get(r + 1, c - 1) {
+                                                if p.get_color() == opp
+                                                    && p.get_type() == PieceType::Pawn
+                                                {
+                                                    pawn_attacked = true;
+                                                }
+                                            }
+                                        }
+                                        if c + 1 < 8 {
+                                            if let Some(p) = post.get(r + 1, c + 1) {
+                                                if p.get_color() == opp
+                                                    && p.get_type() == PieceType::Pawn
+                                                {
+                                                    pawn_attacked = true;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 let mut pen = (-see).max(1000);
-                                if pawn_attacked { pen += 500; }
+                                if pawn_attacked {
+                                    pen += 500;
+                                }
                                 adj -= pen;
                             } else {
                                 let pen = (-see).clamp(80, 300);
@@ -700,40 +1042,78 @@ pub(crate) fn find_move_with_info(
                 scored.push((from, to, adj));
             }
             let mut sorted = sort_moves_on_score_asc(&mut scored);
-            if active_color == Color::White { sorted.reverse(); }
+            if active_color == Color::White {
+                sorted.reverse();
+            }
             if let Some((from, to)) = select_move_based_using_strength(&sorted, playing_strength) {
-                let sc = sorted.iter().find(|e| e.0==from && e.1==to).map(|e| e.2).unwrap_or(sc);
+                let sc = sorted
+                    .iter()
+                    .find(|e| e.0 == from && e.1 == to)
+                    .map(|e| e.2)
+                    .unwrap_or(sc);
                 Some((from, to, sc, used_depth))
-            } else { Some((bf, bt, sc, used_depth)) }
+            } else {
+                Some((bf, bt, sc, used_depth))
+            }
         }
-    } else { None }
+    } else {
+        None
+    }
 }
 
-pub(crate) fn find_all_valid_moves(board: &Board, active_color:Color) -> Vec<((usize, usize), (usize, usize))> {
+pub(crate) fn find_all_valid_moves(
+    board: &Board,
+    active_color: Color,
+) -> Vec<((usize, usize), (usize, usize))> {
     let mut result: Vec<((usize, usize), (usize, usize))> = Vec::new();
 
     // iterate all squares and collect legal moves for the active color
     for r in 0..8 {
         for c in 0..8 {
-            let piece = match board.get(r, c) { Some(p) => p, None => continue };
-            if piece.get_color() != active_color { continue; }
+            let piece = match board.get(r, c) {
+                Some(p) => p,
+                None => continue,
+            };
+            if piece.get_color() != active_color {
+                continue;
+            }
 
             for tr in 0..8 {
                 for tc in 0..8 {
                     let from = (r, c);
                     let to = (tr, tc);
-                    if from == to { continue; }
+                    if from == to {
+                        continue;
+                    }
 
                     let target_piece_is_some = board.get(tr, tc).is_some();
 
                     // basic board-level validation (ownership, capture flags, bounds)
                     let is_capture = target_piece_is_some;
                     let is_pawn_move = piece.get_type() == PieceType::Pawn;
-                    if !board.move_from_and_to_validation_check(from, to, active_color, is_capture, is_pawn_move, None) {
+                    if !board.move_from_and_to_validation_check(
+                        from,
+                        to,
+                        active_color,
+                        is_capture,
+                        is_pawn_move,
+                        None,
+                    ) {
                         continue;
                     }
 
-                    if is_piece_move_valid(board, active_color, r, c, piece, tr, tc, from, to, is_capture) {
+                    if is_piece_move_valid(
+                        board,
+                        active_color,
+                        r,
+                        c,
+                        piece,
+                        tr,
+                        tc,
+                        from,
+                        to,
+                        is_capture,
+                    ) {
                         result.push((from, to));
                     }
                 }
@@ -749,7 +1129,10 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
     let mut bonus: i32 = 0;
 
     // Identify piece and basic metadata
-    let piece = match board.get(from.0, from.1) { Some(p) => p, None => return 0 };
+    let piece = match board.get(from.0, from.1) {
+        Some(p) => p,
+        None => return 0,
+    };
     let pt = piece.get_type();
 
     // Opening-principle nudges (very small):
@@ -761,13 +1144,21 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
     // discourage rook pawns (files a/h -> col 0/7) pushing as early plan
     if pt == PieceType::Pawn && (fc == 0 || fc == 7) {
         // stronger if double push (two ranks)
-        let dr = if fr > tr { fr as i32 - tr as i32 } else { tr as i32 - fr as i32 };
+        let dr = if fr > tr {
+            fr as i32 - tr as i32
+        } else {
+            tr as i32 - fr as i32
+        };
         bonus -= if dr >= 2 { 35 } else { 25 };
     }
 
     // prefer central pawn advances on d/e files, especially 2-step from home
     if pt == PieceType::Pawn && (fc == 3 || fc == 4) {
-        let dr = if fr > tr { fr as i32 - tr as i32 } else { tr as i32 - fr as i32 };
+        let dr = if fr > tr {
+            fr as i32 - tr as i32
+        } else {
+            tr as i32 - fr as i32
+        };
         bonus += if dr >= 2 { 35 } else { 20 };
     }
 
@@ -777,10 +1168,14 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
     if pt == PieceType::Knight {
         match side {
             Color::White => {
-                if (tr, tc) == (2, 2) || (tr, tc) == (2, 5) { bonus += 20; }
+                if (tr, tc) == (2, 2) || (tr, tc) == (2, 5) {
+                    bonus += 20;
+                }
             }
             Color::Black => {
-                if (tr, tc) == (5, 2) || (tr, tc) == (5, 5) { bonus += 20; }
+                if (tr, tc) == (5, 2) || (tr, tc) == (5, 5) {
+                    bonus += 20;
+                }
             }
         }
     }
@@ -788,8 +1183,16 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
     // Bishops to c4/f4 for White; c5/f5 for Black
     if pt == PieceType::Bishop {
         match side {
-            Color::White => { if (tr, tc) == (3, 2) || (tr, tc) == (3, 5) { bonus += 12; } }
-            Color::Black => { if (tr, tc) == (4, 2) || (tr, tc) == (4, 5) { bonus += 12; } }
+            Color::White => {
+                if (tr, tc) == (3, 2) || (tr, tc) == (3, 5) {
+                    bonus += 12;
+                }
+            }
+            Color::Black => {
+                if (tr, tc) == (4, 2) || (tr, tc) == (4, 5) {
+                    bonus += 12;
+                }
+            }
         }
     }
 
@@ -797,7 +1200,10 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
     let central_files = tc >= 2 && tc <= 5; // c..f
     let central_ranks_white = tr >= 2 && tr <= 4; // ranks 3..5 from White pov
     let central_ranks_black = tr >= 3 && tr <= 5; // ranks 4..6 from White rows ~ Black push
-    if central_files && ((side == Color::White && central_ranks_white) || (side == Color::Black && central_ranks_black)) {
+    if central_files
+        && ((side == Color::White && central_ranks_white)
+            || (side == Color::Black && central_ranks_black))
+    {
         bonus += 5;
     }
 
@@ -808,11 +1214,31 @@ fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side
     }
 }
 
-fn is_piece_move_valid(board: &Board, active_color: Color, r: usize, c: usize, piece: Piece, tr: usize, tc: usize, from: (usize, usize), to: (usize, usize), is_capture: bool) -> bool {
+fn is_piece_move_valid(
+    board: &Board,
+    active_color: Color,
+    r: usize,
+    c: usize,
+    piece: Piece,
+    tr: usize,
+    tc: usize,
+    from: (usize, usize),
+    to: (usize, usize),
+    is_capture: bool,
+) -> bool {
     // piece-type specific path/shape validation including pin checks
     let mut tmp = board.clone();
     let ok = match piece.get_type() {
-        PieceType::Pawn => is_valid_pawn_move(&mut tmp, from, to, is_capture, None, active_color, None, true),
+        PieceType::Pawn => is_valid_pawn_move(
+            &mut tmp,
+            from,
+            to,
+            is_capture,
+            None,
+            active_color,
+            None,
+            true,
+        ),
         PieceType::Knight => is_valid_knight_move(&mut tmp, from, to, true),
         PieceType::Bishop => is_valid_bishop_move(&mut tmp, from, to, true),
         PieceType::Rook => is_valid_rook_move(&mut tmp, from, to, true),
@@ -824,7 +1250,9 @@ fn is_piece_move_valid(board: &Board, active_color: Color, r: usize, c: usize, p
             if dr <= 1 && dc <= 1 {
                 // ensure the king wouldn't be in check after the move
                 !is_king_in_check_after_move(&mut tmp, from, to, None)
-            } else { false }
+            } else {
+                false
+            }
         }
     };
     ok
@@ -832,28 +1260,37 @@ fn is_piece_move_valid(board: &Board, active_color: Color, r: usize, c: usize, p
 
 #[inline]
 fn opposite_color(c: Color) -> Color {
-    match c { Color::White => Color::Black, Color::Black => Color::White }
+    match c {
+        Color::White => Color::Black,
+        Color::Black => Color::White,
+    }
 }
 
 // --- Lightweight helpers for selective extensions ---
 // Compute a simple material-based game phase similar to evaluator (0..24)
 #[inline]
 fn game_phase_light(board: &Board) -> i32 {
-    const PHASE_KNIGHT: i32 = 1;
-    const PHASE_BISHOP: i32 = 1;
-    const PHASE_ROOK: i32 = 2;
-    const PHASE_QUEEN: i32 = 4;
     let mut phase: i32 = 0;
-    for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-        phase += match p.get_type() {
-            PieceType::Knight => PHASE_KNIGHT,
-            PieceType::Bishop => PHASE_BISHOP,
-            PieceType::Rook => PHASE_ROOK,
-            PieceType::Queen => PHASE_QUEEN,
-            _ => 0,
-        };
-    }}}
-    if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = board.get(r, c) {
+                phase += match p.get_type() {
+                    PieceType::Knight => PHASE_KNIGHT,
+                    PieceType::Bishop => PHASE_BISHOP,
+                    PieceType::Rook => PHASE_ROOK,
+                    PieceType::Queen => PHASE_QUEEN,
+                    _ => 0,
+                };
+            }
+        }
+    }
+    if phase < 0 {
+        0
+    } else if phase > 24 {
+        24
+    } else {
+        phase
+    }
 }
 
 // Determine if a pawn at (row,col) for color is a passed pawn (no enemy pawns ahead on same/adjacent files)
@@ -864,9 +1301,13 @@ fn is_passed_pawn_simple(board: &Board, row: usize, col: usize, color: Color) ->
     while r >= 0 && r < 8 {
         for dc in [-1i32, 0, 1] {
             let nc = col as i32 + dc;
-            if nc < 0 || nc >= 8 { continue; }
+            if nc < 0 || nc >= 8 {
+                continue;
+            }
             if let Some(p) = board.get(r as usize, nc as usize) {
-                if p.get_color() != color && p.get_type() == PieceType::Pawn { return false; }
+                if p.get_color() != color && p.get_type() == PieceType::Pawn {
+                    return false;
+                }
             }
         }
         r += dir;
@@ -931,53 +1372,79 @@ fn alphabeta(
             use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
             let mut any_queen_attacked = false;
             // Scan white queen
-            'findw: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-                if p.get_color()==Color::White && p.get_type()==PieceType::Queen {
-                    if is_square_attacked_by_opponent(board, (r,c), Color::White) { any_queen_attacked = true; }
-                    break 'findw;
-                }
-            }}}
-            // Scan black queen
-            if !any_queen_attacked {
-                'findb: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-                    if p.get_color()==Color::Black && p.get_type()==PieceType::Queen {
-                        if is_square_attacked_by_opponent(board, (r,c), Color::Black) { any_queen_attacked = true; }
-                        break 'findb;
-                    }
-                }}}
-            }
-            if !any_queen_attacked {
-            // Quick material heuristic: require presence of any piece other than kings/pawns
-            let mut has_non_pawn_minor = false;
-            'scan: for r in 0..8 {
+            'findw: for r in 0..8 {
                 for c in 0..8 {
                     if let Some(p) = board.get(r, c) {
-                        if p.get_color() == to_move {
-                            match p.get_type() {
-                                PieceType::Knight | PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
-                                    has_non_pawn_minor = true; break 'scan;
+                        if p.get_color() == Color::White && p.get_type() == PieceType::Queen {
+                            if is_square_attacked_by_opponent(board, (r, c), Color::White) {
+                                any_queen_attacked = true;
+                            }
+                            break 'findw;
+                        }
+                    }
+                }
+            }
+            // Scan black queen
+            if !any_queen_attacked {
+                'findb: for r in 0..8 {
+                    for c in 0..8 {
+                        if let Some(p) = board.get(r, c) {
+                            if p.get_color() == Color::Black && p.get_type() == PieceType::Queen {
+                                if is_square_attacked_by_opponent(board, (r, c), Color::Black) {
+                                    any_queen_attacked = true;
                                 }
-                                _ => {}
+                                break 'findb;
                             }
                         }
                     }
                 }
             }
-            if has_non_pawn_minor {
-                // Reduction R: capped to 2 for safety
-                let r = if depth >= 6 { 2 } else { 2 } as usize;
-                let undo: Option<()> = None;
-                // Make a null move: switch side to move without changing board, but we still push repetition key
-                // We reuse halfmove_clock (null move does not reset it)
-                // To keep Book/Board API simple, emulate by switching to_move only in recursive call
-                // and NOT modifying the board.
-                // Probe a null-window search; use (beta-1, beta) window which is standard for NMP
-                let score = alphabeta(board, opposite_color(to_move), depth.saturating_sub(1 + r), beta - 1, beta, ply + 1, tt, halfmove_clock.saturating_add(1), rep_stack);
-                let _ = undo; // placeholder for symmetry with real moves; no board change was made
-                if score >= beta {
-                    return score; // null-move cutoff
+            if !any_queen_attacked {
+                // Quick material heuristic: require presence of any piece other than kings/pawns
+                let mut has_non_pawn_minor = false;
+                'scan: for r in 0..8 {
+                    for c in 0..8 {
+                        if let Some(p) = board.get(r, c) {
+                            if p.get_color() == to_move {
+                                match p.get_type() {
+                                    PieceType::Knight
+                                    | PieceType::Bishop
+                                    | PieceType::Rook
+                                    | PieceType::Queen => {
+                                        has_non_pawn_minor = true;
+                                        break 'scan;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
                 }
-            }
+                if has_non_pawn_minor {
+                    // Reduction R: capped to 2 for safety
+                    let r = if depth >= 6 { 2 } else { 2 } as usize;
+                    let undo: Option<()> = None;
+                    // Make a null move: switch side to move without changing board, but we still push repetition key
+                    // We reuse halfmove_clock (null move does not reset it)
+                    // To keep Book/Board API simple, emulate by switching to_move only in recursive call
+                    // and NOT modifying the board.
+                    // Probe a null-window search; use (beta-1, beta) window which is standard for NMP
+                    let score = alphabeta(
+                        board,
+                        opposite_color(to_move),
+                        depth.saturating_sub(1 + r),
+                        beta - 1,
+                        beta,
+                        ply + 1,
+                        tt,
+                        halfmove_clock.saturating_add(1),
+                        rep_stack,
+                    );
+                    let _ = undo; // placeholder for symmetry with real moves; no board change was made
+                    if score >= beta {
+                        return score; // null-move cutoff
+                    }
+                }
             }
         }
     }
@@ -988,14 +1455,24 @@ fn alphabeta(
         if entry.depth as usize >= depth {
             let tt_score = from_tt_score(entry.score, ply);
             match entry.bound {
-                Bound::Exact => { return tt_score; }
+                Bound::Exact => {
+                    return tt_score;
+                }
                 Bound::Lower => {
-                    if tt_score >= beta { return tt_score; }
-                    if tt_score > alpha { alpha = tt_score; }
+                    if tt_score >= beta {
+                        return tt_score;
+                    }
+                    if tt_score > alpha {
+                        alpha = tt_score;
+                    }
                 }
                 Bound::Upper => {
-                    if tt_score <= alpha { return tt_score; }
-                    if tt_score < beta { beta = tt_score; }
+                    if tt_score <= alpha {
+                        return tt_score;
+                    }
+                    if tt_score < beta {
+                        beta = tt_score;
+                    }
                 }
             }
         }
@@ -1023,22 +1500,35 @@ fn alphabeta(
         tail.sort_by_key(|&(from, to)| {
             // Base MVV-LVA score
             let mut key = move_score_mvv_lva(board_ref, from, to);
-            let moved_is_pawn = board_ref.get(from.0, from.1).map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+            let moved_is_pawn = board_ref
+                .get(from.0, from.1)
+                .map(|p| p.get_type() == PieceType::Pawn)
+                .unwrap_or(false);
             let is_capture = board_ref.get(to.0, to.1).is_some();
             // DTZ-like ordering bump: near 50-move horizon, prioritize pawn moves and captures
             if hmc >= 80 {
-                if moved_is_pawn || is_capture { key += 100_000; }
+                if moved_is_pawn || is_capture {
+                    key += 100_000;
+                }
             }
             // Killer move bonus (only for quiets)
             if !is_capture && !moved_is_pawn {
                 let is_killer = HEUR.with(|h| {
-                    let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    let m = h
+                        .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                        .lock()
+                        .unwrap();
                     m.is_killer(ply as usize, from, to)
                 });
-                if is_killer { key += 200_000; }
+                if is_killer {
+                    key += 200_000;
+                }
                 // History bonus
                 let hist = HEUR.with(|h| {
-                    let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    let m = h
+                        .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                        .lock()
+                        .unwrap();
                     m.history_score(to_move, from, to)
                 });
                 // Scale down history to be commensurate with MVV-LVA units
@@ -1079,7 +1569,7 @@ fn alphabeta(
     let value = if to_move == Color::White {
         let mut value = MIN_EVAL_VALUE;
         let mut is_first_move = true; // PVS: first move searched with full window
-        let mut move_index: i32 = 0;  // LMR: track move order
+        let mut move_index: i32 = 0; // LMR: track move order
         // Precompute whether our queen is currently under attack in this node (before making a move)
         let mut queen_in_danger = false;
         {
@@ -1088,7 +1578,9 @@ fn alphabeta(
                 for c in 0..8 {
                     if let Some(p) = board.get(r, c) {
                         if p.get_color() == to_move && p.get_type() == PieceType::Queen {
-                            if is_square_attacked_by_opponent(board, (r, c), to_move) { queen_in_danger = true; }
+                            if is_square_attacked_by_opponent(board, (r, c), to_move) {
+                                queen_in_danger = true;
+                            }
                             break 'findq;
                         }
                     }
@@ -1109,27 +1601,46 @@ fn alphabeta(
                 if p.get_type() == PieceType::Pawn {
                     child_hmc = 0;
                     let color = p.get_color();
-                    let r = to.0; let c = to.1;
+                    let r = to.0;
+                    let c = to.1;
                     if game_phase_light(board) <= 8 && is_passed_pawn_simple(board, r, c, color) {
-                        let adv: i32 = match color { Color::White => r as i32, Color::Black => (7 - r) as i32 };
-                        if adv >= 5 { // 6th or 7th rank
+                        let adv: i32 = match color {
+                            Color::White => r as i32,
+                            Color::Black => (7 - r) as i32,
+                        };
+                        if adv >= 5 {
+                            // 6th or 7th rank
                             child_depth = child_depth.saturating_add(1);
                         }
                     }
                 }
             }
-            if target_piece.is_some() { child_hmc = 0; }
+            if target_piece.is_some() {
+                child_hmc = 0;
+            }
 
             // History/Killer move ordering boost for quiet moves (after initial TT/MVV ordering)
             let is_capture = target_piece.is_some();
-            let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+            let is_pawn_move = moved_piece
+                .map(|p| p.get_type() == PieceType::Pawn)
+                .unwrap_or(false);
             let quiet = !is_capture && !is_pawn_move;
 
             // Principal Variation Search (PVS) + Late Move Reductions (LMR)
             let mut score;
             if is_first_move {
                 // Full window on the first move
-                score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                score = alphabeta(
+                    board,
+                    Color::Black,
+                    child_depth,
+                    alpha,
+                    beta,
+                    ply + 1,
+                    tt,
+                    child_hmc,
+                    rep_stack,
+                );
                 is_first_move = false;
             } else {
                 // Late Move Reduction (safer): start later and cap reductions
@@ -1139,18 +1650,21 @@ fn alphabeta(
                 let gives_check = is_side_in_check(board, Color::Black);
                 // Strictly avoid reducing checking moves and immediate recaptures at shallow depth
                 let mut is_immediate_recapture = false;
-                if let Some(_cap) = target_piece { // current move captured something
+                if let Some(_cap) = target_piece {
+                    // current move captured something
                     // After our capture, if opponent can immediately recapture on the same square, treat as immediate recapture scenario
                     // We approximate by: was there a capture, and is this the same 'to' square as a previous capture this ply? We don't track last capture here,
                     // so use a conservative proxy: any capture counts as tactically sharp; we won't reduce captures anyway because quiet=false.
                     is_immediate_recapture = true;
                 }
                 let mut queen_into_danger = false;
-                if let Some(p) = moved_piece { if p.get_type()==PieceType::Queen {
-                    use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-                    let attacked = is_square_attacked_by_opponent(board, to, Color::White);
-                    queen_into_danger = attacked;
-                }}
+                if let Some(p) = moved_piece {
+                    if p.get_type() == PieceType::Queen {
+                        use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+                        let attacked = is_square_attacked_by_opponent(board, to, Color::White);
+                        queen_into_danger = attacked;
+                    }
+                }
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
                 // If any queen is attacked at this node and depth is shallow, avoid LMR for quiets
@@ -1158,71 +1672,136 @@ fn alphabeta(
                 {
                     use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
                     // White queen
-                    'qw: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-                        if p.get_type()==PieceType::Queen && p.get_color()==Color::White {
-                            if is_square_attacked_by_opponent(board, (r,c), Color::White) { any_queen_attacked_here = true; }
-                            break 'qw;
+                    'qw: for r in 0..8 {
+                        for c in 0..8 {
+                            if let Some(p) = board.get(r, c) {
+                                if p.get_type() == PieceType::Queen && p.get_color() == Color::White
+                                {
+                                    if is_square_attacked_by_opponent(board, (r, c), Color::White) {
+                                        any_queen_attacked_here = true;
+                                    }
+                                    break 'qw;
+                                }
+                            }
                         }
-                    }}}
+                    }
                     // Black queen
                     if !any_queen_attacked_here {
-                        'qb: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-                            if p.get_type()==PieceType::Queen && p.get_color()==Color::Black {
-                                if is_square_attacked_by_opponent(board, (r,c), Color::Black) { any_queen_attacked_here = true; }
-                                break 'qb;
+                        'qb: for r in 0..8 {
+                            for c in 0..8 {
+                                if let Some(p) = board.get(r, c) {
+                                    if p.get_type() == PieceType::Queen
+                                        && p.get_color() == Color::Black
+                                    {
+                                        if is_square_attacked_by_opponent(
+                                            board,
+                                            (r, c),
+                                            Color::Black,
+                                        ) {
+                                            any_queen_attacked_here = true;
+                                        }
+                                        break 'qb;
+                                    }
+                                }
                             }
-                        }}}
+                        }
                     }
                 }
                 let avoid_lmr_for_queen_threat = any_queen_attacked_here && child_depth <= 5;
-                if quiet && child_depth >= 3 && move_index >= 5 && allow_reduce && !queen_in_danger && !queen_into_danger && !avoid_lmr_for_queen_threat {
+                if quiet
+                    && child_depth >= 3
+                    && move_index >= 5
+                    && allow_reduce
+                    && !queen_in_danger
+                    && !queen_into_danger
+                    && !avoid_lmr_for_queen_threat
+                {
                     // Basic reduction formula: grows with move index and depth
                     // Use history to avoid over-reducing historically good moves
                     let hist = HEUR.with(|h| {
-                        let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        let m = h
+                            .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                            .lock()
+                            .unwrap();
                         m.history_score(to_move, from, to)
                     });
                     let hist_good = hist > 10_000; // tuned threshold
                     let mut r = 1 + ((move_index as usize) / 6).min(1); // cap growth
-                    if (child_depth as usize) >= 6 { r += 0; }
-                    if hist_good { r = r.saturating_sub(1); }
+                    if (child_depth as usize) >= 6 {
+                        r += 0;
+                    }
+                    if hist_good {
+                        r = r.saturating_sub(1);
+                    }
                     // Final cap to 2 plies
                     r = r.min(2);
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // Null-window search for subsequent moves (PVS window)
-                score = alphabeta(board, Color::Black, reduced_depth, alpha, alpha + 1, ply + 1, tt, child_hmc, rep_stack);
+                score = alphabeta(
+                    board,
+                    Color::Black,
+                    reduced_depth,
+                    alpha,
+                    alpha + 1,
+                    ply + 1,
+                    tt,
+                    child_hmc,
+                    rep_stack,
+                );
                 if score > alpha && score < beta {
                     // Re-search with full window on fail-high/improvement inside window
-                    score = alphabeta(board, Color::Black, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                    score = alphabeta(
+                        board,
+                        Color::Black,
+                        child_depth,
+                        alpha,
+                        beta,
+                        ply + 1,
+                        tt,
+                        child_hmc,
+                        rep_stack,
+                    );
                 }
             }
             unmake_move_simple(board, u);
-            if score > value { value = score; }
-            if value > alpha { 
-                alpha = value; best_from_to = Some((from, to));
+            if score > value {
+                value = score;
+            }
+            if value > alpha {
+                alpha = value;
+                best_from_to = Some((from, to));
                 // On alpha improvement, update history for quiets
                 if quiet {
                     HEUR.with(|h| {
-                        let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        let mut m = h
+                            .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                            .lock()
+                            .unwrap();
                         m.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
             } else if quiet && score >= beta {
                 // Beta cutoffs are handled by loop break, but record killer before break
                 HEUR.with(|h| {
-                    let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    let mut m = h
+                        .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                        .lock()
+                        .unwrap();
                     m.add_killer(ply as usize, from, to);
                 });
             }
-            if alpha >= beta { break; }
+            if alpha >= beta {
+                break;
+            }
             move_index += 1;
         }
-        value_holder = value; value_holder
+        value_holder = value;
+        value_holder
     } else {
         let mut value = MAX_EVAL_VALUE;
         let mut is_first_move = true; // PVS for minimizing side too
-        let mut move_index: i32 = 0;  // LMR index
+        let mut move_index: i32 = 0; // LMR index
         // Precompute whether our queen is currently under attack in this node
         let mut queen_in_danger = false;
         {
@@ -1231,7 +1810,9 @@ fn alphabeta(
                 for c in 0..8 {
                     if let Some(p) = board.get(r, c) {
                         if p.get_color() == to_move && p.get_type() == PieceType::Queen {
-                            if is_square_attacked_by_opponent(board, (r, c), to_move) { queen_in_danger = true; }
+                            if is_square_attacked_by_opponent(board, (r, c), to_move) {
+                                queen_in_danger = true;
+                            }
                             break 'findq;
                         }
                     }
@@ -1251,23 +1832,41 @@ fn alphabeta(
                 if p.get_type() == PieceType::Pawn {
                     child_hmc = 0;
                     let color = p.get_color();
-                    let r = to.0; let c = to.1;
+                    let r = to.0;
+                    let c = to.1;
                     if game_phase_light(board) <= 8 && is_passed_pawn_simple(board, r, c, color) {
-                        let adv: i32 = match color { Color::White => r as i32, Color::Black => (7 - r) as i32 };
+                        let adv: i32 = match color {
+                            Color::White => r as i32,
+                            Color::Black => (7 - r) as i32,
+                        };
                         if adv >= 5 {
                             child_depth = child_depth.saturating_add(1);
                         }
                     }
                 }
             }
-            if target_piece.is_some() { child_hmc = 0; }
+            if target_piece.is_some() {
+                child_hmc = 0;
+            }
             // PVS + LMR for minimizing side
             let is_capture = target_piece.is_some();
-            let is_pawn_move = moved_piece.map(|p| p.get_type()==PieceType::Pawn).unwrap_or(false);
+            let is_pawn_move = moved_piece
+                .map(|p| p.get_type() == PieceType::Pawn)
+                .unwrap_or(false);
             let quiet = !is_capture && !is_pawn_move;
             let mut score;
             if is_first_move {
-                score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                score = alphabeta(
+                    board,
+                    Color::White,
+                    child_depth,
+                    alpha,
+                    beta,
+                    ply + 1,
+                    tt,
+                    child_hmc,
+                    rep_stack,
+                );
                 is_first_move = false;
             } else {
                 // Late Move Reduction (safer): start later and cap reductions
@@ -1275,106 +1874,199 @@ fn alphabeta(
                 let gives_check = is_side_in_check(board, Color::White);
                 // Strictly avoid reducing checking moves and immediate recaptures at shallow depth
                 let mut is_immediate_recapture = false;
-                if let Some(_cap) = target_piece { is_immediate_recapture = true; }
+                if let Some(_cap) = target_piece {
+                    is_immediate_recapture = true;
+                }
                 let mut queen_into_danger = false;
-                if let Some(p) = moved_piece { if p.get_type()==PieceType::Queen {
-                    use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-                    let attacked = is_square_attacked_by_opponent(board, to, Color::Black);
-                    queen_into_danger = attacked;
-                }}
+                if let Some(p) = moved_piece {
+                    if p.get_type() == PieceType::Queen {
+                        use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
+                        let attacked = is_square_attacked_by_opponent(board, to, Color::Black);
+                        queen_into_danger = attacked;
+                    }
+                }
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
                 // If any queen is attacked at this node and depth is shallow, avoid LMR for quiets
                 let mut any_queen_attacked_here = false;
                 {
                     use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-                    'qw: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-                        if p.get_type()==PieceType::Queen && p.get_color()==Color::White {
-                            if is_square_attacked_by_opponent(board, (r,c), Color::White) { any_queen_attacked_here = true; }
-                            break 'qw;
-                        }
-                    }}}
-                    if !any_queen_attacked_here {
-                        'qb: for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-                            if p.get_type()==PieceType::Queen && p.get_color()==Color::Black {
-                                if is_square_attacked_by_opponent(board, (r,c), Color::Black) { any_queen_attacked_here = true; }
-                                break 'qb;
+                    'qw: for r in 0..8 {
+                        for c in 0..8 {
+                            if let Some(p) = board.get(r, c) {
+                                if p.get_type() == PieceType::Queen && p.get_color() == Color::White
+                                {
+                                    if is_square_attacked_by_opponent(board, (r, c), Color::White) {
+                                        any_queen_attacked_here = true;
+                                    }
+                                    break 'qw;
+                                }
                             }
-                        }}}
+                        }
+                    }
+                    if !any_queen_attacked_here {
+                        'qb: for r in 0..8 {
+                            for c in 0..8 {
+                                if let Some(p) = board.get(r, c) {
+                                    if p.get_type() == PieceType::Queen
+                                        && p.get_color() == Color::Black
+                                    {
+                                        if is_square_attacked_by_opponent(
+                                            board,
+                                            (r, c),
+                                            Color::Black,
+                                        ) {
+                                            any_queen_attacked_here = true;
+                                        }
+                                        break 'qb;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 let avoid_lmr_for_queen_threat = any_queen_attacked_here && child_depth <= 5;
-                if quiet && child_depth >= 3 && move_index >= 5 && allow_reduce && !queen_in_danger && !queen_into_danger && !avoid_lmr_for_queen_threat {
+                if quiet
+                    && child_depth >= 3
+                    && move_index >= 5
+                    && allow_reduce
+                    && !queen_in_danger
+                    && !queen_into_danger
+                    && !avoid_lmr_for_queen_threat
+                {
                     let hist = HEUR.with(|h| {
-                        let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        let m = h
+                            .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                            .lock()
+                            .unwrap();
                         m.history_score(to_move, from, to)
                     });
                     let hist_good = hist < -10_000; // minimizing side: negative is good for minimizing? keep symmetric for simplicity
                     let mut r = 1 + ((move_index as usize) / 6).min(1);
-                    if (child_depth as usize) >= 6 { r += 0; }
-                    if hist_good { r = r.saturating_sub(1); }
+                    if (child_depth as usize) >= 6 {
+                        r += 0;
+                    }
+                    if hist_good {
+                        r = r.saturating_sub(1);
+                    }
                     r = r.min(2);
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // For the minimizing side, a null-window around beta-1 .. beta works equivalently
-                score = alphabeta(board, Color::White, reduced_depth, beta - 1, beta, ply + 1, tt, child_hmc, rep_stack);
+                score = alphabeta(
+                    board,
+                    Color::White,
+                    reduced_depth,
+                    beta - 1,
+                    beta,
+                    ply + 1,
+                    tt,
+                    child_hmc,
+                    rep_stack,
+                );
                 if score < beta && score > alpha {
-                    score = alphabeta(board, Color::White, child_depth, alpha, beta, ply + 1, tt, child_hmc, rep_stack);
+                    score = alphabeta(
+                        board,
+                        Color::White,
+                        child_depth,
+                        alpha,
+                        beta,
+                        ply + 1,
+                        tt,
+                        child_hmc,
+                        rep_stack,
+                    );
                 }
             }
             unmake_move_simple(board, u);
-            if score < value { value = score; }
-            if value < beta { 
-                beta = value; best_from_to = Some((from, to));
+            if score < value {
+                value = score;
+            }
+            if value < beta {
+                beta = value;
+                best_from_to = Some((from, to));
                 if quiet {
                     HEUR.with(|h| {
-                        let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                        let mut m = h
+                            .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                            .lock()
+                            .unwrap();
                         m.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
             } else if quiet && score <= alpha {
                 HEUR.with(|h| {
-                    let mut m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                    let mut m = h
+                        .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                        .lock()
+                        .unwrap();
                     m.add_killer(ply as usize, from, to);
                 });
             }
-            if alpha >= beta { break; }
+            if alpha >= beta {
+                break;
+            }
             move_index += 1;
         }
-        value_holder = value; value_holder
+        value_holder = value;
+        value_holder
     };
 
     // Pop this node key
     let _ = rep_stack.pop();
 
     // Store to TT
-    let bound = if value <= original_alpha { Bound::Upper }
-                else if value >= original_beta { Bound::Lower }
-                else { Bound::Exact };
-    let (bf, bt) = if let Some((f, t)) = best_from_to { let (ff, tt2) = encode_move(f, t); (Some(ff), Some(tt2)) } else { (None, None) };
+    let bound = if value <= original_alpha {
+        Bound::Upper
+    } else if value >= original_beta {
+        Bound::Lower
+    } else {
+        Bound::Exact
+    };
+    let (bf, bt) = if let Some((f, t)) = best_from_to {
+        let (ff, tt2) = encode_move(f, t);
+        (Some(ff), Some(tt2))
+    } else {
+        (None, None)
+    };
     let tt_score = to_tt_score(value, ply);
     tt.store(key, depth as i16, bound, tt_score, bf, bt);
     value
 }
 
 // Quiescence search: consider only tactical continuations (captures) unless in check.
-fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmove_clock: u32, rep_stack: &mut Vec<u64>) -> i32 {
+fn qsearch(
+    board: &mut Board,
+    to_move: Color,
+    mut alpha: i32,
+    beta: i32,
+    halfmove_clock: u32,
+    rep_stack: &mut Vec<u64>,
+) -> i32 {
     // Time cutoff in quiescence as well: return a quick static eval
     if time_is_up() {
         return evaluate_position(&*board);
     }
     // Draw checks in quiescence as well
     let key_here = compute_zobrist(&*board, to_move);
-    if rep_stack.iter().any(|&k| k == key_here) { return 0; }
-    if halfmove_clock >= 100 { return 0; }
+    if rep_stack.iter().any(|&k| k == key_here) {
+        return 0;
+    }
+    if halfmove_clock >= 100 {
+        return 0;
+    }
 
     // Stand-pat (static) evaluation. Suppress stand-pat only when in check.
     let in_check = is_side_in_check(board, to_move);
     let stand_pat = evaluate_position(&*board);
     if !in_check {
         // Uniform alpha/beta semantics regardless of side-to-move.
-        if stand_pat >= beta { return stand_pat; }
-        if stand_pat > alpha { alpha = stand_pat; }
+        if stand_pat >= beta {
+            return stand_pat;
+        }
+        if stand_pat > alpha {
+            alpha = stand_pat;
+        }
     }
 
     // Generate moves. If not in check, restrict to captures (quiescence).
@@ -1384,10 +2076,15 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
     if !in_check {
         // Keep captures only; additionally filter out clearly losing captures using SEE
         moves.retain(|&(from, to)| {
-            if board.get(to.0, to.1).is_none() { return false; }
+            if board.get(to.0, to.1).is_none() {
+                return false;
+            }
             // SEE pre-check: build post-move board and evaluate destination safety
             let mut post = board.clone();
-            let moved = match board.get(from.0, from.1) { Some(p) => p, None => return false };
+            let moved = match board.get(from.0, from.1) {
+                Some(p) => p,
+                None => return false,
+            };
             let captured = board.get(to.0, to.1);
             post.set(from.0, from.1, None);
             post.set(to.0, to.1, Some(moved));
@@ -1403,23 +2100,43 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
         let phase = game_phase_light(&*board);
         if phase <= 8 {
             // collect up to N safe quiet pushes
-            const MAX_QUIET_PUSHES: usize = 2;
             let mut added: usize = 0;
             'outer: for r in 0..8 {
                 for c in 0..8 {
                     if let Some(p) = board.get(r, c) {
-                        if p.get_color() != to_move || p.get_type() != PieceType::Pawn { continue; }
+                        if p.get_color() != to_move || p.get_type() != PieceType::Pawn {
+                            continue;
+                        }
                         // only consider passed pawns on 5th–7th ranks (relative to side)
-                        let adv: i32 = match to_move { Color::White => r as i32, Color::Black => (7 - r) as i32 };
-                        if adv < 4 { continue; }
-                        if !is_passed_pawn_simple(&*board, r, c, to_move) { continue; }
+                        let adv: i32 = match to_move {
+                            Color::White => r as i32,
+                            Color::Black => (7 - r) as i32,
+                        };
+                        if adv < 4 {
+                            continue;
+                        }
+                        if !is_passed_pawn_simple(&*board, r, c, to_move) {
+                            continue;
+                        }
                         // one-step push target
                         let (nr_opt, to_sq) = match to_move {
-                            Color::White => (if r < 7 { Some(r + 1) } else { None }, (r.saturating_add(1), c)),
-                            Color::Black => (if r > 0 { Some(r - 1) } else { None }, (r.saturating_sub(1), c)),
+                            Color::White => (
+                                if r < 7 { Some(r + 1) } else { None },
+                                (r.saturating_add(1), c),
+                            ),
+                            Color::Black => (
+                                if r > 0 { Some(r - 1) } else { None },
+                                (r.saturating_sub(1), c),
+                            ),
                         };
-                        let nr = if let Some(nr) = nr_opt { nr } else { continue; };
-                        if board.get(nr, c).is_some() { continue; }
+                        let nr = if let Some(nr) = nr_opt {
+                            nr
+                        } else {
+                            continue;
+                        };
+                        if board.get(nr, c).is_some() {
+                            continue;
+                        }
                         // simulate and verify safety and legality
                         let from = (r, c);
                         let to = to_sq;
@@ -1430,10 +2147,14 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
                         use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
                         let attacked = is_square_attacked_by_opponent(board, to, to_move);
                         unmake_move_simple(board, u);
-                        if illegal || attacked { continue; }
+                        if illegal || attacked {
+                            continue;
+                        }
                         moves.push((from, to));
                         added += 1;
-                        if added >= MAX_QUIET_PUSHES { break 'outer; }
+                        if added >= MAX_QUIET_PUSHES {
+                            break 'outer;
+                        }
                     }
                 }
             }
@@ -1442,7 +2163,6 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
 
     // Delta pruning: if not in check and clearly below alpha, prune.
     // Start with a conservative constant margin; tune empirically.
-    const DELTA_MARGIN: i32 = 150; // centipawns
     if !in_check && stand_pat + DELTA_MARGIN <= alpha {
         return stand_pat;
     }
@@ -1462,7 +2182,14 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
     #[inline]
     fn piece_simple_value(p: PieceType) -> i32 {
         use crate::piece::pieces::PieceType::*;
-        match p { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 }
+        match p {
+            Pawn => 100,
+            Knight => 320,
+            Bishop => 330,
+            Rook => 500,
+            Queen => 900,
+            King => 20000,
+        }
     }
 
     let mut a = alpha;
@@ -1475,21 +2202,32 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
                     let att_v = piece_simple_value(att.get_type());
                     let vic_v = piece_simple_value(vic.get_type());
                     // Skip "bad" captures where attacker is significantly more valuable than victim
-                    if vic_v + 50 < att_v { continue; }
+                    if vic_v + 50 < att_v {
+                        continue;
+                    }
                     // Futility in qsearch (White to move): if even taking the victim cannot raise alpha, skip
-                    const FUT_MARGIN: i32 = 50;
-                    if stand_pat + vic_v + FUT_MARGIN <= a { continue; }
+                    if stand_pat + vic_v + FUT_MARGIN <= a {
+                        continue;
+                    }
                 }
             }
             let was_capture = board.get(to.0, to.1).is_some();
             let u = make_move_simple(board, from, to);
             let mut child_hmc = halfmove_clock + 1;
-            if was_capture { child_hmc = 0; }
+            if was_capture {
+                child_hmc = 0;
+            }
             let score = qsearch(board, Color::Black, a, bnd, child_hmc, rep_stack);
             unmake_move_simple(board, u);
-            if score > best { best = score; }
-            if best > a { a = best; }
-            if a >= bnd { break; }
+            if score > best {
+                best = score;
+            }
+            if best > a {
+                a = best;
+            }
+            if a >= bnd {
+                break;
+            }
         }
         best
     } else {
@@ -1499,21 +2237,32 @@ fn qsearch(board: &mut Board, to_move: Color, mut alpha: i32, beta: i32, halfmov
                 if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
                     let att_v = piece_simple_value(att.get_type());
                     let vic_v = piece_simple_value(vic.get_type());
-                    if vic_v + 50 < att_v { continue; }
+                    if vic_v + 50 < att_v {
+                        continue;
+                    }
                     // Futility in qsearch (Black to move): if even taking the victim cannot drop below beta, skip
-                    const FUT_MARGIN: i32 = 50;
-                    if stand_pat - vic_v - FUT_MARGIN >= bnd { continue; }
+                    if stand_pat - vic_v - FUT_MARGIN >= bnd {
+                        continue;
+                    }
                 }
             }
             let was_capture = board.get(to.0, to.1).is_some();
             let u = make_move_simple(board, from, to);
             let mut child_hmc = halfmove_clock + 1;
-            if was_capture { child_hmc = 0; }
+            if was_capture {
+                child_hmc = 0;
+            }
             let score = qsearch(board, Color::White, a, bnd, child_hmc, rep_stack);
             unmake_move_simple(board, u);
-            if score < best { best = score; }
-            if best < bnd { bnd = best; }
-            if a >= bnd { break; }
+            if score < best {
+                best = score;
+            }
+            if best < bnd {
+                bnd = best;
+            }
+            if a >= bnd {
+                break;
+            }
         }
         best
     }
@@ -1525,8 +2274,26 @@ fn move_score_mvv_lva(board: &Board, from: (usize, usize), to: (usize, usize)) -
     use crate::piece::pieces::PieceType::*;
     let victim = board.get(to.0, to.1);
     let attacker = board.get(from.0, from.1);
-    let v = victim.map(|p| match p.get_type() { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 }).unwrap_or(0);
-    let a = attacker.map(|p| match p.get_type() { Pawn=>100, Knight=>320, Bishop=>330, Rook=>500, Queen=>900, King=>20000 }).unwrap_or(0);
+    let v = victim
+        .map(|p| match p.get_type() {
+            Pawn => 100,
+            Knight => 320,
+            Bishop => 330,
+            Rook => 500,
+            Queen => 900,
+            King => 20000,
+        })
+        .unwrap_or(0);
+    let a = attacker
+        .map(|p| match p.get_type() {
+            Pawn => 100,
+            Knight => 320,
+            Bishop => 330,
+            Rook => 500,
+            Queen => 900,
+            King => 20000,
+        })
+        .unwrap_or(0);
     // Higher is better for ordering. Captures first; quiets get 0 or negative.
     if victim.is_some() { v * 100 - a } else { -1 }
 }
@@ -1569,7 +2336,14 @@ fn make_move_simple(board: &mut Board, from: (usize, usize), to: (usize, usize))
             board.set_king_location(p.get_color(), to);
         }
     }
-    UndoMove { from, to, moved, captured, prev_white_king, prev_black_king }
+    UndoMove {
+        from,
+        to,
+        moved,
+        captured,
+        prev_white_king,
+        prev_black_king,
+    }
 }
 
 #[inline]
@@ -1584,75 +2358,9 @@ fn unmake_move_simple(board: &mut Board, undo: UndoMove) {
 
 // Sorts the move table by score in ascending order and returns a cloned, sorted vector.
 fn sort_moves_on_score_asc(
-    move_table: &mut Vec<((usize, usize), (usize, usize), i32)>
+    move_table: &mut Vec<((usize, usize), (usize, usize), i32)>,
 ) -> Vec<((usize, usize), (usize, usize), i32)> {
     move_table.sort_by_key(|m| m.2);
     move_table.clone()
 }
 
-// Controlled by the strength parameter, the search will not always return the best move.
-// Selects randomly among the best-scoring moves in a sorted (ascending) move table.
-fn select_move_based_using_strength(
-    sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>, playing_strength: usize
-) -> Option<((usize, usize), (usize, usize))> {
-
-    if sorted_moves.is_empty() { return None; }
-
-    // Clamp strength to [1..1000]
-    let ps = if playing_strength == 0 { 1 } else { playing_strength.min(1000) };
-
-    // Blunder chance: with some probability (higher when weaker), deliberately pick from the bottom of list.
-    // This creates human-like mistakes at low skill.
-    let blunder_chance = if ps >= 950 { 0.0 }
-        else if ps >= 800 { 0.01 }
-        else if ps >= 650 { 0.03 }
-        else if ps >= 500 { 0.05 }
-        else if ps >= 350 { 0.10 }
-        else { 0.18 };
-    let roll: f32 = rng().random::<f32>();
-    if roll < blunder_chance {
-        // pick from bottom bucket (worst moves), limited to 30% of list but at least 2 moves
-        let len = sorted_moves.len();
-        let bucket = (len as f32 * 0.30).ceil() as usize;
-        let bucket = bucket.max(2).min(len);
-        let start = len - bucket;
-        let idx = rng().random_range(start..len);
-        let pick = &sorted_moves[idx];
-        return Some((pick.0, pick.1));
-    }
-
-    // Choose from top-K based on strength. For low strength pick from a wider bucket,
-    // but still bias the pick toward the best move within that bucket.
-    // Map strength to K in [len, 1] roughly: strong -> pick among top 1..3, weak -> wider.
-    let len = sorted_moves.len();
-    // Limit randomness to top 6 to avoid clearly dubious opening moves surfacing too often.
-    let max_bucket = len.min(6);
-    let k = if ps >= 950 { 1 }
-            else if ps >= 800 { 2 }
-            else if ps >= 650 { 3 }
-            else if ps >= 500 { 4 }
-            else if ps >= 350 { 5 }
-            else if ps >= 200 { 6 }
-            else { 8 };
-    let k = k.min(max_bucket).max(1);
-
-    // Random index within top-k, biased toward 0 (best move).
-    // Use the minimum of two uniform draws to skew toward lower indices.
-    let r1: usize = rng().random_range(0..k);
-    let r2: usize = rng().random_range(0..k);
-    let idx = r1.min(r2);
-    let pick = &sorted_moves[idx];
-    Some((pick.0, pick.1))
-}
-
-// Map strength to evaluation noise (centipawns). 0 at 1000, higher at low strengths.
-#[inline]
-fn strength_noise_sigma(ps: usize) -> i32 {
-    let ps = ps.min(1000).max(1) as i32;
-    // Piecewise linear: ~200cp at ps=1, ~120cp at ps=300, ~0 at 1000
-    let sigma = if ps >= 1000 { 0 }
-        else if ps >= 700 { ((1000 - ps) as f32 * 0.10) as i32 }  // up to ~30cp
-        else if ps >= 400 { ((700 - ps) as f32 * 0.20 + 30.0) as i32 } // ~30..90
-        else { ((400 - ps) as f32 * 0.30 + 90.0) as i32 }; // up to ~210
-    sigma.max(0)
-}
