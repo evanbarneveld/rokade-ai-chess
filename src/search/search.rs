@@ -1,19 +1,21 @@
 use crate::board::Board;
 use crate::history::history::History;
+use crate::piece::move_validators::is_piece_move_valid;
 use crate::piece::piece_mover::PieceMover;
-use crate::piece::pieces::{ Color, Piece, PieceType};
-use crate::search::tt::{TranspositionTable, decode_move};
+use crate::piece::pieces::{Color, Piece, PieceType};
+use crate::search::locking::get_tt_mutex;
+use crate::search::playing_strength::{select_move_based_using_strength, PLAYING_STRENGTH_MAX};
+use crate::search::root_moves::{
+    adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves,
+    hard_root_filter,
+};
+use crate::search::threading::init_rayon_pool_if_needed;
+use crate::search::tt::{decode_move, TranspositionTable};
+use crate::search::uci_feedback::emit_info;
 use crate::search::zobrist::compute_zobrist;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 use rayon::prelude::*;
-use crate::piece::move_validators::is_piece_move_valid;
-use crate::search::locking::{get_tt_mutex};
-use crate::search::playing_strength::{select_move_based_using_strength, PLAYING_STRENGTH_MAX};
-use crate::search::root_moves::{ adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves, hard_root_filter};
-use crate::search::threading::init_rayon_pool_if_needed;
-use crate::search::uci_feedback::emit_info;
-
 
 pub const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000;
 pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
@@ -30,7 +32,6 @@ const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root mo
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
 const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
-
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 /// returns the evaluated score (in centipawns) for the selected move
@@ -100,225 +101,19 @@ pub fn find_best_move(
 
     for depth_now in 1..=effective_depth {
         tt.next_age();
-        let mut a = MIN_EVAL_VALUE + 1;
-        let mut b = MAX_EVAL_VALUE - 1;
-        if depth_now > 1 {
-            a = (last_score - window).max(MIN_EVAL_VALUE + 1);
-            b = (last_score + window).min(MAX_EVAL_VALUE - 1);
-        }
-
-        // Retry loop on aspiration fail
-        let mut tried = 0;
-        let best_tuple = loop {
-            tried += 1;
-            let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
-            let mut best_score_raw = if active_color == Color::White {
-                MIN_EVAL_VALUE
-            } else {
-                MAX_EVAL_VALUE
-            };
-            let mut best_adjusted = best_score_raw;
-
-            // Order: if TT has a move at root, try to place it first
-            let mut ordered = root_moves.clone();
-            reorder_with_tt_hint(&mut ordered, &tt, &board, active_color);
-
-            let enable_parallel =
-                depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
-            if enable_parallel {
-                // 1) Search the first (best-ordered) move serially to establish PV and bounds
-                let &(pv_from, pv_to) = ordered.first().unwrap();
-                {
-                    let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                        &board,
-                        active_color,
-                        pv_from,
-                        pv_to,
-                        depth_now,
-                        a,
-                        b,
-                        &mut tt,
-                        base_hmc,
-                    );
-
-                    let adjusted = adjusted_root_eval_for_move(
-                        &board,
-                        active_color,
-                        pv_from,
-                        pv_to,
-                        base_hmc,
-                        score_raw,
-                        is_capture,
-                        moved_is_pawn,
-                        ps,
-                    );
-
-                    best_from_to = Some((pv_from, pv_to));
-                    best_adjusted = adjusted;
-                    best_score_raw = score_raw;
-                }
-
-                // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
-                let base_board = board.clone();
-                let base_hmc_loc = base_hmc;
-                let a_loc = a;
-                let b_loc = b;
-                let side = active_color;
-                let results = ordered[1..]
-                    .par_iter()
-                    .map(|&(from, to)| {
-                        // local TT per task
-                        let mut local_tt = TranspositionTable::new_with_default_size();
-                        let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                            &base_board,
-                            side,
-                            from,
-                            to,
-                            depth_now,
-                            a_loc,
-                            b_loc,
-                            &mut local_tt,
-                            base_hmc_loc,
-                        );
-
-                        // Root adjustments (skip repetition-history check to keep parallel code simple)
-                        let adjusted = adjusted_root_eval_for_move(
-                            &base_board,
-                            side,
-                            from,
-                            to,
-                            base_hmc_loc,
-                            score_raw,
-                            is_capture,
-                            moved_is_pawn,
-                            ps,
-                        );
-                        (from, to, adjusted, score_raw)
-                    })
-                    .reduce(
-                        || {
-                            // Identity: invalid move placeholder not used; return extreme sentinel
-                            (
-                                (0usize, 0usize),
-                                (0usize, 0usize),
-                                if side == Color::White {
-                                    MIN_EVAL_VALUE
-                                } else {
-                                    MAX_EVAL_VALUE
-                                },
-                                if side == Color::White {
-                                    MIN_EVAL_VALUE
-                                } else {
-                                    MAX_EVAL_VALUE
-                                },
-                            )
-                        },
-                        |acc, x| {
-                            let better = if side == Color::White {
-                                x.2 > acc.2
-                            } else {
-                                x.2 < acc.2
-                            };
-                            if better { x } else { acc }
-                        },
-                    );
-
-                // Update best with parallel results if better
-                let (pf, pt, padj, praw) = results;
-                // Ignore identity placeholder
-                if !(pf == (0, 0) && pt == (0, 0)) {
-                    let better = if active_color == Color::White {
-                        padj > best_adjusted
-                    } else {
-                        padj < best_adjusted
-                    };
-                    if better {
-                        best_from_to = Some((pf, pt));
-                        best_adjusted = padj;
-                        best_score_raw = praw;
-                    }
-                }
-            } else {
-                // Search sequentially over root moves
-                for &(from, to) in &ordered {
-                    let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                        &board,
-                        active_color,
-                        from,
-                        to,
-                        depth_now,
-                        a,
-                        b,
-                        &mut tt,
-                        base_hmc,
-                    );
-
-                    // Adjust score for root-only heuristics
-                    let mut adjusted = adjusted_root_eval_for_move(
-                        &board,
-                        active_color,
-                        from,
-                        to,
-                        base_hmc,
-                        score_raw,
-                        is_capture,
-                        moved_is_pawn,
-                        ps,
-                    );
-                    // repetition-avoidance at root
-                    {
-                        adjusted = apply_repetition_avoidance_bias(
-                            adjusted,
-                            game_state,
-                            history,
-                            &board,
-                            active_color,
-                            from,
-                            to,
-                        );
-                    }
-
-                    // Track best
-                    let better = if active_color == Color::White {
-                        adjusted > best_adjusted
-                    } else {
-                        adjusted < best_adjusted
-                    };
-                    if better || best_from_to.is_none() {
-                        best_from_to = Some((from, to));
-                        best_adjusted = adjusted;
-                        best_score_raw = score_raw;
-                    }
-                    // Aspiration cutoffs help ordering mid-loop too
-                    if active_color == Color::White && score_raw >= b {
-                        break;
-                    }
-                    if active_color == Color::Black && score_raw <= a {
-                        break;
-                    }
-                }
-            }
-
-            // Check aspiration result
-            if best_score_raw <= a {
-                // fail-low: widen down
-                window = (window * 2).min(ASP_WINDOW_MAX_CP);
-                a = (last_score - window).max(MIN_EVAL_VALUE + 1);
-                if tried < 3 {
-                    continue;
-                }
-            } else if best_score_raw >= b {
-                // fail-high: widen up
-                window = (window * 2).min(ASP_WINDOW_MAX_CP);
-                b = (last_score + window).min(MAX_EVAL_VALUE - 1);
-                if tried < 3 {
-                    continue;
-                }
-            }
-            break (best_from_to.unwrap(), best_adjusted, best_score_raw);
-        };
-
-        let ((bf, bt), best_adj, best_raw) = best_tuple;
+        let ((bf, bt), best_adj, best_raw) = probe_with_aspiration(
+            &board,
+            active_color,
+            &root_moves,
+            depth_now,
+            last_score,
+            &mut window,
+            &mut tt,
+            base_hmc,
+            ps,
+            game_state,
+            history,
+        );
         last_score = best_raw;
         // Emit PV/info for this iteration, including TT hashfull permille
         let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
@@ -451,7 +246,6 @@ fn sort_moves_on_score_asc(
     move_table.clone()
 }
 
-
 #[inline]
 fn reorder_with_tt_hint(
     ordered: &mut Vec<((usize, usize), (usize, usize))>,
@@ -468,6 +262,276 @@ fn reorder_with_tt_hint(
     }
 }
 
+#[inline]
+fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32) -> (i32, i32) {
+    if depth_now <= 1 {
+        (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1)
+    } else {
+        (
+            (last_score - window).max(MIN_EVAL_VALUE + 1),
+            (last_score + window).min(MAX_EVAL_VALUE - 1),
+        )
+    }
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn evaluate_root_for_bounds(
+    board: &Board,
+    active_color: Color,
+    root_moves: &Vec<((usize, usize), (usize, usize))>,
+    depth_now: usize,
+    a: i32,
+    b: i32,
+    tt: &mut TranspositionTable,
+    base_hmc: u32,
+    ps: i32,
+    game_state: GameState,
+    history: &History,
+) -> (((usize, usize), (usize, usize)), i32, i32) {
+    let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
+    let mut best_score_raw = if active_color == Color::White {
+        MIN_EVAL_VALUE
+    } else {
+        MAX_EVAL_VALUE
+    };
+    let mut best_adjusted = best_score_raw;
+
+    // Order: if TT has a move at root, try to place it first
+    let mut ordered = root_moves.clone();
+    reorder_with_tt_hint(&mut ordered, tt, board, active_color);
+
+    let enable_parallel =
+        depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
+    if enable_parallel {
+        // 1) Search the first (best-ordered) move serially to establish PV and bounds
+        let &(pv_from, pv_to) = ordered.first().unwrap();
+        {
+            let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                board,
+                active_color,
+                pv_from,
+                pv_to,
+                depth_now,
+                a,
+                b,
+                tt,
+                base_hmc,
+            );
+
+            let adjusted = adjusted_root_eval_for_move(
+                board,
+                active_color,
+                pv_from,
+                pv_to,
+                base_hmc,
+                score_raw,
+                is_capture,
+                moved_is_pawn,
+                ps,
+            );
+
+            best_from_to = Some((pv_from, pv_to));
+            best_adjusted = adjusted;
+            best_score_raw = score_raw;
+        }
+
+        // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
+        let base_board = board.clone();
+        let base_hmc_loc = base_hmc;
+        let a_loc = a;
+        let b_loc = b;
+        let side = active_color;
+        let results = ordered[1..]
+            .par_iter()
+            .map(|&(from, to)| {
+                // local TT per task
+                let mut local_tt = TranspositionTable::new_with_default_size();
+                let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                    &base_board,
+                    side,
+                    from,
+                    to,
+                    depth_now,
+                    a_loc,
+                    b_loc,
+                    &mut local_tt,
+                    base_hmc_loc,
+                );
+
+                // Root adjustments (skip repetition-history check to keep parallel code simple)
+                let adjusted = adjusted_root_eval_for_move(
+                    &base_board,
+                    side,
+                    from,
+                    to,
+                    base_hmc_loc,
+                    score_raw,
+                    is_capture,
+                    moved_is_pawn,
+                    ps,
+                );
+                (from, to, adjusted, score_raw)
+            })
+            .reduce(
+                || {
+                    // Identity: invalid move placeholder not used; return extreme sentinel
+                    (
+                        (0usize, 0usize),
+                        (0usize, 0usize),
+                        if side == Color::White {
+                            MIN_EVAL_VALUE
+                        } else {
+                            MAX_EVAL_VALUE
+                        },
+                        if side == Color::White {
+                            MIN_EVAL_VALUE
+                        } else {
+                            MAX_EVAL_VALUE
+                        },
+                    )
+                },
+                |acc, x| {
+                    let better = if side == Color::White {
+                        x.2 > acc.2
+                    } else {
+                        x.2 < acc.2
+                    };
+                    if better { x } else { acc }
+                },
+            );
+
+        // Update best with parallel results if better
+        let (pf, pt, padj, praw) = results;
+        // Ignore identity placeholder
+        if !(pf == (0, 0) && pt == (0, 0)) {
+            let better = if active_color == Color::White {
+                padj > best_adjusted
+            } else {
+                padj < best_adjusted
+            };
+            if better {
+                best_from_to = Some((pf, pt));
+                best_adjusted = padj;
+                best_score_raw = praw;
+            }
+        }
+    } else {
+        // Search sequentially over root moves
+        for &(from, to) in &ordered {
+            let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                board,
+                active_color,
+                from,
+                to,
+                depth_now,
+                a,
+                b,
+                tt,
+                base_hmc,
+            );
+
+            // Adjust score for root-only heuristics
+            let mut adjusted = adjusted_root_eval_for_move(
+                board,
+                active_color,
+                from,
+                to,
+                base_hmc,
+                score_raw,
+                is_capture,
+                moved_is_pawn,
+                ps,
+            );
+            // repetition-avoidance at root
+            adjusted = apply_repetition_avoidance_bias(
+                adjusted,
+                game_state,
+                history,
+                board,
+                active_color,
+                from,
+                to,
+            );
+
+            // Track best
+            let better = if active_color == Color::White {
+                adjusted > best_adjusted
+            } else {
+                adjusted < best_adjusted
+            };
+            if better || best_from_to.is_none() {
+                best_from_to = Some((from, to));
+                best_adjusted = adjusted;
+                best_score_raw = score_raw;
+            }
+            // Aspiration cutoffs help ordering mid-loop too
+            if active_color == Color::White && score_raw >= b {
+                break;
+            }
+            if active_color == Color::Black && score_raw <= a {
+                break;
+            }
+        }
+    }
+
+    (best_from_to.unwrap(), best_adjusted, best_score_raw)
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn probe_with_aspiration(
+    board: &Board,
+    active_color: Color,
+    root_moves: &Vec<((usize, usize), (usize, usize))>,
+    depth_now: usize,
+    last_score: i32,
+    window: &mut i32,
+    tt: &mut TranspositionTable,
+    base_hmc: u32,
+    ps: i32,
+    game_state: GameState,
+    history: &History,
+) -> (((usize, usize), (usize, usize)), i32, i32) {
+    let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
+    let mut tried = 0;
+    loop {
+        tried += 1;
+        let (mv, best_adjusted, best_score_raw) = evaluate_root_for_bounds(
+            board,
+            active_color,
+            root_moves,
+            depth_now,
+            a,
+            b,
+            tt,
+            base_hmc,
+            ps,
+            game_state,
+            history,
+        );
+
+        // Check aspiration result
+        if best_score_raw <= a {
+            // fail-low: widen down
+            *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
+            let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
+            a = bounds.0;
+            if tried < 3 {
+                continue;
+            }
+        } else if best_score_raw >= b {
+            // fail-high: widen up
+            *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
+            let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
+            b = bounds.1;
+            if tried < 3 {
+                continue;
+            }
+        }
+        return (mv, best_adjusted, best_score_raw);
+    }
+}
 
 #[inline]
 fn apply_repetition_avoidance_bias(
@@ -497,7 +561,11 @@ fn apply_repetition_avoidance_bias(
         let fen = game_state_to_fen_string(gs);
         let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
         let count = history.fen_repetition_count(&truncated);
-        let sa = if active_color == Color::White { adjusted } else { -adjusted };
+        let sa = if active_color == Color::White {
+            adjusted
+        } else {
+            -adjusted
+        };
         if count >= 2 && sa > 0 {
             adjusted -= if active_color == Color::White {
                 REP_AVOIDANCE_BIAS_CP
