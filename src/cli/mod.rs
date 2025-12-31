@@ -20,12 +20,11 @@ enum GameMode {
 
 pub fn run_cli() {
     let mut mode = GameMode::PlayerVsPlayer;
-    let mut white_bot_strength: usize = 1000;
-    let mut black_bot_strength: usize = 1000;
+    let mut white_bot_movetime: usize = 5;
+    let mut black_bot_movetime: usize = 5;
     let mut white_bot_search_depth: usize = DEFAULT_SEARCH_DEPTH;
     let mut black_bot_search_depth: usize = DEFAULT_SEARCH_DEPTH;
     // Default movetime in milliseconds (CLI command sets it in seconds)
-    let mut movetime = 5000;
 
     println!("Welcome to chess. Type 'help' for help, enter move, or 'quit' to quit.\n");
 
@@ -98,20 +97,14 @@ pub fn run_cli() {
                 continue;
             }
 
-            if some_input.starts_with("strength") {
-                if handle_strength(some_input.clone(), &mut white_bot_strength, &mut black_bot_strength) {
+            if some_input.starts_with("movetime") {
+                if handle_movetime(some_input.clone(), &mut white_bot_movetime, &mut black_bot_movetime) {
                     continue
                 }
             }
 
             if some_input.starts_with("depth") {
                 if handle_search_depth(some_input.clone(), &mut white_bot_search_depth, &mut black_bot_search_depth) {
-                    continue
-                }
-            }
-
-            if some_input.starts_with("movetime") {
-                if handle_movetime(some_input.clone(), &mut movetime) {
                     continue
                 }
             }
@@ -136,11 +129,12 @@ pub fn run_cli() {
 
         // handle the move
         if must_generate_move(&mut game, &mut mode, move_is_bot_move) {
-            let strength = if game.active_color_is_white() { white_bot_strength } else { black_bot_strength };
+            let strength = 1000;
             let search_depth = if game.active_color_is_white() { white_bot_search_depth } else { black_bot_search_depth };
+            let movetime = if game.active_color_is_white() { white_bot_movetime } else { black_bot_movetime };
             let gs_copy = *game.get_game_state();
             let history_clone = game.get_history().clone();
-            if let Some(generated_move) = generate_move_as_san(gs_copy, &history_clone, search_depth, movetime, strength) {
+            if let Some(generated_move) = generate_move_as_san(gs_copy, &history_clone, search_depth, movetime*1000, strength) {
                 println ! ("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {
@@ -222,14 +216,14 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
     }
 }
 
-fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_strength: &mut usize) -> bool {
+fn handle_movetime(input: String, white_bot_move_time: &mut usize, black_bot_move_time: &mut usize) -> bool {
 
     let mut parts = input.split_whitespace();
     let _ = parts.next(); // consume 'strength'
     let first = parts.next();
 
     if first.is_none() {
-        println!("White bot strength {}, black bot strength {}", white_bot_strength, black_bot_strength);
+        println!("White bot move time {}, black bot time {}", white_bot_move_time, black_bot_move_time);
         return true
     }
     let second = parts.next();
@@ -246,62 +240,37 @@ fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_stre
         // strength <n>  -> set both
         (Some(n), None) => {
             if let Some(v) = parse_strength(n) {
-                *white_bot_strength = v;
-                *black_bot_strength = v;
-                println!("Set both bot strengths to {} (0..1000).", v);
+                *white_bot_move_time = v;
+                *black_bot_move_time = v;
+                println!("Set both bot movetime to {} (0..600).", v);
             } else {
-                println!("Invalid strength. Use: strength <0..1000> | strength white <0..1000> | strength black <0..1000>");
+                println!("Invalid movetime. Use: movetime <0..600> | movetime white <0..600> | movetime black <0..600>");
             }
             return true
         }
         // strength white <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("white") => {
             if let Some(v) = parse_strength(n) {
-                *white_bot_strength = v;
-                println!("Set white bot strength to {} (0..1000).", v);
+                *white_bot_move_time = v;
+                println!("Set white bot movetime to {} (0..600).", v);
             } else {
-                println!("Invalid strength for white. Use: strength white <0..1000>");
+                println!("Invalid movetime for white. Use: movetime white <0..600>");
             }
             return true
         }
         // strength black <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("black") => {
             if let Some(v) = parse_strength(n) {
-                *black_bot_strength = v;
-                println!("Set black bot strength to {} (0..1000).", v);
+                *black_bot_move_time = v;
+                println!("Set black bot movetime to {} (0..600).", v);
             } else {
-                println!("Invalid strength for black. Use: strength black <0..1000>");
+                println!("Invalid movetime for black. Use: strength black <0..600>");
             }
             return true
         }
         _ => {
-            println!("Usage: strength <0..1000> | strength white <0..1000> | strength black <0..1000>");
+            println!("Usage: movetime <0..600> | strength movetime <0..600> | strength movetime <0..600>");
             return true
-        }
-    }
-}
-
-fn handle_movetime(input: String, movetime_ms: &mut usize) -> bool {
-    let mut parts = input.split_whitespace();
-    let _ = parts.next(); // consume 'movetime'
-    match parts.next() {
-        None => {
-            let secs = *movetime_ms / 1000;
-            println!("Movetime: {} seconds ({} ms)", secs, *movetime_ms);
-            true
-        }
-        Some(s) => {
-            match s.parse::<usize>() {
-                Ok(sec) if sec > 0 && sec <= 3600 => {
-                    *movetime_ms = sec.saturating_mul(1000);
-                    println!("Set movetime to {} seconds ({} ms).", sec, *movetime_ms);
-                    true
-                }
-                _ => {
-                    println!("Invalid movetime. Use: movetime <seconds 1..3600>");
-                    true
-                }
-            }
         }
     }
 }
@@ -411,12 +380,10 @@ fn print_help() {
     println!("depth <0..10>            - set both bots' search dept");
     println!("depth white <0..10>      - set white bot search dept");
     println!("depth black <0..10>      - set black bot search dept");
-    println!("movetime                 - get current movetime (seconds)");
-    println!("movetime <seconds>       - set time per move (in seconds)");
-    println!("strength                 - get the strength of the bots (higher = stronger)");
-    println!("strength <0..1000>       - set both bots' playing strength");
-    println!("strength white <0..1000> - set white bot playing strength");
-    println!("strength black <0..1000> - set black bot playing strength");
+    println!("movetime                 - get the movetime of the bots (higher = stronger)");
+    println!("movetime <0..600>       - set both bots' movetime");
+    println!("movetime white <0..600> - set white bot movetime");
+    println!("movetime black <0..600> - set black bot movetime");
     println!("eval                     - evaluate the current position");
     println!("bvsb                     - set playing mode 'bot vs bot'");
     println!("pvp                      - set playing mode 'player vs player'");
