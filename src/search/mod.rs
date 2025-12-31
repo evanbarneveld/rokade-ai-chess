@@ -1,5 +1,15 @@
 pub(crate) mod search;
 pub(crate) mod tt;
 pub(crate) mod zobrist;
-pub(crate) mod search_heuristics;
-mod playing_strength;
+pub(crate) mod heuristics;
+pub(crate) mod playing_strength;
+pub(crate) mod time_control;
+pub(crate) mod uci_feedback;
+pub(crate) mod threading;
+pub(crate) mod telemetry;
+pub(crate) mod locking;
+pub(crate) mod prune_null_moves;
+pub(crate) mod qsearch;
+pub(crate) mod see;
+mod alphabeta;
+mod root_moves;

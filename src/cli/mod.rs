@@ -4,10 +4,11 @@ use crate::board::evaluator::evaluate_position;
 use crate::Chess;
 use crate::generator::move_generator::generate_move_as_san;
 use crate::pgn_player::pgn_player::PgnPlayer;
+use crate::search::search::DEFAULT_SEARCH_DEPTH;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 
-const DEFAULT_SEARCH_DEPTH: usize = 30;
+
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum GameMode {

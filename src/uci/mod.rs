@@ -3,8 +3,10 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_move_with_info, set_info_callback, get_nodes, reset_search_telemetry, set_time_budget_ms, clear_time_budget};
-
+use crate::search::search::{find_move_with_info, DEFAULT_SEARCH_DEPTH};
+use crate::search::telemetry::{get_nodes, reset_search_telemetry};
+use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
+use crate::search::uci_feedback::set_info_callback;
 // Minimal UCI interface implementation.
 // Supported commands:
 // - uci
@@ -17,7 +19,6 @@ use crate::search::search::{find_move_with_info, set_info_callback, get_nodes, r
 // Notes:
 // - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
 
-const DEFAULT_SEARCH_DEPTH: usize = 30;
 
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();

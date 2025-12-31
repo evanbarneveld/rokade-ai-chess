@@ -1,3 +1,14 @@
+use crate::piece::pieces::PieceType::{Bishop, King, Knight, Pawn, Queen, Rook};
+
+
+pub const PAWN_VALUE: i32 = 100;
+pub const KNIGHT_VALUE: i32 = 320;
+pub const BISHOP_VALUE: i32 = 330;
+pub const ROOK_VALUE: i32 = 500;
+pub const QUEEN_VALUE: i32 = 900;
+pub const KING_VALUE: i32 = 20_000;
+
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PieceType {
     Pawn,
@@ -8,10 +19,43 @@ pub enum PieceType {
     King,
 }
 
+#[inline]
+pub fn piece_value_cp(pt: PieceType) -> i32 {
+    use crate::piece::pieces::PieceType::*;
+    match pt {
+        Pawn => PAWN_VALUE,
+        Knight => KNIGHT_VALUE,
+        Bishop => BISHOP_VALUE,
+        Rook => ROOK_VALUE,
+        Queen => QUEEN_VALUE,
+        King => KING_VALUE,
+    }
+}
+
+#[inline]
+pub fn capture_value_cp(pt: PieceType) -> i32 {
+    match pt {
+        Pawn => PAWN_VALUE,
+        Knight => KNIGHT_VALUE,
+        Bishop => BISHOP_VALUE,
+        Rook => ROOK_VALUE,
+        Queen => QUEEN_VALUE,
+        King => 0,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     White,
     Black,
+}
+
+#[inline]
+pub fn opposite_color(c: Color) -> Color {
+    match c {
+        Color::White => Color::Black,
+        Color::Black => Color::White,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

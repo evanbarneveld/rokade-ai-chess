@@ -1,5 +1,7 @@
 use rand::{rng, Rng};
 
+pub const PLAYING_STRENGTH_MAX: usize = 1000;
+
 // Controlled by the strength parameter, the search will not always return the best move.
 // Selects randomly among the best-scoring moves in a sorted (ascending) move table.
 pub fn select_move_based_using_strength(
@@ -96,3 +98,4 @@ pub fn strength_noise_sigma(ps: usize) -> i32 {
     }; // up to ~210
     sigma.max(0)
 }
+
