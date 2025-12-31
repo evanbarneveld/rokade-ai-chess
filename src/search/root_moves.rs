@@ -105,10 +105,10 @@ pub fn hard_root_filter(board: &Board, active_color: Color, v: &mut Vec<((usize,
     }
 }
 
-pub fn get_root_moves(game_state: GameState, history: &History, board: &Board, active_color: Color, moves: &Vec<((usize, usize), (usize, usize))>, v: &mut Vec<((usize, usize), (usize, usize))>) {
+pub fn get_root_moves(game_state: &GameState, history: &History, board: &Board, active_color: Color, moves: &Vec<((usize, usize), (usize, usize))>, v: &mut Vec<((usize, usize), (usize, usize))>) {
     for &(from, to) in moves {
         let is_capture = board.get(to.0, to.1).is_some();
-        let mut gs = game_state; // GameState is Copy
+        let mut gs = *game_state; // GameState is Copy
         let mut promote: Option<Piece> = None;
         if let Some(p) = gs.board().get(from.0, from.1) {
             if p.get_type() == PieceType::Pawn {

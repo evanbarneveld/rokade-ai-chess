@@ -37,7 +37,7 @@ const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
 /// returns the evaluated score (in centipawns) for the selected move
 /// and the effective search depth that was actually used internally.
 pub fn find_best_move(
-    game_state: GameState,
+    game_state: &GameState,
     history: &History,
     search_depth: usize,
     playing_strength: usize,
@@ -155,13 +155,13 @@ pub fn find_best_move(
                 scored.push((from, to, adj));
             }
 
-            let mut sorted = sort_moves_on_score_asc(&mut scored);
+            sort_moves_on_score_asc(&mut scored);
             if active_color == Color::White {
-                sorted.reverse();
+                scored.reverse();
             }
 
-            if let Some((from, to)) = select_move_based_using_strength(&sorted, playing_strength) {
-                let sc = sorted
+            if let Some((from, to)) = select_move_based_using_strength(&scored, playing_strength) {
+                let sc = scored
                     .iter()
                     .find(|e| e.0 == from && e.1 == to)
                     .map(|e| e.2)
@@ -238,12 +238,11 @@ pub(crate) fn find_all_valid_moves(
     result
 }
 
-// Sorts the move table by score in ascending order and returns a cloned, sorted vector.
+// Sorts the move table by score in ascending order, in-place.
 fn sort_moves_on_score_asc(
     move_table: &mut Vec<((usize, usize), (usize, usize), i32)>,
-) -> Vec<((usize, usize), (usize, usize), i32)> {
+) {
     move_table.sort_by_key(|m| m.2);
-    move_table.clone()
 }
 
 #[inline]
@@ -286,7 +285,7 @@ fn evaluate_root_for_bounds(
     tt: &mut TranspositionTable,
     base_hmc: u32,
     ps: i32,
-    game_state: GameState,
+    game_state: &GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize)), i32, i32) {
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
@@ -298,7 +297,7 @@ fn evaluate_root_for_bounds(
     let mut best_adjusted = best_score_raw;
 
     // Order: if TT has a move at root, try to place it first
-    let mut ordered = root_moves.clone();
+    let mut ordered: Vec<((usize, usize), (usize, usize))> = root_moves.iter().copied().collect();
     reorder_with_tt_hint(&mut ordered, tt, board, active_color);
 
     let enable_parallel =
@@ -337,7 +336,7 @@ fn evaluate_root_for_bounds(
         }
 
         // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
-        let base_board = board.clone();
+        // reuse shared board reference in parallel (read-only access)
         let base_hmc_loc = base_hmc;
         let a_loc = a;
         let b_loc = b;
@@ -348,7 +347,7 @@ fn evaluate_root_for_bounds(
                 // local TT per task
                 let mut local_tt = TranspositionTable::new_with_default_size();
                 let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                    &base_board,
+                    board,
                     side,
                     from,
                     to,
@@ -361,7 +360,7 @@ fn evaluate_root_for_bounds(
 
                 // Root adjustments (skip repetition-history check to keep parallel code simple)
                 let adjusted = adjusted_root_eval_for_move(
-                    &base_board,
+                    board,
                     side,
                     from,
                     to,
@@ -490,7 +489,7 @@ fn probe_with_aspiration(
     tt: &mut TranspositionTable,
     base_hmc: u32,
     ps: i32,
-    game_state: GameState,
+    game_state: &GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize)), i32, i32) {
     let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
@@ -536,7 +535,7 @@ fn probe_with_aspiration(
 #[inline]
 fn apply_repetition_avoidance_bias(
     adjusted: i32,
-    game_state: GameState,
+    game_state: &GameState,
     history: &History,
     board: &Board,
     active_color: Color,
@@ -545,7 +544,7 @@ fn apply_repetition_avoidance_bias(
 ) -> i32 {
     let mut adjusted = adjusted;
     let is_capture = board.get(to.0, to.1).is_some();
-    let mut gs = game_state; // Copy
+    let mut gs = *game_state; // Copy
     let mut promote: Option<Piece> = None;
     if let Some(p) = gs.board().get(from.0, from.1) {
         if p.get_type() == PieceType::Pawn {

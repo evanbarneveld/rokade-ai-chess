@@ -6,7 +6,7 @@ use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 
 pub fn generate_move_as_san(game_state: GameState, history: &History, search_depth: usize, movetime: usize, playing_strength: usize) -> Option<String> {
     set_time_budget_ms(movetime);
-    let generated_move = match find_best_move(game_state, history, search_depth, playing_strength) {
+    let generated_move = match find_best_move(&game_state, history, search_depth, playing_strength) {
         Some((from, to, _score_cp, _depth_used)) => Some((from, to)),
         None => None,
     };
