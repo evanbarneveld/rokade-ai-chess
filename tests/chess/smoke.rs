@@ -187,8 +187,40 @@ fn test_check_with_o_o_o() {
 
 /*
 
-1. Nf3 d6 2. b3 e5 3. Bb2 e4 4. Nd4 c5 5. Nb5 d5 6. e3 Nc6 7. c4 d4 8.
-exd4 cxd4 9. d3 Bb4+ 10. Ke2 Qe7 11. Nxd4 exd3+ 12. Kxd3 Nxd4 13. Kxd4 Bf5
-14. Qe2 O-O-O# 0-1
+test fens:
+
+Run each with go depth 12 (or your usual depth) and share info/bestmove if anything looks off.
+1)
+Original queen-hang (Qxf3? g2xf3!)
+rnb1kbnr/ppp1pppp/8/3q4/8/5N2/PPPPPPPP/R1BQKB1R b KQkq - 1 3
+Expected: Avoid d5f3; suggest a safer move like b8c6 or e7e5.
+2)
+Queen to a2 rook-capture motif (Qa2?? Ra1xa2!)
+rnb1kbnr/ppp1pppp/8/3q4/8/5N2/PPPPPPPP/R1BQKB1R b KQkq - 1 3
+Note: Same FEN. Confirm it never chooses d5a2 at final depth.
+3)
+Nd5? Qxd5! (unsafe knight “walk-in”)
+rnbqkbnr/ppp1pppp/8/3p4/8/2N5/PPPPPPPP/R1BQKBNR w KQkq d6 0 2
+Expected: Avoid c3d5 as best at final depth; prefer e2e4, d2d4, or g1f3.
+4)
+Quiet consolidation (stable PV from mid-depths)
+r3k2r/pp3ppp/8/2Q5/8/8/RPP2PPP/2B1KB1R b Kkq - 0 12
+
+5)
+Generic queen safety checks
+•
+Queen centralization without support:
+r1bqkbnr/pppppppp/8/8/3Q4/8/PPPPPPPP/RNB1KBNR b KQkq - 2 2
+Expected: Avoid chasing lines that hang the queen; choose development.
+•
+Queen side foray with obvious capture back:
+rnbqkbnr/pppppppp/8/8/8/4Q3/PPPPPPPP/RNB1KBNR b KQkq - 0 2
+Expected: Avoid queen moves to squares immediately capturable; develop instead.
+
+6)
+Sanity: typical opening startpos (no queen antics)
+rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+Expected: Reasonable opening moves; no early queen sorties.
+
 
  */
