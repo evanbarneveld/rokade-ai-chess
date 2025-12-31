@@ -16,6 +16,7 @@ use crate::search::zobrist::compute_zobrist;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 use rayon::prelude::*;
+use crate::book::book::book_pick;
 
 pub const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000;
 pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
@@ -27,7 +28,7 @@ const ASP_WINDOW_INIT_CP: i32 = 50; // initial aspiration half-window
 const ASP_WINDOW_MAX_CP: i32 = 800; // maximum expanded half-window
 
 // Root parallelization thresholds
-const ROOT_PARALLEL_MIN_DEPTH: usize = 100; // enable root parallel only from this depth
+const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // enable root parallel only from this depth
 const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
@@ -56,6 +57,14 @@ pub fn find_best_move(
 
     if moves.is_empty() {
         return None;
+    }
+
+    // Opening book: if we have a book move in early game, play it immediately.
+    // Limit to first ~8 full moves to avoid forcing book deep into middlegame.
+    if game_state.full_move_number() <= 8 {
+        if let Some((bf, bt)) = book_pick(game_state) {
+            return Some((bf, bt, 0, 0));
+        }
     }
 
     // if depth is 0, treat it as 1 ply (evaluate after making one move)

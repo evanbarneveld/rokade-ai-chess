@@ -9,5 +9,6 @@ pub mod search;
 pub mod history;
 pub mod uci;
 pub mod cli;
+pub mod book;
 
 pub use crate::chess::Chess;
