@@ -1,16 +1,33 @@
+use rand::{rng, Rng};
 use crate::board::Board;
+use crate::board::evaluator::evaluate_position;
 use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
-use crate::piece::pieces::{opposite_color, piece_value_cp, Color, Piece, PieceType};
+use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
+use crate::search::alphabeta::alphabeta;
+use crate::search::playing_strength::strength_noise_sigma;
 use crate::search::search::find_all_valid_moves;
-use crate::search::see::{see_dest_estimate, SEE_MINOR_SAC_THRESHOLD_CP};
+use crate::search::see::{see_dest_estimate, SEE_MINOR_SAC_THRESHOLD_CP, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
 use crate::search::tt::{decode_move, TranspositionTable};
 use crate::search::zobrist::compute_zobrist;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
 
-/// build_pv_for_root constructs the principal variation (PV) line starting from a given root move
+const ROOT_CAPTURE_BONUS_DIV: i32 = 10; // add captured piece value / this divisor
+const QUEEN_LOSING_PEN_BASE_CP: i32 = 1000; // base penalty for clearly losing queen moves
+const QUEEN_PAWN_ATTACK_EXTRA_CP: i32 = 500; // extra penalty if queen landing square is pawn-attacked
+
+const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150; // only apply adjustments if side advantage above this
+const ENDGAME_HMC_THRESHOLD: u32 = 80; // start scaling after this half-move clock
+const ENDGAME_SCALE_MAX: i32 = 21; // max scaling steps used in formula below
+const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15; // per-scale bonus if capture or pawn move
+const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8; // per-scale penalty if quiet move
+
+
+const REP_STACK_CAPACITY: usize = 128; // repetition detection stack capacity hint
+
+// / build_pv_for_root constructs the principal variation (PV) line starting from a given root move
 /// by following best moves stored in the transposition table (TT), alternating sides, and validating
 /// every step’s legality. It returns a list of move pairs (from, to) that represents the best‑known line
 /// from the root according to the TT.
@@ -45,7 +62,7 @@ pub fn build_pv_for_root(
             break;
         }
         pv.push(next);
-        let _u = tmp.make_move_simple( (nfr, nfc), (ntr, ntc));
+        let _u = tmp.make_move_simple((nfr, nfc), (ntr, ntc));
         side = opposite_color(side);
     }
     pv
@@ -207,4 +224,130 @@ pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), 
         Color::Black => -bonus,
     }
 }
+#[inline]
+pub fn adjust_root_score(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    base_hmc: u32,
+    is_capture: bool,
+    moved_is_pawn: bool,
+    score_raw: i32,
+    strength_ps: i32,
+) -> i32 {
+    // Base root bonus
+    let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
+
+    // SEE-based root penalty with queen special handling
+    {
+        let mut post = base_board.clone();
+        let moved_piece = base_board.get(from.0, from.1);
+        let captured = base_board.get(to.0, to.1);
+        if let Some(mp) = moved_piece {
+            post.set(from.0, from.1, None);
+            post.set(to.0, to.1, Some(mp));
+            let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
+            let see = see_dest_estimate(&post, side, to, cap_val);
+            if see < 0 {
+                if mp.get_type() == PieceType::Queen {
+                    let opp = opposite_color(side);
+                    let mut pen = (-see).max(QUEEN_LOSING_PEN_BASE_CP);
+                    if post.is_square_pawn_attacked_by(opp, to) {
+                        pen += QUEEN_PAWN_ATTACK_EXTRA_CP;
+                    }
+                    adjusted -= pen;
+                } else {
+                    let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
+                    adjusted -= pen;
+                }
+            }
+        }
+    }
+
+    // Small capture bonus at root
+    if let Some(captured) = base_board.get(to.0, to.1) {
+        let cap_val = capture_value_cp(captured.get_type());
+        adjusted += cap_val / ROOT_CAPTURE_BONUS_DIV;
+    }
+
+    // Endgame/50-move rule pressure scaling
+    let side_adv = if side == Color::White { score_raw } else { -score_raw };
+    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD {
+        let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1)).min(ENDGAME_SCALE_MAX);
+        if is_capture || moved_is_pawn {
+            adjusted += ENDGAME_CAPTURE_SCALE_BONUS_CP * scale;
+        } else {
+            adjusted -= ENDGAME_NONCAP_SCALE_PENALTY_CP * scale;
+        }
+    }
+
+    // Playing-strength noise
+    let sigma = strength_noise_sigma(strength_ps as usize);
+    if sigma > 0 {
+        let n: i32 = rng().random_range(-sigma..=sigma);
+        adjusted += n;
+    }
+
+    adjusted
+}
+
+#[inline]
+pub fn evaluate_after_root_move(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    depth_now: usize,
+    a: i32,
+    b: i32,
+    tt: &mut TranspositionTable,
+    base_hmc: u32,
+) -> (i32, bool, bool) {
+    let mut tmp = base_board.clone();
+    let u = tmp.make_move_simple(from, to);
+    let moved_is_pawn = base_board
+        .get(from.0, from.1)
+        .map(|p| p.get_type() == PieceType::Pawn)
+        .unwrap_or(false);
+    let is_capture = base_board.get(to.0, to.1).is_some();
+    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+    let score_raw = if depth_now <= 1 {
+        evaluate_position(&tmp)
+    } else {
+        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
+        alphabeta(
+            &mut tmp,
+            opposite_color(side),
+            depth_now - 1,
+            a,
+            b,
+            1,
+            tt,
+            child_hmc,
+            &mut rep_stack,
+        )
+    };
+    tmp.unmake_move_simple(u);
+    (score_raw, is_capture, moved_is_pawn)
+}
+
+#[inline]
+pub fn adjusted_root_eval_for_move(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    base_hmc: u32,
+    score_raw: i32,
+    is_capture: bool,
+    moved_is_pawn: bool,
+    ps: i32,
+) -> i32 {
+    adjust_root_score(
+        base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw, ps,
+    )
+}
+
+
 

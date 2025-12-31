@@ -252,6 +252,46 @@ impl Board {
         if victim.is_some() { v * 100 - a } else { -1 }
     }
 
+    #[inline]
+    pub fn is_square_pawn_attacked_by(&self, attacker: Color, sq: (usize, usize)) -> bool {
+        let (r, c) = sq;
+        if attacker == Color::White {
+            if r >= 1 {
+                if c >= 1 {
+                    if let Some(p) = self.get(r - 1, c - 1) {
+                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                            return true;
+                        }
+                    }
+                }
+                if c + 1 < 8 {
+                    if let Some(p) = self.get(r - 1, c + 1) {
+                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } else {
+            if r + 1 < 8 {
+                if c >= 1 {
+                    if let Some(p) = self.get(r + 1, c - 1) {
+                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                            return true;
+                        }
+                    }
+                }
+                if c + 1 < 8 {
+                    if let Some(p) = self.get(r + 1, c + 1) {
+                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 

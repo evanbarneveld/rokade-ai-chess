@@ -1,27 +1,20 @@
 use crate::board::Board;
-use crate::board::evaluator::evaluate_position;
 use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
-use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
+use crate::piece::pieces::{ Color, Piece, PieceType};
 use crate::search::tt::{TranspositionTable, decode_move};
 use crate::search::zobrist::compute_zobrist;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
-use rand::{Rng, rng};
 use rayon::prelude::*;
 use crate::piece::move_validators::is_piece_move_valid;
-use crate::search::alphabeta::alphabeta;
 use crate::search::locking::{get_tt_mutex};
-use crate::search::playing_strength::{select_move_based_using_strength, strength_noise_sigma, PLAYING_STRENGTH_MAX};
-use crate::search::root_moves::{build_pv_for_root, get_root_moves, hard_root_filter, root_move_bonus};
-use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
+use crate::search::playing_strength::{select_move_based_using_strength, PLAYING_STRENGTH_MAX};
+use crate::search::root_moves::{ adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves, hard_root_filter};
 use crate::search::threading::init_rayon_pool_if_needed;
 use crate::search::uci_feedback::emit_info;
 
-// ==========================
-// Tunable search parameters
-// ==========================
-// Evaluation bounds used as sentinels inside search
+
 pub const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000;
 pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
 
@@ -35,256 +28,8 @@ const ASP_WINDOW_MAX_CP: i32 = 800; // maximum expanded half-window
 const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // enable root parallel only from this depth
 const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
 
-const QUEEN_LOSING_PEN_BASE_CP: i32 = 1000; // base penalty for clearly losing queen moves
-const QUEEN_PAWN_ATTACK_EXTRA_CP: i32 = 500; // extra penalty if queen landing square is pawn-attacked
-
-// Root capture adjustment
-const ROOT_CAPTURE_BONUS_DIV: i32 = 10; // add captured piece value / this divisor
-
-// Endgame/50-move rule aware root adjustments
-const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150; // only apply adjustments if side advantage above this
-const ENDGAME_HMC_THRESHOLD: u32 = 80; // start scaling after this half-move clock
-const ENDGAME_SCALE_MAX: i32 = 21; // max scaling steps used in formula below
-const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15; // per-scale bonus if capture or pawn move
-const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8; // per-scale penalty if quiet move
-
-// History heuristic cap
-
-// Internal stacks/containers sizing
-const REP_STACK_CAPACITY: usize = 128; // repetition detection stack capacity hint
 // Root repetition-avoidance bias when a move would immediately create 3-fold
 const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
-
-
-
-// ==========================
-// Small helpers extracted to simplify `find_best_move`
-// ==========================
-
-#[inline]
-fn reorder_with_tt_hint(
-    ordered: &mut Vec<((usize, usize), (usize, usize))>,
-    tt: &TranspositionTable,
-    board: &Board,
-    side: Color,
-) {
-    if let Some(entry) = tt.probe(compute_zobrist(board, side)) {
-        let bm = decode_move(entry.best_from, entry.best_to);
-        if let Some(pos) = ordered.iter().position(|m| *m == bm) {
-            let first = ordered.remove(pos);
-            ordered.insert(0, first);
-        }
-    }
-}
-
-#[inline]
-fn is_square_pawn_attacked_by(board: &Board, attacker: Color, sq: (usize, usize)) -> bool {
-    let (r, c) = sq;
-    if attacker == Color::White {
-        if r >= 1 {
-            if c >= 1 {
-                if let Some(p) = board.get(r - 1, c - 1) {
-                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                        return true;
-                    }
-                }
-            }
-            if c + 1 < 8 {
-                if let Some(p) = board.get(r - 1, c + 1) {
-                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                        return true;
-                    }
-                }
-            }
-        }
-    } else {
-        if r + 1 < 8 {
-            if c >= 1 {
-                if let Some(p) = board.get(r + 1, c - 1) {
-                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                        return true;
-                    }
-                }
-            }
-            if c + 1 < 8 {
-                if let Some(p) = board.get(r + 1, c + 1) {
-                    if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
-#[inline]
-fn adjust_root_score(
-    base_board: &Board,
-    side: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-    base_hmc: u32,
-    is_capture: bool,
-    moved_is_pawn: bool,
-    score_raw: i32,
-    strength_ps: i32,
-) -> i32 {
-    // Base root bonus
-    let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
-
-    // SEE-based root penalty with queen special handling
-    {
-        let mut post = base_board.clone();
-        let moved_piece = base_board.get(from.0, from.1);
-        let captured = base_board.get(to.0, to.1);
-        if let Some(mp) = moved_piece {
-            post.set(from.0, from.1, None);
-            post.set(to.0, to.1, Some(mp));
-            let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-            let see = see_dest_estimate(&post, side, to, cap_val);
-            if see < 0 {
-                if mp.get_type() == PieceType::Queen {
-                    let opp = opposite_color(side);
-                    let mut pen = (-see).max(QUEEN_LOSING_PEN_BASE_CP);
-                    if is_square_pawn_attacked_by(&post, opp, to) {
-                        pen += QUEEN_PAWN_ATTACK_EXTRA_CP;
-                    }
-                    adjusted -= pen;
-                } else {
-                    let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
-                    adjusted -= pen;
-                }
-            }
-        }
-    }
-
-    // Small capture bonus at root
-    if let Some(captured) = base_board.get(to.0, to.1) {
-        let cap_val = capture_value_cp(captured.get_type());
-        adjusted += cap_val / ROOT_CAPTURE_BONUS_DIV;
-    }
-
-    // Endgame/50-move rule pressure scaling
-    let side_adv = if side == Color::White { score_raw } else { -score_raw };
-    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD {
-        let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1)).min(ENDGAME_SCALE_MAX);
-        if is_capture || moved_is_pawn {
-            adjusted += ENDGAME_CAPTURE_SCALE_BONUS_CP * scale;
-        } else {
-            adjusted -= ENDGAME_NONCAP_SCALE_PENALTY_CP * scale;
-        }
-    }
-
-    // Playing-strength noise
-    let sigma = strength_noise_sigma(strength_ps as usize);
-    if sigma > 0 {
-        let n: i32 = rng().random_range(-sigma..=sigma);
-        adjusted += n;
-    }
-
-    adjusted
-}
-
-
-
-#[inline]
-fn evaluate_after_root_move(
-    base_board: &Board,
-    side: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-    depth_now: usize,
-    a: i32,
-    b: i32,
-    tt: &mut TranspositionTable,
-    base_hmc: u32,
-) -> (i32, bool, bool) {
-    let mut tmp = base_board.clone();
-    let u = tmp.make_move_simple(from, to);
-    let moved_is_pawn = base_board
-        .get(from.0, from.1)
-        .map(|p| p.get_type() == PieceType::Pawn)
-        .unwrap_or(false);
-    let is_capture = base_board.get(to.0, to.1).is_some();
-    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
-    let score_raw = if depth_now <= 1 {
-        evaluate_position(&tmp)
-    } else {
-        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
-        alphabeta(
-            &mut tmp,
-            opposite_color(side),
-            depth_now - 1,
-            a,
-            b,
-            1,
-            tt,
-            child_hmc,
-            &mut rep_stack,
-        )
-    };
-    tmp.unmake_move_simple(u);
-    (score_raw, is_capture, moved_is_pawn)
-}
-
-#[inline]
-fn adjusted_root_eval_for_move(
-    base_board: &Board,
-    side: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-    base_hmc: u32,
-    score_raw: i32,
-    is_capture: bool,
-    moved_is_pawn: bool,
-    ps: i32,
-) -> i32 {
-    adjust_root_score(
-        base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw, ps,
-    )
-}
-
-#[inline]
-fn apply_repetition_avoidance_bias(
-    adjusted: i32,
-    game_state: GameState,
-    history: &History,
-    board: &Board,
-    active_color: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-) -> i32 {
-    let mut adjusted = adjusted;
-    let is_capture = board.get(to.0, to.1).is_some();
-    let mut gs = game_state; // Copy
-    let mut promote: Option<Piece> = None;
-    if let Some(p) = gs.board().get(from.0, from.1) {
-        if p.get_type() == PieceType::Pawn {
-            if (active_color == Color::White && to.0 == 7)
-                || (active_color == Color::Black && to.0 == 0)
-            {
-                promote = Some(Piece::new(PieceType::Queen, active_color));
-            }
-        }
-    }
-    if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
-        gs.switch_player_turn();
-        let fen = game_state_to_fen_string(gs);
-        let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
-        let count = history.fen_repetition_count(&truncated);
-        let sa = if active_color == Color::White { adjusted } else { -adjusted };
-        if count >= 2 && sa > 0 {
-            adjusted -= if active_color == Color::White {
-                REP_AVOIDANCE_BIAS_CP
-            } else {
-                -REP_AVOIDANCE_BIAS_CP
-            };
-        }
-    }
-    adjusted
-}
-
 
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
@@ -704,4 +449,62 @@ fn sort_moves_on_score_asc(
 ) -> Vec<((usize, usize), (usize, usize), i32)> {
     move_table.sort_by_key(|m| m.2);
     move_table.clone()
+}
+
+
+#[inline]
+fn reorder_with_tt_hint(
+    ordered: &mut Vec<((usize, usize), (usize, usize))>,
+    tt: &TranspositionTable,
+    board: &Board,
+    side: Color,
+) {
+    if let Some(entry) = tt.probe(compute_zobrist(board, side)) {
+        let bm = decode_move(entry.best_from, entry.best_to);
+        if let Some(pos) = ordered.iter().position(|m| *m == bm) {
+            let first = ordered.remove(pos);
+            ordered.insert(0, first);
+        }
+    }
+}
+
+
+#[inline]
+fn apply_repetition_avoidance_bias(
+    adjusted: i32,
+    game_state: GameState,
+    history: &History,
+    board: &Board,
+    active_color: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+) -> i32 {
+    let mut adjusted = adjusted;
+    let is_capture = board.get(to.0, to.1).is_some();
+    let mut gs = game_state; // Copy
+    let mut promote: Option<Piece> = None;
+    if let Some(p) = gs.board().get(from.0, from.1) {
+        if p.get_type() == PieceType::Pawn {
+            if (active_color == Color::White && to.0 == 7)
+                || (active_color == Color::Black && to.0 == 0)
+            {
+                promote = Some(Piece::new(PieceType::Queen, active_color));
+            }
+        }
+    }
+    if PieceMover::move_piece(&mut gs, from, to, is_capture, promote) {
+        gs.switch_player_turn();
+        let fen = game_state_to_fen_string(gs);
+        let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+        let count = history.fen_repetition_count(&truncated);
+        let sa = if active_color == Color::White { adjusted } else { -adjusted };
+        if count >= 2 && sa > 0 {
+            adjusted -= if active_color == Color::White {
+                REP_AVOIDANCE_BIAS_CP
+            } else {
+                -REP_AVOIDANCE_BIAS_CP
+            };
+        }
+    }
+    adjusted
 }
