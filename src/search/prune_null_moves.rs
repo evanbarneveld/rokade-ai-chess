@@ -3,6 +3,8 @@ use crate::piece::pieces::{opposite_color, Color, PieceType};
 use crate::search::alphabeta::alphabeta;
 use crate::search::tt::TranspositionTable;
 
+const NULL_MOVE_PRUNING_START_DEPTH: usize = 4;
+
 #[inline]
 pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, beta: i32, ply: i32, tt: &mut TranspositionTable, halfmove_clock: u32, rep_stack: &mut Vec<u64>) -> Option<i32> {
     // -----------------
@@ -14,7 +16,7 @@ pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, beta: i
     // - Halfmove clock not already at draw threshold
     // - Avoid in likely zugzwang scenarios (very low material) — here we approximate by requiring some non-pawn material
     // Null-move pruning (safer settings): require a bit more depth and cap reduction
-    if depth >= 4 {
+    if depth >= NULL_MOVE_PRUNING_START_DEPTH {
         let in_check = board.is_side_in_check(to_move);
         if !in_check && halfmove_clock < 100 {
             // Additional safety: if any queen on the board is currently attacked, do not try null move.

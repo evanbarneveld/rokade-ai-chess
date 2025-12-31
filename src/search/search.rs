@@ -27,7 +27,7 @@ const ASP_WINDOW_INIT_CP: i32 = 50; // initial aspiration half-window
 const ASP_WINDOW_MAX_CP: i32 = 800; // maximum expanded half-window
 
 // Root parallelization thresholds
-const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // enable root parallel only from this depth
+const ROOT_PARALLEL_MIN_DEPTH: usize = 100; // enable root parallel only from this depth
 const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
@@ -99,7 +99,13 @@ pub fn find_best_move(
     let mut chosen: Option<((usize, usize), (usize, usize), i32, usize)> = None;
     let mut window: i32 = ASP_WINDOW_INIT_CP; // cp
 
+    eprintln!("[root] starting ID; eff_depth={} root_moves={} window={}",
+              effective_depth, root_moves.len(), window);
+
     for depth_now in 1..=effective_depth {
+
+        eprintln!("[root] depth_now={} (pre-asp) last_score={} window={}", depth_now, last_score, window);
+
         tt.next_age();
         let ((bf, bt), best_adj, best_raw) = probe_with_aspiration(
             &board,
@@ -114,6 +120,10 @@ pub fn find_best_move(
             game_state,
             history,
         );
+
+        eprintln!("[root] depth_now={} (post-asp) best_adj={} best_raw={} mv={:?}->{:?}",
+                  depth_now, best_adj, best_raw, (bf, bt).0, (bf, bt).1);
+
         last_score = best_raw;
         // Emit PV/info for this iteration, including TT hashfull permille
         let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
@@ -300,9 +310,14 @@ fn evaluate_root_for_bounds(
     let mut ordered: Vec<((usize, usize), (usize, usize))> = root_moves.iter().copied().collect();
     reorder_with_tt_hint(&mut ordered, tt, board, active_color);
 
+    eprintln!("[root-bounds] depth={} ordered={} a={} b={} parallel?={}",
+              depth_now, ordered.len(), a, b,
+              (depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES));
+
     let enable_parallel =
         depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
     if enable_parallel {
+        println!("Parallel root search enabled");
         // 1) Search the first (best-ordered) move serially to establish PV and bounds
         let &(pv_from, pv_to) = ordered.first().unwrap();
         {
@@ -417,7 +432,17 @@ fn evaluate_root_for_bounds(
         }
     } else {
         // Search sequentially over root moves
+        eprintln!(
+            "[root-serial] depth={} scanning {} moves with a={} b={}",
+            depth_now,
+            ordered.len(),
+            a,
+            b
+        );
         for &(from, to) in &ordered {
+
+            eprintln!("[root-serial] try mv={:?}->{:?}", from, to);
+
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
                 board,
                 active_color,
@@ -428,6 +453,15 @@ fn evaluate_root_for_bounds(
                 b,
                 tt,
                 base_hmc,
+            );
+
+            eprintln!(
+                "[root-serial] mv={:?}->{:?} raw={} (alpha={}, beta={})",
+                (from, to).0,
+                (from, to).1,
+                score_raw,
+                a,
+                b
             );
 
             // Adjust score for root-only heuristics
@@ -459,6 +493,14 @@ fn evaluate_root_for_bounds(
             } else {
                 adjusted < best_adjusted
             };
+
+            eprintln!(
+                "[root-serial] adj={} best_adj_so_far={} best_raw_so_far={}",
+                adjusted,
+                best_adjusted,
+                best_score_raw
+            );
+
             if better || best_from_to.is_none() {
                 best_from_to = Some((from, to));
                 best_adjusted = adjusted;
@@ -466,13 +508,23 @@ fn evaluate_root_for_bounds(
             }
             // Aspiration cutoffs help ordering mid-loop too
             if active_color == Color::White && score_raw >= b {
+                eprintln!("[root-serial] cutoff WHITE raw={} >= beta={}, break", score_raw, b);
                 break;
             }
             if active_color == Color::Black && score_raw <= a {
+                eprintln!("[root-serial] cutoff BLACK raw={} <= alpha={}, break", score_raw, a);
                 break;
             }
         }
     }
+
+    eprintln!(
+        "[root-serial] RETURN depth={} mv={:?} best_raw={} best_adj={}",
+        depth_now,
+        best_from_to.unwrap(),
+        best_score_raw,
+        best_adjusted
+    );
 
     (best_from_to.unwrap(), best_adjusted, best_score_raw)
 }
@@ -493,9 +545,15 @@ fn probe_with_aspiration(
     history: &History,
 ) -> (((usize, usize), (usize, usize)), i32, i32) {
     let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
+
+    eprintln!("[asp] depth={} init a={} b={} last={}", depth_now, a, b, last_score);
+
     let mut tried = 0;
     loop {
         tried += 1;
+
+        eprintln!("[asp] depth={} try={} a={} b={}", depth_now, tried, a, b);
+
         let (mv, best_adjusted, best_score_raw) = evaluate_root_for_bounds(
             board,
             active_color,
@@ -510,9 +568,16 @@ fn probe_with_aspiration(
             history,
         );
 
+        eprintln!("[asp] result depth={} try={} raw={} adj={} mv={:?}->{:?}",
+                  depth_now, tried, best_score_raw, best_adjusted, mv.0, mv.1);
+
         // Check aspiration result
         if best_score_raw <= a {
             // fail-low: widen down
+
+            eprintln!("[asp] FAIL-LOW depth={} try={} raw={} <= a={}; expand window {}->{}",
+                      depth_now, tried, best_score_raw, a, *window, (*window * 2).min(ASP_WINDOW_MAX_CP));
+
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
             a = bounds.0;
@@ -521,6 +586,10 @@ fn probe_with_aspiration(
             }
         } else if best_score_raw >= b {
             // fail-high: widen up
+
+            eprintln!("[asp] FAIL-HIGH depth={} try={} raw={} >= b={}; expand window {}->{}",
+                      depth_now, tried, best_score_raw, b, *window, (*window * 2).min(ASP_WINDOW_MAX_CP));
+
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
             b = bounds.1;

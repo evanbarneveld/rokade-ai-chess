@@ -16,9 +16,13 @@ pub fn init_rayon_pool_if_needed() {
             .unwrap_or(default_threads);
         // Increase worker thread stack size to avoid stack overflows in deep searches.
         let stack_bytes: usize = RAYON_STACK_BYTES;
-        let _ = ThreadPoolBuilder::new()
+        let result = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .stack_size(stack_bytes)
             .build_global();
+        match result {
+            Ok(_) => {}
+            Err(e) => panic!("Failed to initialize rayon thread pool: {}", e),
+        }
     });
 }
