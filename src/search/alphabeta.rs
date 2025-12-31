@@ -64,20 +64,17 @@ pub fn alphabeta(
             let tt_score = from_tt_score(entry.score, ply);
             match entry.bound {
                 Bound::Exact => {
+                    // Only EXACT entries may short-circuit
                     return tt_score;
                 }
                 Bound::Lower => {
-                    if tt_score >= beta {
-                        return tt_score;
-                    }
+                    // Do not return early on LOWER; only tighten alpha
                     if tt_score > alpha {
                         alpha = tt_score;
                     }
                 }
                 Bound::Upper => {
-                    if tt_score <= alpha {
-                        return tt_score;
-                    }
+                    // Do not return early on UPPER; only tighten beta
                     if tt_score < beta {
                         beta = tt_score;
                     }
