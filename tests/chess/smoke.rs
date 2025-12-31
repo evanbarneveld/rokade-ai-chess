@@ -187,6 +187,10 @@ fn test_check_with_o_o_o() {
 
 /*
 
+rnb1kbnr/ppp1pppp/8/3q4/8/5N2/PPPPPPPP/R1BQKB1R b KQkq - 1 3
+black: Bc8-h3, a very bad move!
+
+
 test fens:
 
 Run each with go depth 12 (or your usual depth) and share info/bestmove if anything looks off.

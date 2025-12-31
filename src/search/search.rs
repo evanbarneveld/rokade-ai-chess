@@ -298,14 +298,14 @@ pub(crate) fn find_move_with_info(
             } else { false };
             if !makes_threefold { v.push((from, to)); }
         }
-        // Hard root filter: drop queen moves that have negative SEE on destination (post-move),
-        // i.e., immediately capturable by opponent with non-losing result. If filtering removes all, keep original set.
+        // Hard root filter: drop unsafe queen moves (SEE<0) and unsafe minor-piece non-check sacs (SEE<=-150 and not giving check)
+        // If filtering removes all, keep original set.
         if !v.is_empty() {
             let mut filtered: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(v.len());
             for &(from, to) in &v {
                 let piece = board.get(from.0, from.1);
                 let mut drop = false;
-                if let Some(p) = piece { if p.get_type() == PieceType::Queen {
+                if let Some(p) = piece {
                     // simulate move on a temp board and evaluate SEE(dest)
                     let mut post = board.clone();
                     let captured = board.get(to.0, to.1);
@@ -313,8 +313,16 @@ pub(crate) fn find_move_with_info(
                     post.set(to.0, to.1, Some(p));
                     let cap_val = captured.map(|cp| piece_value_cp(cp.get_type())).unwrap_or(0);
                     let see = see_dest_estimate(&post, active_color, to, cap_val);
-                    if see < 0 { drop = true; }
-                }}
+                    match p.get_type() {
+                        PieceType::Queen => { if see < 0 { drop = true; } }
+                        PieceType::Bishop | PieceType::Knight => {
+                            // keep potential sound sacs if the move gives check; otherwise filter clearly losing ones
+                            let gives_check = is_side_in_check(&mut post, opposite_color(active_color));
+                            if see <= -150 && !gives_check { drop = true; }
+                        }
+                        _ => {}
+                    }
+                }
                 if !drop { filtered.push((from, to)); }
             }
             if filtered.is_empty() { v } else { filtered }
