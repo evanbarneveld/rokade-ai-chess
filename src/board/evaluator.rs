@@ -209,8 +209,8 @@ pub fn evaluate_position(board: &Board) -> i32 {
                     if is_isolated_pawn(board, col, color) { val -= 14; }
                     if is_passed_pawn(board, row, col, color) {
                         let advance = match color { Color::White => row as i32, Color::Black => (7 - row) as i32 };
-                        // Base passer bonus grows with advancement and endgame weight
-                        val += ((8 + 3 * advance) * (8 + eg)) / 24; // ~+10..+40cp
+                        // Base passer bonus grows with advancement and endgame weight (slightly steeper)
+                        val += ((8 + 4 * advance) * (8 + eg)) / 24; // ~+12..+50cp
 
                         // Additional endgame-scaled passer heuristics
                         if eg > 0 {
@@ -442,8 +442,8 @@ pub fn evaluate_position(board: &Board) -> i32 {
     // Global light features to bias toward sound openings
     // Bishop pair (middlegame‑weighted)
     let (w_bishops, b_bishops) = count_bishops(board);
-    if w_bishops >= 2 { score += (28 * phase) / 24; }
-    if b_bishops >= 2 { score -= (28 * phase) / 24; }
+    if w_bishops >= 2 { score += (36 * phase) / 24; }
+    if b_bishops >= 2 { score -= (36 * phase) / 24; }
 
     // Rooks on open/semi-open files (middlegame‑weighted)
     score += rook_file_activity(board, Color::White) * phase / 24;
@@ -533,10 +533,10 @@ fn king_safety(board: &Board, color: Color) -> i32 {
             if let Some(p)=board.get(front_rank as usize, f as usize) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { shield += 1; } }
         }
         let mut pen = 0;
-        if shield==0 { pen += 24; } else if shield==1 { pen += 14; } else if shield==2 { pen += 6; }
+        if shield==0 { pen += 30; } else if shield==1 { pen += 18; } else if shield==2 { pen += 8; }
         // Half-open king file penalty
         let mut own=0; let mut opp=0; for r in 0..8 { if let Some(p)=board.get(r, kf) { if matches!(p.get_type(), PieceType::Pawn) { if p.get_color()==color { own+=1; } else { opp+=1; } } } }
-        if own==0 && opp>0 { pen += 10; }
+        if own==0 && opp>0 { pen += 14; }
         return -pen;
     }
     0

@@ -227,19 +227,56 @@ pub(crate) fn find_all_valid_moves(
                         continue;
                     }
 
-                    if is_piece_move_valid(
-                        board,
-                        active_color,
-                        r,
-                        c,
-                        piece,
-                        tr,
-                        tc,
-                        from,
-                        to,
-                        is_capture,
-                    ) {
-                        result.push((from, to));
+                    // Special-case: allow castling generation using GameState-aware validator
+                    if piece.get_type() == PieceType::King {
+                        // Try regular single-square king moves via existing validator
+                        let dr = if r > tr { r - tr } else { tr - r };
+                        let dc = if c > tc { c - tc } else { tc - c };
+                        if dr <= 1 && dc <= 1 {
+                            if is_piece_move_valid(
+                                board,
+                                active_color,
+                                r,
+                                c,
+                                piece,
+                                tr,
+                                tc,
+                                from,
+                                to,
+                                is_capture,
+                            ) {
+                                result.push((from, to));
+                            }
+                        } else if dr == 0 && dc == 2 {
+                            // Potential castle squares: e1g1/e1c1 or e8g8/e8c8
+                            // Reuse GameState + king_move_validator by simulating via PieceMover.
+                            // Build a temporary GameState-like context from the current board and a neutral state.
+                            use crate::state::game_state::GameState;
+                            // Create a shallow copy of the current GameState is not available here; so we can
+                            // construct a new GameState with this board snapshot and default state, then set side.
+                            // GameState is Copy in some contexts; when not, we create from board.
+                            let mut gs = GameState::from_board_and_side(*board, active_color);
+                            let can_move = PieceMover::move_piece(&mut gs, from, to, is_capture, None);
+                            if can_move {
+                                // We do not commit the move here; generator only needs legality.
+                                result.push((from, to));
+                            }
+                        }
+                    } else {
+                        if is_piece_move_valid(
+                            board,
+                            active_color,
+                            r,
+                            c,
+                            piece,
+                            tr,
+                            tc,
+                            from,
+                            to,
+                            is_capture,
+                        ) {
+                            result.push((from, to));
+                        }
                     }
                 }
             }

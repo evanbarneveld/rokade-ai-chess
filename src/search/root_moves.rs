@@ -15,8 +15,8 @@ use crate::state::game_state::GameState;
 
 
 const ROOT_CAPTURE_BONUS_DIV: i32 = 10; // add captured piece value / this divisor
-const QUEEN_LOSING_PEN_BASE_CP: i32 = 1000; // base penalty for clearly losing queen moves
-const QUEEN_PAWN_ATTACK_EXTRA_CP: i32 = 500; // extra penalty if queen landing square is pawn-attacked
+const QUEEN_LOSING_PEN_BASE_CP: i32 = 600; // was 1000; soften to avoid over-timid queen play
+const QUEEN_PAWN_ATTACK_EXTRA_CP: i32 = 250; // was 500; still discourages walking into pawn nets
 
 const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150; // only apply adjustments if side advantage above this
 const ENDGAME_HMC_THRESHOLD: u32 = 80; // start scaling after this half-move clock

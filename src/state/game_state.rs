@@ -1,6 +1,6 @@
 use crate::board::Board;
 use crate::history::history::History;
-use crate::piece::pieces::{Piece, Color};
+use crate::piece::pieces::{Piece, Color, PieceType};
 use crate::state::outcome::{recompute_outcome, OutcomeType};
 use crate::state::castling::CastlingRights;
 
@@ -140,6 +140,34 @@ impl GameState {
     }
 
     pub fn get_outcome(&self) -> Option<OutcomeType> { self.outcome.clone() }
+
+    // Lightweight constructor for validators: build a GameState from a Board snapshot and side to move.
+    // Castling rights are inferred from piece placement on initial squares (approximation).
+    pub fn from_board_and_side(board: Board, side: Color) -> Self {
+        // Infer castling rights string based on king/rook presence at start squares
+        let mut rights_str = String::new();
+        // White
+        if matches!(board.get(0,4), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::King) {
+            if matches!(board.get(0,7), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::Rook) {
+                rights_str.push('K');
+            }
+            if matches!(board.get(0,0), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::Rook) {
+                rights_str.push('Q');
+            }
+        }
+        // Black
+        if matches!(board.get(7,4), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::King) {
+            if matches!(board.get(7,7), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::Rook) {
+                rights_str.push('k');
+            }
+            if matches!(board.get(7,0), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::Rook) {
+                rights_str.push('q');
+            }
+        }
+        if rights_str.is_empty() { rights_str.push('-'); }
+        let rights = CastlingRights::from_fen(&rights_str);
+        GameState::new_from_existing_state(board, side, rights, None, 0, 1)
+    }
 }
 
 

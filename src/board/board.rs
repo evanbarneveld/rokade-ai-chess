@@ -26,6 +26,9 @@ pub struct UndoMove {
     // Save king locations to restore accurately on unmake
     prev_white_king: (usize, usize),
     prev_black_king: (usize, usize),
+    // Castling support: if the move was a castle, remember rook relocation
+    castle_rook_from: Option<(usize, usize)>,
+    castle_rook_to: Option<(usize, usize)>,
 }
 
 impl Board {
@@ -187,7 +190,47 @@ impl Board {
         // snapshot king locations before move
         let prev_white_king = self.get_king_location(Color::White);
         let prev_black_king = self.get_king_location(Color::Black);
-        // apply move directly
+        // apply move directly (handle castling rook relocation if needed)
+        let mut castle_rook_from: Option<(usize, usize)> = None;
+        let mut castle_rook_to: Option<(usize, usize)> = None;
+
+        // Detect castling: king moves two files from initial file 4 to 6 or 2
+        if let Some(p) = moved {
+            if p.get_type() == PieceType::King {
+                let dr = if from.0 > to.0 { from.0 - to.0 } else { to.0 - from.0 };
+                let dc = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
+                if dr == 0 && dc == 2 && from.1 == 4 {
+                    // Kingside or queenside
+                    if to.1 == 6 {
+                        // Kingside: move rook from h-file to f-file
+                        let rf = (from.0, 7usize);
+                        let rt = (from.0, 5usize);
+                        if let Some(rook) = self.get(rf.0, rf.1) {
+                            if rook.get_type() == PieceType::Rook {
+                                self.set(rt.0, rt.1, Some(rook));
+                                self.set(rf.0, rf.1, None);
+                                castle_rook_from = Some(rf);
+                                castle_rook_to = Some(rt);
+                            }
+                        }
+                    } else if to.1 == 2 {
+                        // Queenside: move rook from a-file to d-file
+                        let rf = (from.0, 0usize);
+                        let rt = (from.0, 3usize);
+                        if let Some(rook) = self.get(rf.0, rf.1) {
+                            if rook.get_type() == PieceType::Rook {
+                                self.set(rt.0, rt.1, Some(rook));
+                                self.set(rf.0, rf.1, None);
+                                castle_rook_from = Some(rf);
+                                castle_rook_to = Some(rt);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Move the king (or any piece) to destination
         self.set(to.0, to.1, moved);
         self.set(from.0, from.1, None);
         // update king location cache if a king moved
@@ -203,6 +246,8 @@ impl Board {
             captured,
             prev_white_king,
             prev_black_king,
+            castle_rook_from,
+            castle_rook_to,
         }
     }
 
@@ -211,6 +256,15 @@ impl Board {
         // restore original squares
         self.set(undo.from.0, undo.from.1, undo.moved);
         self.set(undo.to.0, undo.to.1, undo.captured);
+        // If this was a castle, move the rook back
+        if let (Some(rf), Some(rt)) = (undo.castle_rook_from, undo.castle_rook_to) {
+            if let Some(rook) = self.get(rt.0, rt.1) {
+                if rook.get_type() == PieceType::Rook {
+                    self.set(rf.0, rf.1, Some(rook));
+                    self.set(rt.0, rt.1, None);
+                }
+            }
+        }
         // restore king location cache from snapshot
         self.set_king_location(Color::White, undo.prev_white_king);
         self.set_king_location(Color::Black, undo.prev_black_king);
