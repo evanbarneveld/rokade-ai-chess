@@ -187,7 +187,7 @@ fn test_check_with_o_o_o() {
 }
 
 #[test]
-fn test_weird_move() {
+fn test_weird_move1() {
     let fen = "r1b1kB1r/ppp1p2p/5p2/3Qp3/8/8/PPnNPPPP/R2K1B1R b kq - 1 10";
     let mv = "e6";
     let mut game = Chess::new();
@@ -207,12 +207,24 @@ fn test_weird_move() {
     assert_ne!(san_move, "Kd1xc2");
 }
 
+#[test]
+fn test_weird_move2() {
+    let fen = "r1b1k2B/ppp4p/5p2/3pp3/8/8/PP1NPPPP/R3KB1R b q - 0 13";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    println!("Fen: {}", fen);
+    let history = game.get_history().clone();
+    println!("{}", game.board().get_board_display_string(Some(&history)));
+    let san_move = generate_move_as_san(*game.get_game_state(), &history, 7, 10000, 1000).unwrap();
+    println!("Best move: {:?}", san_move);
+    assert_ne!(san_move, "Bc8h3");
+}
+
 /*
 #[test]
 fn test_template_function() {
-    let fen = "fen";
+    let fen = "<fen>";
     let mv = "<move>";
-    //let mv = "e2";
     let mut game = Chess::new();
     game.set_starting_fen(fen);
     println!("Fen: {}", fen);

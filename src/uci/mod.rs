@@ -121,7 +121,7 @@ pub fn run_uci() -> io::Result<()> {
 
             // If we have extra info from the search, emit a UCI info line
             if let Some((score_cp, depth_used)) = info_opt {
-                let info = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp as f32)/3.0f32, elapsed_ms, nodes, nps, best_move_str);
+                let info = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, score_cp as f32, elapsed_ms, nodes, nps, best_move_str);
                 writeln!(stdout, "{}", info)?; log_io(&mut log, "OUT", &info);
             }
 
