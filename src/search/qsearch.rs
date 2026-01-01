@@ -2,6 +2,7 @@ use crate::board::Board;
 use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{piece_value_cp, Color, PieceType};
 use crate::search::search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED};
+use crate::state::game_state::GameState;
 use crate::search::see::see_dest_estimate;
 use crate::search::time_control::time_is_up;
 use crate::search::zobrist::compute_zobrist;
@@ -54,7 +55,8 @@ pub fn qsearch(
     // Generate moves. If not in check, restrict to captures (quiescence).
     // NOTE: For speed we currently generate all and filter; consider adding
     // a dedicated capture generator to avoid the extra work.
-    let mut moves = find_all_valid_moves(&*board, to_move);
+    let gs = GameState::from_board_and_side((*board).clone(), to_move);
+    let mut moves = find_all_valid_moves(&gs);
     if !in_check {
         if QSEE_PRUNING_ENABLED {
             // Keep captures only; additionally filter out clearly losing captures using SEE

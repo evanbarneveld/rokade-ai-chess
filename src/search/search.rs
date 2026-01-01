@@ -78,7 +78,7 @@ pub fn find_best_move(
     // collect all legal moves for the side to move
     let board = game_state.board();
     let active_color = game_state.active_color();
-    let moves = find_all_valid_moves(board, active_color);
+    let moves = find_all_valid_moves(game_state);
 
     //dump_all_valid_moves(game_state, active_color, true);
 
@@ -282,10 +282,11 @@ pub fn find_best_move(
 }
 
 pub(crate) fn find_all_valid_moves(
-    board: &Board,
-    active_color: Color,
+    game_state: &GameState,
 ) -> Vec<((usize, usize), (usize, usize))> {
     let mut result: Vec<((usize, usize), (usize, usize))> = Vec::new();
+    let board = game_state.board();
+    let active_color = game_state.active_color();
 
     // iterate all squares and collect legal moves for the active color
     for r in 0..8 {
@@ -309,69 +310,38 @@ pub(crate) fn find_all_valid_moves(
                     let target_piece_is_some = board.get(tr, tc).is_some();
 
                     // basic board-level validation (ownership, capture flags, bounds)
-                    let is_capture = target_piece_is_some;
+                    let is_capture = target_piece_is_some
+                        || (piece.get_type() == PieceType::Pawn
+                            && game_state.en_passant_target().is_some()
+                            && to == game_state.en_passant_target().unwrap());
                     let is_pawn_move = piece.get_type() == PieceType::Pawn;
-                    if !board.move_from_and_to_validation_check(
+                    if !game_state.move_from_and_to_validation_check(
                         from,
                         to,
                         active_color,
                         is_capture,
                         is_pawn_move,
-                        None,
+                        game_state.en_passant_target(),
                     ) {
                         continue;
                     }
 
-                    // Special-case: allow castling generation using GameState-aware validator
-                    if piece.get_type() == PieceType::King {
-                        // Try regular single-square king moves via existing validator
-                        let dr = if r > tr { r - tr } else { tr - r };
-                        let dc = if c > tc { c - tc } else { tc - c };
-                        if dr <= 1 && dc <= 1 {
-                            if is_piece_move_valid(
-                                board,
-                                active_color,
-                                r,
-                                c,
-                                piece,
-                                tr,
-                                tc,
-                                from,
-                                to,
-                                is_capture,
-                            ) {
-                                result.push((from, to));
-                            }
-                        } else if dr == 0 && dc == 2 {
-                            // Potential castle squares: e1g1/e1c1 or e8g8/e8c8
-                            // Reuse GameState + king_move_validator by simulating via PieceMover.
-                            // Build a temporary GameState-like context from the current board and a neutral state.
-                            use crate::state::game_state::GameState;
-                            // Create a shallow copy of the current GameState is not available here; so we can
-                            // construct a new GameState with this board snapshot and default state, then set side.
-                            // GameState is Copy in some contexts; when not, we create from board.
-                            let mut gs = GameState::from_board_and_side(*board, active_color);
-                            let can_move = PieceMover::move_piece(&mut gs, from, to, is_capture, None);
-                            if can_move {
-                                // We do not commit the move here; generator only needs legality.
-                                result.push((from, to));
-                            }
+                    // Use full GameState-aware move application to validate legality, covering:
+                    // - pins/check (including en passant discovered checks)
+                    // - castling rights and rook/king path clearance
+                    // - en passant captures
+                    // - promotions (we try with implicit queen where required)
+                    let mut gs = *game_state;
+                    let mut promo: Option<Piece> = None;
+                    if piece.get_type() == PieceType::Pawn {
+                        if (active_color == Color::White && tr == 7)
+                            || (active_color == Color::Black && tr == 0)
+                        {
+                            promo = Some(Piece::new(PieceType::Queen, active_color));
                         }
-                    } else {
-                        if is_piece_move_valid(
-                            board,
-                            active_color,
-                            r,
-                            c,
-                            piece,
-                            tr,
-                            tc,
-                            from,
-                            to,
-                            is_capture,
-                        ) {
-                            result.push((from, to));
-                        }
+                    }
+                    if PieceMover::move_piece(&mut gs, from, to, is_capture, promo) {
+                        result.push((from, to));
                     }
                 }
             }
@@ -391,7 +361,7 @@ pub fn dump_all_valid_moves(
 ) {
     use crate::board::san_move::convert_move_to_san;
     let board = game_state.board();
-    let moves = find_all_valid_moves(board, active_color);
+    let moves = find_all_valid_moves(game_state);
     if moves.is_empty() {
         println!("No moves");
         return;

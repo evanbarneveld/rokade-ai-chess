@@ -466,7 +466,7 @@ pub fn book_pick(game_state: &GameState) -> Option<((usize, usize), (usize, usiz
     // Parse UCI
     let (from, to, _promo) = parse_uci_move(chosen.0)?;
     // Validate against generator to be safe
-    let legals = find_all_valid_moves(game_state.board(), game_state.active_color());
+    let legals = find_all_valid_moves(game_state);
     if legals.contains(&(from, to)) {
         Some((from, to))
     } else {

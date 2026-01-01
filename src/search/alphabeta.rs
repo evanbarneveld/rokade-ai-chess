@@ -6,6 +6,7 @@ use crate::search::heuristics::SearchHeuristics;
 use crate::search::prune_null_moves::prune_null_moves;
 use crate::search::qsearch::qsearch;
 use crate::search::search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE};
+use crate::state::game_state::GameState;
 use crate::search::telemetry::bump_node;
 use crate::search::time_control::time_is_up;
 use crate::search::tt::{decode_move, encode_move, from_tt_score, to_tt_score, Bound, TranspositionTable, MATE_VALUE};
@@ -83,7 +84,8 @@ pub fn alphabeta(
         }
     }
 
-    let mut moves = find_all_valid_moves(&*board, to_move);
+    let gs = GameState::from_board_and_side((*board).clone(), to_move);
+    let mut moves = find_all_valid_moves(&gs);
     // If TT has a best move, try it first
     if let Some(entry) = tt.probe(key) {
         let bm = decode_move(entry.best_from, entry.best_to);

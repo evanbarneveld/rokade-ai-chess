@@ -55,7 +55,8 @@ pub fn build_pv_for_root(
         let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
         let next = ((nfr, nfc), (ntr, ntc));
         // Validate legality in current position to avoid garbage PV
-        let legals = find_all_valid_moves(&tmp, side);
+        let gs = GameState::from_board_and_side(tmp.clone(), side);
+        let legals = find_all_valid_moves(&gs);
         if !legals.contains(&next) {
             break;
         }
