@@ -1,7 +1,7 @@
 use crate::board::Board;
 use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{piece_value_cp, Color, PieceType};
-use crate::search::search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE};
+use crate::search::search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED};
 use crate::search::see::see_dest_estimate;
 use crate::search::time_control::time_is_up;
 use crate::search::zobrist::compute_zobrist;
@@ -20,6 +20,10 @@ pub fn qsearch(
     halfmove_clock: u32,
     rep_stack: &mut Vec<u64>,
 ) -> i32 {
+    // If quiescence is disabled, return a static evaluation immediately.
+    if !QUIESCENCE_ENABLED {
+        return evaluate_position(&*board, to_move);
+    }
     // Time cutoff in quiescence as well: return a quick static eval
     if time_is_up() {
         return evaluate_position(&*board, to_move);
@@ -52,24 +56,29 @@ pub fn qsearch(
     // a dedicated capture generator to avoid the extra work.
     let mut moves = find_all_valid_moves(&*board, to_move);
     if !in_check {
-        // Keep captures only; additionally filter out clearly losing captures using SEE
-        moves.retain(|&(from, to)| {
-            if board.get(to.0, to.1).is_none() {
-                return false;
-            }
-            // SEE pre-check: build post-move board and evaluate destination safety
-            let mut post = board.clone();
-            let moved = match board.get(from.0, from.1) {
-                Some(p) => p,
-                None => return false,
-            };
-            let captured = board.get(to.0, to.1);
-            post.set(from.0, from.1, None);
-            post.set(to.0, to.1, Some(moved));
-            let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-            let see = see_dest_estimate(&post, to_move, to, cap_val);
-            see >= -50 // allow slightly negative to avoid over-pruning, but skip clearly losing captures
-        });
+        if QSEE_PRUNING_ENABLED {
+            // Keep captures only; additionally filter out clearly losing captures using SEE
+            moves.retain(|&(from, to)| {
+                if board.get(to.0, to.1).is_none() {
+                    return false;
+                }
+                // SEE pre-check: build post-move board and evaluate destination safety
+                let mut post = board.clone();
+                let moved = match board.get(from.0, from.1) {
+                    Some(p) => p,
+                    None => return false,
+                };
+                let captured = board.get(to.0, to.1);
+                post.set(from.0, from.1, None);
+                post.set(to.0, to.1, Some(moved));
+                let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
+                let see = see_dest_estimate(&post, to_move, to, cap_val);
+                see >= -50 // allow slightly negative to avoid over-pruning, but skip clearly losing captures
+            });
+        } else {
+            // Keep captures only, no SEE-based filtering
+            moves.retain(|&(_from, to)| board.get(to.0, to.1).is_some());
+        }
     }
 
     // Selective endgame pawn-push quiescence: allow a few safe passer pushes
@@ -150,7 +159,7 @@ pub fn qsearch(
     }
 
     // Order captures by MVV-LVA to improve cutoffs (only matters for captures branch)
-    if !in_check {
+    if !in_check && MVV_LVA_ENABLED {
         let b = &*board;
         moves.sort_by_key(|&(from, to)| -b.move_score_mvv_lva(from, to));
     }
@@ -163,7 +172,7 @@ pub fn qsearch(
     if to_move == Color::White {
         let mut best = MIN_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
-            if !in_check {
+            if !in_check && QSEE_PRUNING_ENABLED {
                 if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
                     let att_v = piece_value_cp(att.get_type());
                     let vic_v = piece_value_cp(vic.get_type());
@@ -199,7 +208,7 @@ pub fn qsearch(
     } else {
         let mut best = MAX_EVAL_VALUE;
         for (from, to) in moves.into_iter() {
-            if !in_check {
+            if !in_check && QSEE_PRUNING_ENABLED {
                 if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
                     let att_v = piece_value_cp(att.get_type());
                     let vic_v = piece_value_cp(vic.get_type());

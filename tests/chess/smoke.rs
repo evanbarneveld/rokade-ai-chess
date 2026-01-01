@@ -221,6 +221,11 @@ fn test_weird_move2() {
 }
 
 /*
+
+     r1bqkbnr/pppppppp/n7/8/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2
+     moves the pony and could be attacked
+ */
+/*
 #[test]
 fn test_template_function() {
     let fen = "<fen>";

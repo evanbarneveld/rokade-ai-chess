@@ -103,8 +103,10 @@ pub fn alphabeta(
             static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
         }
         tail.sort_by_key(|&(from, to)| {
-            // Base MVV-LVA score
-            let mut key = board_ref.move_score_mvv_lva(from, to);
+            // Base MVV-LVA score (optional)
+            let mut key = if crate::search::search::MVV_LVA_ENABLED {
+                board_ref.move_score_mvv_lva(from, to)
+            } else { 0 };
             let moved_is_pawn = board_ref
                 .get(from.0, from.1)
                 .map(|p| p.get_type() == PieceType::Pawn)
@@ -239,32 +241,34 @@ pub fn alphabeta(
                 // Strictly avoid reducing checking moves at shallow depth
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
-                if quiet
-                    && child_depth >= 3
-                    && move_index >= 4
-                    && allow_reduce
-                {
-                    // Basic reduction formula: grows with move index and depth
-                    // Use history to avoid over-reducing historically good moves
-                    let hist = HEUR.with(|h| {
-                        let m = h
-                            .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
-                            .lock()
-                            .unwrap();
-                        m.history_score(to_move, from, to)
-                    });
-                    let hist_good = hist > 10_000; // tuned threshold
-                    // Slightly more aggressive with stronger eval; allow up to 3 plies at depth >= 8
-                    let mut r = 1 + ((move_index as usize) / 6).min(1);
-                    if child_depth >= 8 {
-                        r += 1;
+                if crate::search::search::LMR_ENABLED {
+                    if quiet
+                        && child_depth >= 3
+                        && move_index >= 4
+                        && allow_reduce
+                    {
+                        // Basic reduction formula: grows with move index and depth
+                        // Use history to avoid over-reducing historically good moves
+                        let hist = HEUR.with(|h| {
+                            let m = h
+                                .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                                .lock()
+                                .unwrap();
+                            m.history_score(to_move, from, to)
+                        });
+                        let hist_good = hist > 10_000; // tuned threshold
+                        // Slightly more aggressive with stronger eval; allow up to 3 plies at depth >= 8
+                        let mut r = 1 + ((move_index as usize) / 6).min(1);
+                        if child_depth >= 8 {
+                            r += 1;
+                        }
+                        if hist_good {
+                            r = r.saturating_sub(1);
+                        }
+                        // Final cap to 3 plies
+                        r = r.min(3);
+                        reduced_depth = reduced_depth.saturating_sub(r);
                     }
-                    if hist_good {
-                        r = r.saturating_sub(1);
-                    }
-                    // Final cap to 3 plies
-                    r = r.min(3);
-                    reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // Null-window search for subsequent moves (PVS window)
                 score = alphabeta(
@@ -388,28 +392,30 @@ pub fn alphabeta(
                 // Strictly avoid reducing checking moves at shallow depth
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
-                if quiet
-                    && child_depth >= 3
-                    && move_index >= 4
-                    && allow_reduce
-                {
-                    let hist = HEUR.with(|h| {
-                        let m = h
-                            .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
-                            .lock()
-                            .unwrap();
-                        m.history_score(to_move, from, to)
-                    });
-                    let hist_good = hist < -10_000; // minimizing side: keep symmetric magnitude
-                    let mut r = 1 + ((move_index as usize) / 6).min(1);
-                    if (child_depth as usize) >= 8 {
-                        r += 1;
+                if crate::search::search::LMR_ENABLED {
+                    if quiet
+                        && child_depth >= 3
+                        && move_index >= 4
+                        && allow_reduce
+                    {
+                        let hist = HEUR.with(|h| {
+                            let m = h
+                                .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
+                                .lock()
+                                .unwrap();
+                            m.history_score(to_move, from, to)
+                        });
+                        let hist_good = hist < -10_000; // minimizing side: keep symmetric magnitude
+                        let mut r = 1 + ((move_index as usize) / 6).min(1);
+                        if (child_depth as usize) >= 8 {
+                            r += 1;
+                        }
+                        if hist_good {
+                            r = r.saturating_sub(1);
+                        }
+                        r = r.min(3);
+                        reduced_depth = reduced_depth.saturating_sub(r);
                     }
-                    if hist_good {
-                        r = r.saturating_sub(1);
-                    }
-                    r = r.min(3);
-                    reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // For the minimizing side, a null-window around beta-1 .. beta works equivalently
                 score = alphabeta(

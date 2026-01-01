@@ -23,13 +23,35 @@ pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
 
 pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 
+pub(crate) const ROOT_PARALLELIZATION_ENABLED: bool = true; // TODO WARNING
+const ORDERBOOK_ENABLED: bool = false; // TODO WARNING
+const STRENGTH_MODE_ENABLED: bool = false; // TODO WARNING
+
+pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = true; // TODO WARNING Disabling TT can be 2–10x slower
+
+// Optimization feature toggles (compile-time booleans)
+// Set to true to enable the corresponding optimization.
+// Note: These are coarse global switches primarily for experimentation.
+pub(crate) const NULL_MOVE_PRUNING_ENABLED: bool = true;
+pub(crate) const SEE_FILTERING_ENABLED: bool = true;
+pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true;
+
+// Focused debug toggles (compile-time booleans)
+// Warning: Disabling some of these can cause large slowdowns and strength drops.
+// Keep defaults true to preserve current behavior.
+pub(crate) const QUIESCENCE_ENABLED: bool = true; // Disabling may cause horizon effects
+pub(crate) const QSEE_PRUNING_ENABLED: bool = true; // SEE-based pruning inside qsearch
+pub(crate) const MVV_LVA_ENABLED: bool = true; // Capture ordering heuristic
+pub(crate) const LMR_ENABLED: bool = true; // Late Move Reductions
+pub(crate) const ID_ITERATIONS_ENABLED: bool = true; // Iterative deepening loop
+
 // Iterative deepening aspiration window (in centipawns)
 // With a stronger, more stable evaluator we can start tighter and cap lower.
 const ASP_WINDOW_INIT_CP: i32 = 30; // initial aspiration half-window
 const ASP_WINDOW_MAX_CP: i32 = 400; // maximum expanded half-window
 
 // Root parallelization thresholds
-const ROOT_PARALLEL_MIN_DEPTH: usize = 5; // enable root parallel only from this depth
+const ROOT_PARALLEL_MIN_DEPTH: usize = 15; // enable root parallel only from this depth
 const ROOT_PARALLEL_MIN_MOVES: usize = 3; // and when at least this many root moves exist
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
@@ -58,15 +80,19 @@ pub fn find_best_move(
     let active_color = game_state.active_color();
     let moves = find_all_valid_moves(board, active_color);
 
+    //dump_all_valid_moves(game_state, active_color, true);
+
     if moves.is_empty() {
         return None;
     }
 
     // Opening book: if we have a book move in early game, play it immediately.
     // Limit to first ~8 full moves to avoid forcing book deep into middlegame.
-    if game_state.full_move_number() <= 8 {
-        if let Some((bf, bt)) = book_pick(game_state) {
-            return Some((bf, bt, 0, 0));
+    if ORDERBOOK_ENABLED {
+        if game_state.full_move_number() <= 8 {
+            if let Some((bf, bt)) = book_pick(game_state) {
+                return Some((bf, bt, 0, 0));
+            }
         }
     }
 
@@ -94,7 +120,7 @@ pub fn find_best_move(
         // Hard root filter: drop unsafe queen moves (SEE<0) and unsafe minor-piece non-check sacs
         // (SEE<=SEE_MINOR_SAC_THRESHOLD_CP and not giving check)
         // If filtering removes all, keep original set.
-        if !v.is_empty() {
+        if SEE_FILTERING_ENABLED && !v.is_empty() {
             let mut filtered: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(v.len());
             hard_root_filter(board, active_color, &mut v, &mut filtered);
             if filtered.is_empty() { v } else { filtered }
@@ -114,30 +140,87 @@ pub fn find_best_move(
     //eprintln!("[root] starting ID; eff_depth={} root_moves={} window={}",
     //          effective_depth, root_moves.len(), window);
 
-    for depth_now in 1..=effective_depth {
+    if ID_ITERATIONS_ENABLED {
+        for depth_now in 1..=effective_depth {
 
-        //eprintln!("[root] depth_now={} (pre-asp) last_score={} window={}", depth_now, last_score, window);
+            //eprintln!("[root] depth_now={} (pre-asp) last_score={} window={}", depth_now, last_score, window);
 
+            tt.next_age();
+            let ((bf, bt), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
+                probe_with_aspiration(
+                    &board,
+                    active_color,
+                    &root_moves,
+                    depth_now,
+                    last_score,
+                    &mut window,
+                    &mut tt,
+                    base_hmc,
+                    ps,
+                    game_state,
+                    history,
+                )
+            } else {
+                // Full-width single probe without aspiration
+                evaluate_root_for_bounds(
+                    &board,
+                    active_color,
+                    &root_moves,
+                    depth_now,
+                    MIN_EVAL_VALUE + 1,
+                    MAX_EVAL_VALUE - 1,
+                    &mut tt,
+                    base_hmc,
+                    ps,
+                    game_state,
+                    history,
+                )
+            };
+
+            //eprintln!("[root] depth_now={} (post-asp) best_adj={} best_raw={} mv={:?}->{:?}",
+            //          depth_now, best_adj, best_raw, (bf, bt).0, (bf, bt).1);
+
+            last_score = best_raw;
+            // Emit PV/info for this iteration, including TT hashfull permille
+            let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
+            let hf = tt.hashfull_permille();
+            emit_info(bf, bt, best_adj, depth_now, pv, hf);
+            chosen = Some((bf, bt, best_adj, depth_now));
+        }
+    } else {
+        // Single-depth search without iterative deepening
+        let depth_now = effective_depth;
         tt.next_age();
-        let ((bf, bt), best_adj, best_raw) = probe_with_aspiration(
-            &board,
-            active_color,
-            &root_moves,
-            depth_now,
-            last_score,
-            &mut window,
-            &mut tt,
-            base_hmc,
-            ps,
-            game_state,
-            history,
-        );
-
-        //eprintln!("[root] depth_now={} (post-asp) best_adj={} best_raw={} mv={:?}->{:?}",
-        //          depth_now, best_adj, best_raw, (bf, bt).0, (bf, bt).1);
-
+        let ((bf, bt), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
+            probe_with_aspiration(
+                &board,
+                active_color,
+                &root_moves,
+                depth_now,
+                last_score,
+                &mut window,
+                &mut tt,
+                base_hmc,
+                ps,
+                game_state,
+                history,
+            )
+        } else {
+            evaluate_root_for_bounds(
+                &board,
+                active_color,
+                &root_moves,
+                depth_now,
+                MIN_EVAL_VALUE + 1,
+                MAX_EVAL_VALUE - 1,
+                &mut tt,
+                base_hmc,
+                ps,
+                game_state,
+                history,
+            )
+        };
         last_score = best_raw;
-        // Emit PV/info for this iteration, including TT hashfull permille
         let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
         let hf = tt.hashfull_permille();
         emit_info(bf, bt, best_adj, depth_now, pv, hf);
@@ -146,9 +229,7 @@ pub fn find_best_move(
 
     // Final selection based on playing_strength from the last iteration
     if let Some((bf, bt, sc, used_depth)) = chosen {
-        if playing_strength >= MAX_PLAYING_STRENGTH {
-            Some((bf, bt, sc, used_depth))
-        } else {
+        if STRENGTH_MODE_ENABLED && playing_strength < MAX_PLAYING_STRENGTH {
             // Re-evaluate top K moves for stochastic selection at final depth
             let mut scored: Vec<((usize, usize), (usize, usize), i32)> = Vec::new();
             for &(from, to) in &root_moves {
@@ -192,6 +273,8 @@ pub fn find_best_move(
             } else {
                 Some((bf, bt, sc, used_depth))
             }
+        } else {
+            Some((bf, bt, sc, used_depth))
         }
     } else {
         None
@@ -297,6 +380,57 @@ pub(crate) fn find_all_valid_moves(
     result
 }
 
+/// Dump all legal moves for the given side from the current board, formatted as SAN or coordinate pairs.
+/// This is intended for debugging/tests. It returns a single string with moves separated by spaces.
+/// By default it uses simple coordinate notation like e2e4; when `to_san` is true and a GameState is
+/// provided, it will attempt to convert to SAN.
+pub fn dump_all_valid_moves(
+    game_state: &GameState,
+    active_color: Color,
+    to_san: bool,
+) {
+    use crate::board::san_move::convert_move_to_san;
+    let board = game_state.board();
+    let moves = find_all_valid_moves(board, active_color);
+    if moves.is_empty() {
+        println!("No moves");
+        return;
+    }
+    if to_san {
+        let mut parts: Vec<String> = Vec::with_capacity(moves.len());
+        for (from, to) in moves {
+            if let Some(s) = convert_move_to_san(*game_state, Some((from, to))) {
+                parts.push(s);
+            } else {
+                // fallback to coord if SAN conversion fails
+                let s = format!(
+                    "{}{}{}{}",
+                    (b'a' + from.1 as u8) as char,
+                    (b'1' + from.0 as u8) as char,
+                    (b'a' + to.1 as u8) as char,
+                    (b'1' + to.0 as u8) as char
+                );
+                parts.push(s);
+            }
+        }
+        println!("{}", parts.join(" "));
+        return;
+    } else {
+        let mut parts: Vec<String> = Vec::with_capacity(moves.len());
+        for (from, to) in moves {
+            let s = format!(
+                "{}{}{}{}",
+                (b'a' + from.1 as u8) as char,
+                (b'1' + from.0 as u8) as char,
+                (b'a' + to.1 as u8) as char,
+                (b'1' + to.0 as u8) as char
+            );
+            parts.push(s);
+        }
+        println!("{}", parts.join(" "));
+    }
+}
+
 // Sorts the move table by score in ascending order, in-place.
 fn sort_moves_on_score_asc(
     move_table: &mut Vec<((usize, usize), (usize, usize), i32)>,
@@ -364,8 +498,9 @@ fn evaluate_root_for_bounds(
     //          depth_now, ordered.len(), a, b,
     //         (depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES));
 
-    let enable_parallel =
-        depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
+    let enable_parallel = ROOT_PARALLELIZATION_ENABLED
+        && depth_now >= ROOT_PARALLEL_MIN_DEPTH
+        && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
     if enable_parallel {
         //eprintln!("Parallel root search enabled");
         // 1) Search the first (best-ordered) move serially to establish PV and bounds

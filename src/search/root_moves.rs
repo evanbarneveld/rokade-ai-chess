@@ -5,6 +5,7 @@ use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
 use crate::search::alphabeta::alphabeta;
+use crate::search::search::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 use crate::search::playing_strength::strength_noise_sigma;
 use crate::search::search::find_all_valid_moves;
 use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};

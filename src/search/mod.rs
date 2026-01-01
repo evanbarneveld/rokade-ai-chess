@@ -4,7 +4,7 @@ pub(crate) mod zobrist;
 pub(crate) mod heuristics;
 pub(crate) mod playing_strength;
 pub(crate) mod time_control;
-pub(crate) mod uci_feedback;
+pub mod uci_feedback;
 pub(crate) mod threading;
 pub(crate) mod telemetry;
 pub(crate) mod locking;

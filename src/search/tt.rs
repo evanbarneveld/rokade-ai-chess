@@ -49,6 +49,7 @@ impl TranspositionTable {
 
     #[inline]
     pub fn probe(&self, key: u64) -> Option<&Entry> {
+        if !crate::search::search::TRANSPOSITION_TABLE_ENABLED { return None; }
         let idx = self.index(key);
         let e = &self.entries[idx];
         if e.depth >= 0 && e.key == key { Some(e) } else { None }
@@ -56,6 +57,7 @@ impl TranspositionTable {
 
     #[inline]
     pub fn store(&mut self, key: u64, depth: i16, bound: Bound, score: i32, best_from: Option<u8>, best_to: Option<u8>) {
+        if !crate::search::search::TRANSPOSITION_TABLE_ENABLED { return; }
         let idx = self.index(key);
         let e = &mut self.entries[idx];
         // Replace if empty, deeper, or older (simple replacement scheme favoring depth)
@@ -74,6 +76,7 @@ impl TranspositionTable {
     // Return UCI-style hashfull (permill 0..1000) based on approximate occupancy.
     #[inline]
     pub fn hashfull_permille(&self) -> u16 {
+        if !crate::search::search::TRANSPOSITION_TABLE_ENABLED { return 0; }
         if self.entries.is_empty() { return 0; }
         let used = self.used_slots.min(self.entries.len());
         let v = (used as u128) * 1000u128 / (self.entries.len() as u128);

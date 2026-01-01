@@ -12,7 +12,7 @@ fn info_cb_cell() -> &'static Mutex<Option<Arc<InfoCb>>> {
     INFO_CB.get_or_init(|| Mutex::new(None))
 }
 
-pub(crate) fn set_info_callback(cb: Option<Arc<InfoCb>>) {
+pub fn set_info_callback(cb: Option<Arc<InfoCb>>) {
     let cell = info_cb_cell();
     let mut guard = cell.lock().unwrap();
     *guard = cb;
