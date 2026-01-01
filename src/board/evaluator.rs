@@ -207,6 +207,12 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                     // Lightweight pawn-structure terms to improve opening choices
                     if is_doubled_pawn(board, row, col, color) { val -= 12; }
                     if is_isolated_pawn(board, col, color) { val -= 14; }
+                    // Backward pawn (middlegame-weighted, small in endgame)
+                    if is_backward_pawn(board, row, col, color) {
+                        // Taper: ~-22 in MG to ~-8 in EG
+                        let mg = 22; let egp = 8;
+                        val -= (mg * phase + egp * (24 - phase)) / 24;
+                    }
                     if is_passed_pawn(board, row, col, color) {
                         let advance = match color { Color::White => row as i32, Color::Black => (7 - row) as i32 };
                         // Base passer bonus grows with advancement and endgame weight (slightly steeper)
@@ -360,6 +366,14 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                         if support > 0 { val += (8 * support as i32 * eg) / 24; }
                     }
                 }
+                // Knight outposts: protected by own pawn and cannot be chased by enemy pawn
+                if pt == PieceType::Knight {
+                    if is_knight_outpost(board, row, col, color) {
+                        // Tapered: ~+22 MG, +8 EG
+                        let mg = 22; let egp = 8;
+                        val += (mg * phase + egp * (24 - phase)) / 24;
+                    }
+                }
                 match color {
                     Color::White => score += val,
                     Color::Black => score -= val,
@@ -409,6 +423,66 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     score += mob_w * phase / 24;
     score -= mob_b * phase / 24;
 
+    // Holes (weak squares) in central area that cannot be challenged by pawns
+    // Penalize when opponent controls/occupies them. Emphasize middlegame.
+    let hole_mg_pen: i32 = 10; // per hole square influenced by opponent
+    for r in 2..=5 { // central ranks (roughly)
+        for c in 2..=5 { // central files c..f
+            // White holes
+            if is_hole_square(board, r, c, Color::White) {
+                // If Black controls the hole, penalize White
+                let influenced = att_b[r][c];
+                let occ_minor = matches!(board.get(r,c), Some(p) if p.get_color()==Color::Black && (p.get_type()==PieceType::Knight || p.get_type()==PieceType::Bishop));
+                if influenced || occ_minor {
+                    let mut pen = hole_mg_pen;
+                    if occ_minor { pen += 6; }
+                    score -= pen * phase / 24;
+                }
+            }
+            // Black holes
+            if is_hole_square(board, 7 - r, c, Color::Black) {
+                // Mirror ranks for symmetry (use same band); check White influence
+                let rr = 7 - r;
+                let influenced = att_w[rr][c];
+                let occ_minor = matches!(board.get(rr,c), Some(p) if p.get_color()==Color::White && (p.get_type()==PieceType::Knight || p.get_type()==PieceType::Bishop));
+                if influenced || occ_minor {
+                    let mut pen = hole_mg_pen;
+                    if occ_minor { pen += 6; }
+                    score += pen * phase / 24; // penalize Black → increase score for White
+                }
+            }
+        }
+    }
+
+    // Center control bonus: reward controlling d4/e4/d5/e5 (r,c) = (3,3),(3,4),(4,3),(4,4)
+    // Use attack maps; small bonus per controlled square; extra if occupied by minor/pawn
+    const CENTER_CTRL_CP: i32 = 4; // per control
+    const CENTER_OCC_EXTRA_CP: i32 = 3; // extra if occupying with minor/pawn
+    for &(r,c) in &[(3,3),(3,4),(4,3),(4,4)] {
+        if att_w[r][c] { score += CENTER_CTRL_CP * phase / 24; }
+        if att_b[r][c] { score -= CENTER_CTRL_CP * phase / 24; }
+        if let Some(p)=board.get(r,c) {
+            let is_minor_or_pawn = matches!(p.get_type(), PieceType::Pawn|PieceType::Knight|PieceType::Bishop);
+            if is_minor_or_pawn {
+                if p.get_color()==Color::White { score += CENTER_OCC_EXTRA_CP * phase / 24; }
+                else { score -= CENTER_OCC_EXTRA_CP * phase / 24; }
+            }
+        }
+    }
+
+    // Space via pawns on the 5th rank (middlegame): encourage advanced pawn chains
+    const SPACE_PAWN5_CP: i32 = 6;
+    for r in 0..8 { for c in 0..8 {
+        if let Some(p)=board.get(r,c) {
+            if p.get_type()==PieceType::Pawn {
+                match p.get_color() {
+                    Color::White => { if r >= 4 { score += SPACE_PAWN5_CP * phase / 24; } }
+                    Color::Black => { if r <= 3 { score -= SPACE_PAWN5_CP * phase / 24; } }
+                }
+            }
+        }
+    }}
+
     // Global light features to bias toward sound openings
     // Bishop pair (middlegame‑weighted)
     let (w_bishops, b_bishops) = count_bishops(board);
@@ -418,6 +492,14 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     // Rooks on open/semi-open files (middlegame‑weighted)
     score += rook_file_activity(board, Color::White) * phase / 24;
     score -= rook_file_activity(board, Color::Black) * phase / 24;
+
+    // Rook/queen coordination heuristics (middlegame‑weighted)
+    score += doubled_rooks_bonus(board, Color::White) * phase / 24;
+    score -= doubled_rooks_bonus(board, Color::Black) * phase / 24;
+    score += rook_on_enemy_king_file_bonus(board, Color::White) * phase / 24;
+    score -= rook_on_enemy_king_file_bonus(board, Color::Black) * phase / 24;
+    score += queen_on_semi_open_file_bonus(board, Color::White) * phase / 24;
+    score -= queen_on_semi_open_file_bonus(board, Color::Black) * phase / 24;
 
     // King safety (opening‑weighted) and endgame king activity
     score += king_safety(board, Color::White) * phase / 24;
@@ -429,6 +511,13 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     if phase > 12 {
         score += development_penalty_on_backrank(board, Color::White) * (phase - 12) / 12;
         score -= development_penalty_on_backrank(board, Color::Black) * (phase - 12) / 12;
+    }
+
+    // Mild early-queen penalty in the opening: discourage bringing the queen out
+    // before minor pieces are developed off the back rank. Taper with phase.
+    if phase > 0 {
+        score -= early_queen_penalty(board, Color::White) * phase / 24;
+        score += early_queen_penalty(board, Color::Black) * phase / 24;
     }
 
     score
@@ -469,6 +558,119 @@ fn is_passed_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool {
     true
 }
 
+#[inline]
+fn has_enemy_pawn_ahead_same_file(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    let dir: i32 = if color==Color::White { 1 } else { -1 };
+    let mut r = row as i32 + dir;
+    while r>=0 && r<8 {
+        if let Some(p)=board.get(r as usize, col) {
+            if p.get_color()!=color && matches!(p.get_type(), PieceType::Pawn) { return true; }
+        }
+        r += dir;
+    }
+    false
+}
+
+#[inline]
+fn friendly_pawn_adjacent_behind(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    // Any friendly pawn on adjacent files on ranks behind or equal to the pawn (relative to color)
+    for dc in [-1i32, 1] {
+        let nc_i = col as i32 + dc; if nc_i < 0 || nc_i > 7 { continue; }
+        let nc = nc_i as usize;
+        for r in 0..8 {
+            if let Some(p) = board.get(r, nc) {
+                if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) {
+                    match color {
+                        Color::White => { if r <= row { return true; } }
+                        Color::Black => { if r >= row { return true; } }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+#[inline]
+fn square_attacked_by_enemy_pawn(board: &Board, r: usize, c: usize, enemy: Color) -> bool {
+    match enemy {
+        Color::White => {
+            // White pawns attack up: from (r-1,c-1) and (r-1,c+1) to (r,c)
+            if r>0 {
+                if c>0 { if let Some(p)=board.get(r-1, c-1) { if p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn) { return true; } } }
+                if c<7 { if let Some(p)=board.get(r-1, c+1) { if p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn) { return true; } } }
+            }
+            false
+        }
+        Color::Black => {
+            // Black pawns attack down: from (r+1,c-1) and (r+1,c+1) to (r,c)
+            if r<7 {
+                if c>0 { if let Some(p)=board.get(r+1, c-1) { if p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn) { return true; } } }
+                if c<7 { if let Some(p)=board.get(r+1, c+1) { if p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn) { return true; } } }
+            }
+            false
+        }
+    }
+}
+
+#[inline]
+fn square_attacked_by_pawn(board: &Board, r: usize, c: usize, color: Color) -> bool {
+    square_attacked_by_enemy_pawn(board, r, c, color)
+}
+
+// Conservative backward pawn detection:
+// - not passed
+// - enemy pawn ahead on same file
+// - front square is blocked by enemy piece OR controlled by enemy pawn
+// - no friendly pawn on adjacent files behind that can support
+fn is_backward_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    if !matches!(board.get(row,col).map(|p| p.get_type()), Some(PieceType::Pawn)) { return false; }
+    if is_passed_pawn(board, row, col, color) { return false; }
+    if !has_enemy_pawn_ahead_same_file(board, row, col, color) { return false; }
+    let dir: i32 = if color==Color::White { 1 } else { -1 };
+    let fr_i = row as i32 + dir; if fr_i < 0 || fr_i > 7 { return false; }
+    let fr = fr_i as usize;
+    let front_blocked_by_enemy = match board.get(fr, col) { Some(p) if p.get_color()!=color => true, _ => false };
+    let front_controlled_by_enemy_pawn = square_attacked_by_enemy_pawn(board, fr, col, opponent(color));
+    if !(front_blocked_by_enemy || front_controlled_by_enemy_pawn) { return false; }
+    if friendly_pawn_adjacent_behind(board, row, col, color) { return false; }
+    true
+}
+
+// Knight outpost detection: protected by own pawn and cannot be chased by enemy pawn (no enemy pawn can attack the square now or from behind on adjacent files)
+fn is_knight_outpost(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    if !matches!(board.get(row,col).map(|p| p.get_type()), Some(PieceType::Knight)) { return false; }
+    // Must be protected by own pawn
+    let own_pawn_protects = match color {
+        Color::White => {
+            (row>0 && col>0 && matches!(board.get(row-1,col-1), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn))) ||
+            (row>0 && col<7 && matches!(board.get(row-1,col+1), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn)))
+        }
+        Color::Black => {
+            (row<7 && col>0 && matches!(board.get(row+1,col-1), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn))) ||
+            (row<7 && col<7 && matches!(board.get(row+1,col+1), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn)))
+        }
+    };
+    if !own_pawn_protects { return false; }
+    // Not chasable by enemy pawn: (a) not currently attacked by enemy pawn; (b) no enemy pawn on adjacent files behind relative to enemy advance
+    let enemy = opponent(color);
+    if square_attacked_by_enemy_pawn(board, row, col, enemy) { return false; }
+    for dc in [-1i32, 1] {
+        let nc_i = col as i32 + dc; if nc_i < 0 || nc_i > 7 { continue; }
+        let nc = nc_i as usize;
+        match enemy {
+            Color::White => {
+                // any white pawn behind the square (lower row index) on adjacent file could advance to attack later
+                for r in 0..row { if let Some(p)=board.get(r,nc) { if p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn) { return false; } } }
+            }
+            Color::Black => {
+                for r in (row+1)..8 { if let Some(p)=board.get(r,nc) { if p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn) { return false; } } }
+            }
+        }
+    }
+    true
+}
+
 fn count_bishops(board: &Board) -> (i32,i32) {
     let mut w=0; let mut b=0; for r in 0..8 { for c in 0..8 {
         if let Some(p)=board.get(r,c) { if matches!(p.get_type(), PieceType::Bishop) { if p.get_color()==Color::White { w+=1; } else { b+=1; } } }
@@ -479,13 +681,119 @@ fn rook_file_activity(board: &Board, color: Color) -> i32 {
     let mut bonus = 0;
     for r in 0..8 { for c in 0..8 {
         if let Some(p)=board.get(r,c) { if p.get_color()==color && matches!(p.get_type(), PieceType::Rook) {
-            let mut wp=0; let mut bp=0; for rr in 0..8 { if let Some(pp)=board.get(rr,c) { if matches!(pp.get_type(), PieceType::Pawn) { if pp.get_color()==Color::White { wp+=1; } else { bp+=1; } } } }
+            let (wp,bp) = file_pawn_counts(board, c);
             let open = wp==0 && bp==0;
             let semi = match color { Color::White => wp==0 && bp>0, Color::Black => bp==0 && wp>0 };
             if open { bonus += 14; } else if semi { bonus += 8; }
         }}
     }}
     bonus
+}
+
+#[inline]
+fn file_pawn_counts(board: &Board, file: usize) -> (i32,i32) {
+    let mut wp=0; let mut bp=0; for r in 0..8 {
+        if let Some(pp)=board.get(r,file) {
+            if matches!(pp.get_type(), PieceType::Pawn) {
+                if pp.get_color()==Color::White { wp+=1; } else { bp+=1; }
+            }
+        }
+    }
+    (wp,bp)
+}
+
+// Bonus for doubled rooks on the same file; slightly higher on (semi-)open files.
+fn doubled_rooks_bonus(board: &Board, color: Color) -> i32 {
+    let mut bonus = 0;
+    for file in 0..8 {
+        let mut count = 0;
+        for r in 0..8 {
+            if let Some(p)=board.get(r,file) {
+                if p.get_color()==color && matches!(p.get_type(), PieceType::Rook) { count += 1; }
+            }
+        }
+        if count >= 2 {
+            // Base for doubled rooks
+            let mut b = 10;
+            let (wp,bp) = file_pawn_counts(board, file);
+            let open = wp==0 && bp==0;
+            let semi = match color { Color::White => wp==0 && bp>0, Color::Black => bp==0 && wp>0 };
+            if open { b += 6; } else if semi { b += 3; }
+            bonus += b;
+        }
+    }
+    bonus
+}
+
+// Bonus if a rook is on the same file as the enemy king with empty squares between
+// (classic pressure motif). Counts each qualifying rook.
+fn rook_on_enemy_king_file_bonus(board: &Board, color: Color) -> i32 {
+    let mut bonus = 0;
+    if let Some((ek_r, ek_f)) = find_king(board, opponent(color)) {
+        for r in 0..8 { if let Some(p)=board.get(r, ek_f) {
+            if p.get_color()==color && matches!(p.get_type(), PieceType::Rook) {
+                if file_clear_between(board, r, ek_r, ek_f) {
+                    bonus += 10;
+                }
+            }
+        }}
+    }
+    bonus
+}
+
+// Middlegame bonus for queen on a semi-open file (encourages useful central/semi-open placement
+// without overcommitting to early queen activity).
+fn queen_on_semi_open_file_bonus(board: &Board, color: Color) -> i32 {
+    let mut bonus = 0;
+    for r in 0..8 { for c in 0..8 {
+        if let Some(p)=board.get(r,c) {
+            if p.get_color()==color && matches!(p.get_type(), PieceType::Queen) {
+                let (wp,bp) = file_pawn_counts(board, c);
+                let semi = match color { Color::White => wp==0 && bp>0, Color::Black => bp==0 && wp>0 };
+                if semi { bonus += 6; }
+            }
+        }
+    }}
+    bonus
+}
+
+// Penalize early queen development if minor pieces are still on the back rank.
+fn early_queen_penalty(board: &Board, color: Color) -> i32 {
+    // Identify queen home square and back rank
+    let (home_r, home_c) = match color { Color::White => (0usize, 3usize), Color::Black => (7usize, 3usize) };
+    // If queen is still at home, no penalty
+    if matches!(board.get(home_r, home_c), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Queen)) {
+        return 0;
+    }
+    // Count undeveloped minors on the back rank (knights/bishops still on back rank squares)
+    let mut undeveloped = 0;
+    let back_r = home_r;
+    for c in 0..8 {
+        if let Some(p)=board.get(back_r, c) {
+            if p.get_color()==color {
+                match p.get_type() {
+                    PieceType::Knight | PieceType::Bishop => { undeveloped += 1; }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if undeveloped == 0 { return 0; }
+    // Base penalty scales with how undeveloped the position is
+    let base = if undeveloped >= 3 { 18 } else if undeveloped == 2 { 14 } else { 10 };
+    // Slightly increase if queen has advanced beyond back rank (always true here),
+    // and not shielded by pawns in front (crude heuristic: open file at queen file)
+    // Find queen square
+    let mut extra = 0;
+    'outer: for r in 0..8 { for c in 0..8 {
+        if let Some(p)=board.get(r,c) { if p.get_color()==color && matches!(p.get_type(), PieceType::Queen) {
+            let (wp,bp) = file_pawn_counts(board, c);
+            let open = wp==0 && bp==0;
+            if open { extra = 2; }
+            break 'outer;
+        }}
+    }}
+    base + extra
 }
 
 fn find_king(board: &Board, color: Color) -> Option<(usize,usize)> {
@@ -739,4 +1047,42 @@ fn add_pawn_attacks(r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &
             }
         }
     }
+}
+
+// ---- Hole (weak square) detection ----
+#[inline]
+fn is_hole_square(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    // A simplified hole: square in central band not controllable by own pawn now nor by a pawn from behind on adjacent files
+    // Quick current control test
+    let own = color;
+    let cur_ctrl = match own {
+        Color::White => {
+            if row>0 {
+                (col>0 && matches!(board.get(row-1,col-1), Some(p) if p.get_color()==own && matches!(p.get_type(), PieceType::Pawn))) ||
+                (col<7 && matches!(board.get(row-1,col+1), Some(p) if p.get_color()==own && matches!(p.get_type(), PieceType::Pawn)))
+            } else { false }
+        }
+        Color::Black => {
+            if row<7 {
+                (col>0 && matches!(board.get(row+1,col-1), Some(p) if p.get_color()==own && matches!(p.get_type(), PieceType::Pawn))) ||
+                (col<7 && matches!(board.get(row+1,col+1), Some(p) if p.get_color()==own && matches!(p.get_type(), PieceType::Pawn)))
+            } else { false }
+        }
+    };
+    if cur_ctrl { return false; }
+    // Is there any own pawn on adjacent files behind the square that could, in principle, advance to control it?
+    for dc in [-1i32, 1] {
+        let nc_i = col as i32 + dc; if nc_i < 0 || nc_i > 7 { continue; }
+        let nc = nc_i as usize;
+        match color {
+            Color::White => {
+                // any white pawn strictly behind the square on adjacent file
+                for r in 0..row { if let Some(p)=board.get(r, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { return false; } } }
+            }
+            Color::Black => {
+                for r in (row+1)..8 { if let Some(p)=board.get(r, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { return false; } } }
+            }
+        }
+    }
+    true
 }
