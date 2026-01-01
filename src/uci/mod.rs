@@ -182,7 +182,7 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
     }
     let from = &mv[0..2];
     let to = &mv[2..4];
-    let _promo = if mv.len() >= 5 { Some(&mv[4..5]) } else { None };
+    let promo = if mv.len() >= 5 { mv.chars().nth(4) } else { None };
 
     let parse = |sq: &str| -> Option<(usize, usize)> {
         let bytes = sq.as_bytes();
@@ -211,7 +211,7 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
         None => return false,
     };
 
-    engine.move_piece(from_idx, to_idx)
+    engine.move_piece(from_idx, to_idx, promo)
 }
 
 pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, mut move_time_in_ms: usize) -> (String, Option<(i32, usize)>) {

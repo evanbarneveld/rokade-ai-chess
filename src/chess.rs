@@ -106,23 +106,26 @@ impl Chess {
         Some(removed_move.0)
     }
 
-    pub fn move_piece(&mut self, from:(usize, usize), to:(usize,usize)) -> bool {
+    pub fn move_piece(&mut self, from:(usize, usize), to:(usize,usize), promotion_char:Option<char> ) -> bool {
         let mut is_capture = false;
         let mutable_board = self.get_game_state().mutable_board();
         let piece_to_move = mutable_board.get(from.0, from.1);
         if piece_to_move.is_none() { return false; }
         if mutable_board.get(to.0, to.1).is_some() { is_capture = true; }
 
-        let promotion_piece = if piece_to_move.unwrap().get_type() == PieceType::Pawn && (to.0 == 7 || to.0 == 0) {
+        let mut promotion_piece = None;
+
+        if piece_to_move.unwrap().get_type() == PieceType::Pawn && (to.0 == 7 || to.0 == 0) {
             let active_color = piece_to_move.unwrap().get_color();
             if active_color == Color::White {
-                Some(Piece::new(PieceType::Queen, Color::White))
+                // get piece type from promotion_char
+                let adjusted_promotion_char = promotion_char.unwrap().to_ascii_uppercase();
+                promotion_piece = Piece::from_fen_char(adjusted_promotion_char);
             } else {
-                Some(Piece::new(PieceType::Queen, Color::Black))
+                let adjusted_promotion_char = promotion_char.unwrap().to_ascii_lowercase();
+                promotion_piece = Piece::from_fen_char(adjusted_promotion_char);
             }
-        } else {
-            None
-        };
+        }
 
         if PieceMover::move_piece(&mut self.game_state, from, to, is_capture, promotion_piece) {
             self.game_state.switch_player_turn();

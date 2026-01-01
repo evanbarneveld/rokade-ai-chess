@@ -54,6 +54,13 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
         } else {
             if to.0 != 0 { return false }
         }
+    } else {
+        //a promotion piece must be supplied if the move is a promotion
+        if active_color == Color::White {
+            if to.0 == 7 { return false }
+        } else {
+            if to.0 == 0 { return false }
+        }
     }
 
     if do_pin_check && is_king_in_check_after_move(board, (from.0, from.1), (to.0, to.1), en_passant_target) {
