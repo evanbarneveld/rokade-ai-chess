@@ -1,6 +1,5 @@
 use crate::board::Board;
 use crate::history::history::History;
-use crate::piece::move_validators::is_piece_move_valid;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::search::locking::get_tt_mutex;
@@ -356,11 +355,9 @@ pub(crate) fn find_all_valid_moves(
 /// provided, it will attempt to convert to SAN.
 pub fn dump_all_valid_moves(
     game_state: &GameState,
-    active_color: Color,
     to_san: bool,
 ) {
     use crate::board::san_move::convert_move_to_san;
-    let board = game_state.board();
     let moves = find_all_valid_moves(game_state);
     if moves.is_empty() {
         println!("No moves");
