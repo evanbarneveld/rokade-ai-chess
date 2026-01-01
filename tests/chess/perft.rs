@@ -13,7 +13,6 @@ fn perft_startpos_depths() {
     assert_eq!(perft_count(&gs, 4), 197_281);
     assert_eq!(perft_count(&gs, 5), 4_865_609);
     assert_eq!(perft_count(&gs, 6), 119_060_324);
-    assert_eq!(perft_count(&gs, 7), 119_060_324);
 }
 
 #[test]
@@ -260,7 +259,7 @@ fn perft_position6_depth3() {
 fn perft_position6_depth4() {
     let fen = "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10";
     let gs = reset_from_fen(fen).expect("valid FEN");
-    let nodes:i64 = perft_count(&gs, 3) as i64;
+    let nodes:i64 = perft_count(&gs, 4) as i64;
     let expected: i64 = 3_894_594;
 
     if nodes - expected != 0 {
