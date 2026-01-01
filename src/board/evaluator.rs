@@ -484,10 +484,10 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     }}
 
     // Global light features to bias toward sound openings
-    // Bishop pair (middlegame‑weighted)
+    // Bishop pair with MG/EG taper (slightly smaller in EG)
     let (w_bishops, b_bishops) = count_bishops(board);
-    if w_bishops >= 2 { score += (36 * phase) / 24; }
-    if b_bishops >= 2 { score -= (36 * phase) / 24; }
+    if w_bishops >= 2 { score += (36 * phase + 24 * (24 - phase)) / 24; }
+    if b_bishops >= 2 { score -= (36 * phase + 24 * (24 - phase)) / 24; }
 
     // Rooks on open/semi-open files (middlegame‑weighted)
     score += rook_file_activity(board, Color::White) * phase / 24;
@@ -940,9 +940,9 @@ fn mobility_activity(board: &Board) -> (i32, i32) {
             if let Some(p) = board.get(r, c) {
                 let color = p.get_color();
                 let add = match p.get_type() {
-                    PieceType::Knight => count_knight_targets(board, r, c, color) as i32 * 1,
-                    PieceType::Bishop => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)]) as i32 * 2,
-                    PieceType::Rook   => count_slider_targets(board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 2,
+                    PieceType::Knight => count_knight_targets(board, r, c, color) as i32 * 2,
+                    PieceType::Bishop => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)]) as i32 * 3,
+                    PieceType::Rook   => count_slider_targets(board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 3,
                     PieceType::Queen  => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 1,
                     _ => 0,
                 };
