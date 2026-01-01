@@ -77,11 +77,11 @@ pub fn find_best_move(
     // collect all legal moves for the side to move
     let board = game_state.board();
     let active_color = game_state.active_color();
-    let moves = find_all_valid_moves(game_state);
+    let gen_moves = find_all_valid_moves(game_state);
 
     //dump_all_valid_moves(game_state, active_color, true);
 
-    if moves.is_empty() {
+    if gen_moves.is_empty() {
         return None;
     }
 
@@ -111,6 +111,12 @@ pub fn find_best_move(
     // Root-level hard 3-fold avoidance: filter out any root move that would create
     // a third occurrence of the same position (per truncated FEN used in History).
     // If filtering removes all moves (e.g., only repetition saves a loss), fall back to all moves.
+    // Map generated triples to pairs for existing root pipeline (duplicates preserved)
+    let moves: Vec<((usize, usize), (usize, usize))> = gen_moves
+        .iter()
+        .map(|(f, t, _)| (*f, *t))
+        .collect();
+
     let root_moves: Vec<((usize, usize), (usize, usize))> = {
         let mut v = Vec::with_capacity(moves.len());
 
@@ -282,8 +288,8 @@ pub fn find_best_move(
 
 pub(crate) fn find_all_valid_moves(
     game_state: &GameState,
-) -> Vec<((usize, usize), (usize, usize))> {
-    let mut result: Vec<((usize, usize), (usize, usize))> = Vec::new();
+) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
+    let mut result: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::new();
     let board = game_state.board();
     let active_color = game_state.active_color();
 
@@ -329,18 +335,41 @@ pub(crate) fn find_all_valid_moves(
                     // - pins/check (including en passant discovered checks)
                     // - castling rights and rook/king path clearance
                     // - en passant captures
-                    // - promotions (we try with implicit queen where required)
+                    // - promotions (try all promotion piece types)
                     let mut gs = *game_state;
-                    let mut promo: Option<Piece> = None;
-                    if piece.get_type() == PieceType::Pawn {
-                        if (active_color == Color::White && tr == 7)
-                            || (active_color == Color::Black && tr == 0)
-                        {
-                            promo = Some(Piece::new(PieceType::Queen, active_color));
+                    let is_pawn_promotion = piece.get_type() == PieceType::Pawn
+                        && ((active_color == Color::White && tr == 7)
+                            || (active_color == Color::Black && tr == 0));
+
+                    if is_pawn_promotion {
+                        // Try all legal promotion pieces: Queen, Rook, Bishop, Knight
+                        // Note: We push the same (from,to) four times if all are legal,
+                        // so perft and generators can count distinct promotions separately.
+                        let promo_types = [
+                            PieceType::Queen,
+                            PieceType::Rook,
+                            PieceType::Bishop,
+                            PieceType::Knight,
+                        ];
+                        for pt in promo_types.iter() {
+                            let mut gs_var = gs; // work from the same pre-move state
+                            let promo_piece = Some(Piece::new(*pt, active_color));
+                            if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
+                            {
+                                let ch = match pt {
+                                    PieceType::Queen => Some('q'),
+                                    PieceType::Rook => Some('r'),
+                                    PieceType::Bishop => Some('b'),
+                                    PieceType::Knight => Some('n'),
+                                    _ => None,
+                                };
+                                result.push((from, to, ch));
+                            }
                         }
-                    }
-                    if PieceMover::move_piece(&mut gs, from, to, is_capture, promo) {
-                        result.push((from, to));
+                    } else {
+                        if PieceMover::move_piece(&mut gs, from, to, is_capture, None) {
+                            result.push((from, to, None));
+                        }
                     }
                 }
             }
@@ -365,33 +394,45 @@ pub fn dump_all_valid_moves(
     }
     if to_san {
         let mut parts: Vec<String> = Vec::with_capacity(moves.len());
-        for (from, to) in moves {
+        for (from, to, _promo) in moves {
             if let Some(s) = convert_move_to_san(*game_state, Some((from, to))) {
                 parts.push(s);
             } else {
                 // fallback to coord if SAN conversion fails
                 let s = format!(
-                    "{}{}{}{}",
+                    "{}{}{}{}{}",
                     (b'a' + from.1 as u8) as char,
                     (b'1' + from.0 as u8) as char,
                     (b'a' + to.1 as u8) as char,
-                    (b'1' + to.0 as u8) as char
+                    (b'1' + to.0 as u8) as char,
+                    _promo.unwrap_or('\0')
                 );
-                parts.push(s);
+                parts.push(s.trim_end_matches('\0').to_string());
             }
         }
         println!("{}", parts.join(" "));
         return;
     } else {
         let mut parts: Vec<String> = Vec::with_capacity(moves.len());
-        for (from, to) in moves {
-            let s = format!(
-                "{}{}{}{}",
-                (b'a' + from.1 as u8) as char,
-                (b'1' + from.0 as u8) as char,
-                (b'a' + to.1 as u8) as char,
-                (b'1' + to.0 as u8) as char
-            );
+        for (from, to, promo) in moves {
+            let s = if let Some(pc) = promo {
+                format!(
+                    "{}{}{}{}{}",
+                    (b'a' + from.1 as u8) as char,
+                    (b'1' + from.0 as u8) as char,
+                    (b'a' + to.1 as u8) as char,
+                    (b'1' + to.0 as u8) as char,
+                    pc
+                )
+            } else {
+                format!(
+                    "{}{}{}{}",
+                    (b'a' + from.1 as u8) as char,
+                    (b'1' + from.0 as u8) as char,
+                    (b'a' + to.1 as u8) as char,
+                    (b'1' + to.0 as u8) as char
+                )
+            };
             parts.push(s);
         }
         println!("{}", parts.join(" "));

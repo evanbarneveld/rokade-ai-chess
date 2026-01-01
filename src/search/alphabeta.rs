@@ -85,7 +85,10 @@ pub fn alphabeta(
     }
 
     let gs = GameState::from_board_and_side((*board).clone(), to_move);
-    let mut moves = find_all_valid_moves(&gs);
+    let mut moves: Vec<((usize, usize), (usize, usize))> = find_all_valid_moves(&gs)
+        .iter()
+        .map(|(f, t, _)| (*f, *t))
+        .collect();
     // If TT has a best move, try it first
     if let Some(entry) = tt.probe(key) {
         let bm = decode_move(entry.best_from, entry.best_to);

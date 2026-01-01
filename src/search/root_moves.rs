@@ -56,8 +56,11 @@ pub fn build_pv_for_root(
         let next = ((nfr, nfc), (ntr, ntc));
         // Validate legality in current position to avoid garbage PV
         let gs = GameState::from_board_and_side(tmp.clone(), side);
-        let legals = find_all_valid_moves(&gs);
-        if !legals.contains(&next) {
+        let legals_pairs: Vec<((usize, usize), (usize, usize))> = find_all_valid_moves(&gs)
+            .iter()
+            .map(|(f, t, _)| (*f, *t))
+            .collect();
+        if !legals_pairs.contains(&next) {
             break;
         }
         pv.push(next);

@@ -56,7 +56,10 @@ pub fn qsearch(
     // NOTE: For speed we currently generate all and filter; consider adding
     // a dedicated capture generator to avoid the extra work.
     let gs = GameState::from_board_and_side((*board).clone(), to_move);
-    let mut moves = find_all_valid_moves(&gs);
+    let mut moves: Vec<((usize, usize), (usize, usize))> = find_all_valid_moves(&gs)
+        .iter()
+        .map(|(f, t, _)| (*f, *t))
+        .collect();
     if !in_check {
         if QSEE_PRUNING_ENABLED {
             // Keep captures only; additionally filter out clearly losing captures using SEE
