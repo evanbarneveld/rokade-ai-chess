@@ -105,7 +105,7 @@ impl Chess {
         }
         Some(removed_move.0)
     }
-
+    
     pub fn move_piece(&mut self, from:(usize, usize), to:(usize,usize), promotion_char:Option<char> ) -> bool {
         let mut is_capture = false;
         let mutable_board = self.get_game_state().mutable_board();

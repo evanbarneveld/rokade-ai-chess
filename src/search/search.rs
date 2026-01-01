@@ -29,8 +29,8 @@ const ASP_WINDOW_INIT_CP: i32 = 30; // initial aspiration half-window
 const ASP_WINDOW_MAX_CP: i32 = 400; // maximum expanded half-window
 
 // Root parallelization thresholds
-const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // enable root parallel only from this depth
-const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
+const ROOT_PARALLEL_MIN_DEPTH: usize = 5; // enable root parallel only from this depth
+const ROOT_PARALLEL_MIN_MOVES: usize = 3; // and when at least this many root moves exist
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
 const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;

@@ -24,6 +24,10 @@ impl History {
         self.plies.get(index)
     }
 
+    pub fn get_last_move(&self) -> String {
+        self.get_move(self.len() - 1).map(|mv| mv.0.clone()).unwrap_or_else(|| String::from("No moves have been made yet"))
+    }
+
     // Adds a move to the history (SAN or other chosen notation)
     pub fn add_move(&mut self, mv: String, board_move:((usize, usize), (usize, usize)), fen: String) {
         // Truncate FEN to exclude the last two move counters (halfmove clock and fullmove number)

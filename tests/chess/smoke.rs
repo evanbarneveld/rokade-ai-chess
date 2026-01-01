@@ -1,4 +1,5 @@
 use chess::Chess;
+use chess::generator::move_generator::generate_move_as_san;
 use chess::piece::pieces::Color;
 use chess::state::outcome::OutcomeType;
 
@@ -184,6 +185,47 @@ fn test_check_with_o_o_o() {
     println!("Outcome: {:?}", outcome);
     assert_eq!(outcome, OutcomeType::InCheck)
 }
+
+#[test]
+fn test_weird_move() {
+    let fen = "r1b1kB1r/ppp1p2p/5p2/3Qp3/8/8/PPnNPPPP/R2K1B1R b kq - 1 10";
+    let mv = "e6";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    println!("Fen: {}", fen);
+    println!("Move: {}", mv);
+    let history = game.get_history().clone();
+    println!("{}", game.board().get_board_display_string(Some(&history)));
+    assert!(game.move_piece_san(mv));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
+    let history = game.get_history().clone();
+    let last_move = history.get_last_move();
+    println!("Last move: {:?}", last_move);
+    //get best move
+    let san_move = generate_move_as_san(*game.get_game_state(), &history, 7, 10000, 1000).unwrap();
+    println!("Best move: {:?}", san_move);
+    assert_ne!(san_move, "Kd1xc2");
+}
+
+/*
+#[test]
+fn test_template_function() {
+    let fen = "fen";
+    let mv = "<move>";
+    //let mv = "e2";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    println!("Fen: {}", fen);
+    println!("Move: {}", mv);
+    let history = game.get_history().clone();
+    println!("{}", game.board().get_board_display_string(Some(&history)));
+    assert!(game.move_piece_san(mv));
+    println!("{}", game.board().get_board_display_string(Some(&history)));
+    let history = game.get_history().clone();
+    let last_move = history.get_last_move();
+    println!("Last move: {:?}", last_move);
+}
+*/
 
 /*
 
