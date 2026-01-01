@@ -19,83 +19,46 @@ pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, beta: i
     if depth >= NULL_MOVE_PRUNING_START_DEPTH {
         let in_check = board.is_side_in_check(to_move);
         if !in_check && halfmove_clock < 100 {
-            // Additional safety: if any queen on the board is currently attacked, do not try null move.
-            // This avoids pruning away urgent queen-safety lines on either side.
-            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-            let mut any_queen_attacked = false;
-            // Scan white queen
-            'findw: for r in 0..8 {
+            // Quick material heuristic: require presence of any piece other than kings/pawns
+            let mut has_non_pawn_minor = false;
+            'scan: for r in 0..8 {
                 for c in 0..8 {
                     if let Some(p) = board.get(r, c) {
-                        if p.get_color() == Color::White && p.get_type() == PieceType::Queen {
-                            if is_square_attacked_by_opponent(board, (r, c), Color::White) {
-                                any_queen_attacked = true;
-                            }
-                            break 'findw;
-                        }
-                    }
-                }
-            }
-            // Scan black queen
-            if !any_queen_attacked {
-                'findb: for r in 0..8 {
-                    for c in 0..8 {
-                        if let Some(p) = board.get(r, c) {
-                            if p.get_color() == Color::Black && p.get_type() == PieceType::Queen {
-                                if is_square_attacked_by_opponent(board, (r, c), Color::Black) {
-                                    any_queen_attacked = true;
+                        if p.get_color() == to_move {
+                            match p.get_type() {
+                                PieceType::Knight | PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
+                                    has_non_pawn_minor = true;
+                                    break 'scan;
                                 }
-                                break 'findb;
+                                _ => {}
                             }
                         }
                     }
                 }
             }
-            if !any_queen_attacked {
-                // Quick material heuristic: require presence of any piece other than kings/pawns
-                let mut has_non_pawn_minor = false;
-                'scan: for r in 0..8 {
-                    for c in 0..8 {
-                        if let Some(p) = board.get(r, c) {
-                            if p.get_color() == to_move {
-                                match p.get_type() {
-                                    PieceType::Knight
-                                    | PieceType::Bishop
-                                    | PieceType::Rook
-                                    | PieceType::Queen => {
-                                        has_non_pawn_minor = true;
-                                        break 'scan;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                }
-                if has_non_pawn_minor {
-                    // Reduction R: slightly deeper at high depths with stronger eval
-                    let r: usize = if depth >= 8 { 3 } else { 2 };
-                    let undo: Option<()> = None;
-                    // Make a null move: switch side to move without changing board, but we still push repetition key
-                    // We reuse halfmove_clock (null move does not reset it)
-                    // To keep Book/Board API simple, emulate by switching to_move only in recursive call
-                    // and NOT modifying the board.
-                    // Probe a null-window search; use (beta-1, beta) window which is standard for NMP
-                    let score = alphabeta(
-                        board,
-                        opposite_color(to_move),
-                        depth.saturating_sub(1 + r),
-                        beta - 1,
-                        beta,
-                        ply + 1,
-                        tt,
-                        halfmove_clock.saturating_add(1),
-                        rep_stack,
-                    );
-                    let _ = undo; // placeholder for symmetry with real moves; no board change was made
-                    if score >= beta {
-                        return Some(score); // null-move cutoff
-                    }
+            if has_non_pawn_minor {
+                // Reduction R: slightly deeper at high depths with stronger eval
+                let r: usize = if depth >= 8 { 3 } else { 2 };
+                let undo: Option<()> = None;
+                // Make a null move: switch side to move without changing board, but we still push repetition key
+                // We reuse halfmove_clock (null move does not reset it)
+                // To keep Book/Board API simple, emulate by switching to_move only in recursive call
+                // and NOT modifying the board.
+                // Probe a null-window search; use (beta-1, beta) window which is standard for NMP
+                let score = alphabeta(
+                    board,
+                    opposite_color(to_move),
+                    depth.saturating_sub(1 + r),
+                    beta - 1,
+                    beta,
+                    ply + 1,
+                    tt,
+                    halfmove_clock.saturating_add(1),
+                    rep_stack,
+                );
+                let _ = undo; // placeholder for symmetry with real moves; no board change was made
+                if score >= beta {
+                    return Some(score); // null-move cutoff
                 }
             }
         }

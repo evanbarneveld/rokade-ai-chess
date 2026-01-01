@@ -7,7 +7,7 @@ use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Col
 use crate::search::alphabeta::alphabeta;
 use crate::search::playing_strength::strength_noise_sigma;
 use crate::search::search::find_all_valid_moves;
-use crate::search::see::{see_dest_estimate, SEE_MINOR_SAC_THRESHOLD_CP, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
+use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
 use crate::search::tt::{decode_move, TranspositionTable};
 use crate::search::zobrist::compute_zobrist;
 use crate::state::fen::writer::game_state_to_fen_string;
@@ -15,8 +15,6 @@ use crate::state::game_state::GameState;
 
 
 const ROOT_CAPTURE_BONUS_DIV: i32 = 10; // add captured piece value / this divisor
-const QUEEN_LOSING_PEN_BASE_CP: i32 = 600; // was 1000; soften to avoid over-timid queen play
-const QUEEN_PAWN_ATTACK_EXTRA_CP: i32 = 250; // was 500; still discourages walking into pawn nets
 
 const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150; // only apply adjustments if side advantage above this
 const ENDGAME_HMC_THRESHOLD: u32 = 80; // start scaling after this half-move clock
@@ -68,41 +66,10 @@ pub fn build_pv_for_root(
     pv
 }
 
-pub fn hard_root_filter(board: &Board, active_color: Color, v: &mut Vec<((usize, usize), (usize, usize))>, filtered: &mut Vec<((usize, usize), (usize, usize))>) {
-    for (from, to) in v {
-        let piece = board.get(from.0, from.1);
-        let mut drop = false;
-        if let Some(p) = piece {
-            // simulate move on a temp board and evaluate SEE(dest)
-            let mut post = board.clone();
-            let captured = board.get(to.0, to.1);
-            post.set(from.0, from.1, None);
-            post.set(to.0, to.1, Some(p));
-            let cap_val = captured
-                .map(|cp| piece_value_cp(cp.get_type()))
-                .unwrap_or(0);
-            let see = see_dest_estimate(&post, active_color, *to, cap_val);
-            match p.get_type() {
-                PieceType::Queen => {
-                    if see < 0 {
-                        drop = true;
-                    }
-                }
-                PieceType::Bishop | PieceType::Knight => {
-                    // keep potential sound sacs if the move gives check; otherwise filter clearly losing ones
-                    let gives_check =
-                        post.is_side_in_check(opposite_color(active_color));
-                    if see <= SEE_MINOR_SAC_THRESHOLD_CP && !gives_check {
-                        drop = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if !drop {
-            filtered.push((*from, *to));
-        }
-    }
+pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usize, usize), (usize, usize))>, filtered: &mut Vec<((usize, usize), (usize, usize))>) {
+    // Previously applied piece-specific root filtering (queen/minor handling) has been removed.
+    // With a stronger evaluator, we keep all legal root moves and rely on search/eval to decide.
+    filtered.extend(v.iter().copied());
 }
 
 pub fn get_root_moves(game_state: &GameState, history: &History, board: &Board, active_color: Color, moves: &Vec<((usize, usize), (usize, usize))>, v: &mut Vec<((usize, usize), (usize, usize))>) {
@@ -134,8 +101,9 @@ pub fn get_root_moves(game_state: &GameState, history: &History, board: &Board, 
     }
 }
 
-// Small, root-level heuristic bonus used to break ties at low depth.
+// Root-level move bonus strictly limited to tiny tie-breakers that are not covered by the static evaluator.
 // Positive favors White; negative favors Black (we add for side to move).
+// Single source of truth policy: avoid duplicating evaluator logic (pawn-file preferences etc.).
 pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side: Color) -> i32 {
     let mut bonus: i32 = 0;
 
@@ -146,76 +114,40 @@ pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), 
     };
     let pt = piece.get_type();
 
-    // Opening-principle nudges (very small):
-    // - prefer central pawn advances (d/e pawns); discourage a/h pawn pushes
-    // - prefer knights to c3/f3 and bishops to c4/f4 for White (mirror for Black)
-    let (fr, fc) = from;
+    let (_fr, _fc) = from;
     let (tr, tc) = to;
 
-    // discourage rook pawns (files a/h -> col 0/7) pushing as early plan
-    if pt == PieceType::Pawn && (fc == 0 || fc == 7) {
-        // stronger if double push (two ranks)
-        let dr = if fr > tr {
-            fr as i32 - tr as i32
-        } else {
-            tr as i32 - fr as i32
-        };
-        bonus -= if dr >= 2 { 35 } else { 25 };
-    }
-
-    // prefer central pawn advances on d/e files, especially 2-step from home
-    if pt == PieceType::Pawn && (fc == 3 || fc == 4) {
-        let dr = if fr > tr {
-            fr as i32 - tr as i32
-        } else {
-            tr as i32 - fr as i32
-        };
-        bonus += if dr >= 2 { 35 } else { 20 };
-    }
-
-    // Removed older special-case guards; SEE-based root filter and penalties handle safety now.
-
+    // Keep only very small development/centralization nudges not modeled explicitly by eval:
     // Knights to c3/f3 (White) or c6/f6 (Black)
     if pt == PieceType::Knight {
         match side {
             Color::White => {
                 if (tr, tc) == (2, 2) || (tr, tc) == (2, 5) {
-                    bonus += 20;
+                    bonus += 5;
                 }
             }
             Color::Black => {
                 if (tr, tc) == (5, 2) || (tr, tc) == (5, 5) {
-                    bonus += 20;
+                    bonus += 5;
                 }
             }
         }
     }
 
-    // Bishops to c4/f4 for White; c5/f5 for Black
+    // Bishops to c4/f4 for White; c5/f5 for Black (tiny nudge)
     if pt == PieceType::Bishop {
         match side {
             Color::White => {
                 if (tr, tc) == (3, 2) || (tr, tc) == (3, 5) {
-                    bonus += 12;
+                    bonus += 3;
                 }
             }
             Color::Black => {
                 if (tr, tc) == (4, 2) || (tr, tc) == (4, 5) {
-                    bonus += 12;
+                    bonus += 3;
                 }
             }
         }
-    }
-
-    // Very small central control nudge for landing on or influencing center rings
-    let central_files = tc >= 2 && tc <= 5; // c..f
-    let central_ranks_white = tr >= 2 && tr <= 4; // ranks 3..5 from White pov
-    let central_ranks_black = tr >= 3 && tr <= 5; // ranks 4..6 from White rows ~ Black push
-    if central_files
-        && ((side == Color::White && central_ranks_white)
-        || (side == Color::Black && central_ranks_black))
-    {
-        bonus += 5;
     }
 
     // Apply sign for side to move (we always add for the maximizing side at root)
@@ -239,7 +171,7 @@ pub fn adjust_root_score(
     // Base root bonus
     let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
 
-    // SEE-based root penalty with queen special handling
+    // SEE-based root penalty (uniform across pieces)
     {
         let mut post = base_board.clone();
         let moved_piece = base_board.get(from.0, from.1);
@@ -250,17 +182,8 @@ pub fn adjust_root_score(
             let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
             let see = see_dest_estimate(&post, side, to, cap_val);
             if see < 0 {
-                if mp.get_type() == PieceType::Queen {
-                    let opp = opposite_color(side);
-                    let mut pen = (-see).max(QUEEN_LOSING_PEN_BASE_CP);
-                    if post.is_square_pawn_attacked_by(opp, to) {
-                        pen += QUEEN_PAWN_ATTACK_EXTRA_CP;
-                    }
-                    adjusted -= pen;
-                } else {
-                    let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
-                    adjusted -= pen;
-                }
+                let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
+                adjusted -= pen;
             }
         }
     }

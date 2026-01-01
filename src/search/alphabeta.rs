@@ -175,23 +175,7 @@ pub fn alphabeta(
         let mut value = MIN_EVAL_VALUE;
         let mut is_first_move = true; // PVS: first move searched with full window
         let mut move_index: i32 = 0; // LMR: track move order
-        // Precompute whether our queen is currently under attack in this node (before making a move)
-        let mut queen_in_danger = false;
-        {
-            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-            'findq: for r in 0..8 {
-                for c in 0..8 {
-                    if let Some(p) = board.get(r, c) {
-                        if p.get_color() == to_move && p.get_type() == PieceType::Queen {
-                            if is_square_attacked_by_opponent(board, (r, c), to_move) {
-                                queen_in_danger = true;
-                            }
-                            break 'findq;
-                        }
-                    }
-                }
-            }
-        }
+        // Removed piece-specific precomputations (e.g., queen danger). Evaluator is strong enough now.
         for (from, to) in moves.into_iter() {
             // Detect a moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
@@ -250,68 +234,15 @@ pub fn alphabeta(
             } else {
                 // Late Move Reduction (safer): start later and cap reductions
                 let mut reduced_depth = child_depth;
-                // Do not reduce if the move gives check or if our queen is currently in danger (urgent moves)
-                // Also, do not reduce if this move is a queen move landing on an attacked square — needs full depth.
+                // Do not reduce if the move gives check.
                 let gives_check = board.is_side_in_check(Color::Black);
-                // Strictly avoid reducing checking moves and immediate recaptures at shallow depth
-                let mut queen_into_danger = false;
-                if let Some(p) = moved_piece {
-                    if p.get_type() == PieceType::Queen {
-                        use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-                        let attacked = is_square_attacked_by_opponent(board, to, Color::White);
-                        queen_into_danger = attacked;
-                    }
-                }
+                // Strictly avoid reducing checking moves at shallow depth
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
-                // If any queen is attacked at this node and depth is shallow, avoid LMR for quiets
-                let mut any_queen_attacked_here = false;
-                {
-                    use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-                    // White queen
-                    'qw: for r in 0..8 {
-                        for c in 0..8 {
-                            if let Some(p) = board.get(r, c) {
-                                if p.get_type() == PieceType::Queen && p.get_color() == Color::White
-                                {
-                                    if is_square_attacked_by_opponent(board, (r, c), Color::White) {
-                                        any_queen_attacked_here = true;
-                                    }
-                                    break 'qw;
-                                }
-                            }
-                        }
-                    }
-                    // Black queen
-                    if !any_queen_attacked_here {
-                        'qb: for r in 0..8 {
-                            for c in 0..8 {
-                                if let Some(p) = board.get(r, c) {
-                                    if p.get_type() == PieceType::Queen
-                                        && p.get_color() == Color::Black
-                                    {
-                                        if is_square_attacked_by_opponent(
-                                            board,
-                                            (r, c),
-                                            Color::Black,
-                                        ) {
-                                            any_queen_attacked_here = true;
-                                        }
-                                        break 'qb;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                let avoid_lmr_for_queen_threat = any_queen_attacked_here && child_depth <= 5;
                 if quiet
                     && child_depth >= 3
                     && move_index >= 4
                     && allow_reduce
-                    && !queen_in_danger
-                    && !queen_into_danger
-                    && !avoid_lmr_for_queen_threat
                 {
                     // Basic reduction formula: grows with move index and depth
                     // Use history to avoid over-reducing historically good moves
@@ -400,23 +331,7 @@ pub fn alphabeta(
         let mut value = MAX_EVAL_VALUE;
         let mut is_first_move = true; // PVS for minimizing side too
         let mut move_index: i32 = 0; // LMR index
-        // Precompute whether our queen is currently under attack in this node
-        let mut queen_in_danger = false;
-        {
-            use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-            'findq: for r in 0..8 {
-                for c in 0..8 {
-                    if let Some(p) = board.get(r, c) {
-                        if p.get_color() == to_move && p.get_type() == PieceType::Queen {
-                            if is_square_attacked_by_opponent(board, (r, c), to_move) {
-                                queen_in_danger = true;
-                            }
-                            break 'findq;
-                        }
-                    }
-                }
-            }
-        }
+        // Removed piece-specific precomputations.
         for (from, to) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
@@ -470,63 +385,13 @@ pub fn alphabeta(
                 // Late Move Reduction (safer): start later and cap reductions
                 let mut reduced_depth = child_depth;
                 let gives_check = board.is_side_in_check(Color::White);
-                // Strictly avoid reducing checking moves and immediate recaptures at shallow depth
-                let mut queen_into_danger = false;
-                if let Some(p) = moved_piece {
-                    if p.get_type() == PieceType::Queen {
-                        use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-                        let attacked = is_square_attacked_by_opponent(board, to, Color::Black);
-                        queen_into_danger = attacked;
-                    }
-                }
+                // Strictly avoid reducing checking moves at shallow depth
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
-                // If any queen is attacked at this node and depth is shallow, avoid LMR for quiets
-                let mut any_queen_attacked_here = false;
-                {
-                    use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-                    'qw: for r in 0..8 {
-                        for c in 0..8 {
-                            if let Some(p) = board.get(r, c) {
-                                if p.get_type() == PieceType::Queen && p.get_color() == Color::White
-                                {
-                                    if is_square_attacked_by_opponent(board, (r, c), Color::White) {
-                                        any_queen_attacked_here = true;
-                                    }
-                                    break 'qw;
-                                }
-                            }
-                        }
-                    }
-                    if !any_queen_attacked_here {
-                        'qb: for r in 0..8 {
-                            for c in 0..8 {
-                                if let Some(p) = board.get(r, c) {
-                                    if p.get_type() == PieceType::Queen
-                                        && p.get_color() == Color::Black
-                                    {
-                                        if is_square_attacked_by_opponent(
-                                            board,
-                                            (r, c),
-                                            Color::Black,
-                                        ) {
-                                            any_queen_attacked_here = true;
-                                        }
-                                        break 'qb;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                let avoid_lmr_for_queen_threat = any_queen_attacked_here && child_depth <= 5;
                 if quiet
                     && child_depth >= 3
                     && move_index >= 4
                     && allow_reduce
-                    && !queen_in_danger
-                    && !queen_into_danger
-                    && !avoid_lmr_for_queen_threat
                 {
                     let hist = HEUR.with(|h| {
                         let m = h
