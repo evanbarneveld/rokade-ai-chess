@@ -49,7 +49,7 @@ pub fn run_uci() -> io::Result<()> {
         }
 
         if line == "uci" {
-            let m1 = "id name eriks-chess".to_string();
+            let m1 = "id name eriks-chess v0.1.0 build 1".to_string();
             writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
             let m2 = "id author erik van barneveld".to_string();
             writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);
