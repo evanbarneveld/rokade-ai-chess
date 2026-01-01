@@ -494,8 +494,8 @@ fn find_king(board: &Board, color: Color) -> Option<(usize,usize)> {
 }
 
 fn king_safety(board: &Board, color: Color) -> i32 {
-    if let Some((_kr, kf)) = find_king(board, color) {
-        // Pawn shield directly in front of home rank (one rank forward from home)
+    if let Some((kr, kf)) = find_king(board, color) {
+        // 1) Pawn shelter quality around the king (home side forward one rank).
         let front_rank: i32 = if matches!(color, Color::White) { 1 } else { 6 };
         let mut shield = 0;
         for df in -1..=1 {
@@ -504,10 +504,36 @@ fn king_safety(board: &Board, color: Color) -> i32 {
         }
         let mut pen = 0;
         if shield==0 { pen += 30; } else if shield==1 { pen += 18; } else if shield==2 { pen += 8; }
+
         // Half-open king file penalty
         let mut own=0; let mut opp=0; for r in 0..8 { if let Some(p)=board.get(r, kf) { if matches!(p.get_type(), PieceType::Pawn) { if p.get_color()==color { own+=1; } else { opp+=1; } } } }
         if own==0 && opp>0 { pen += 14; }
-        return -pen;
+
+        // 2) King-ring attacker count (3x3 around king) weighted by piece type.
+        let (att_w, att_b) = build_attack_maps(board);
+        let enemy = opponent(color);
+        let mut danger = 0;
+        // piece presence map around king to weigh attackers by proximity rays
+        for dr in -1..=1 { for dc in -1..=1 { if dr==0 && dc==0 { continue; }
+            let nr = kr as i32 + dr; let nc = kf as i32 + dc; if nr<0||nr>=8||nc<0||nc>=8 { continue; }
+            let r = nr as usize; let c = nc as usize;
+            let attacked = match enemy { Color::White => att_w[r][c], Color::Black => att_b[r][c] };
+            if attacked { danger += 3; } // base per controlled square around king
+        }}
+
+        // Add directional openness penalties: open/half-open adjacent files next to king
+        for df in [-1i32,0,1] {
+            let file = kf as i32 + df; if file < 0 || file > 7 { continue; }
+            let mut ownp=0; let mut oppp=0; for r in 0..8 { if let Some(p)=board.get(r, file as usize) { if matches!(p.get_type(), PieceType::Pawn) { if p.get_color()==color { ownp+=1; } else { oppp+=1; } } } }
+            if ownp==0 && oppp==0 { danger += 6; } // open file near king
+            else if ownp==0 && oppp>0 { danger += 10; } // half-open against king
+        }
+
+        // 3) Castling status: small bonus if king is on typical castled files and rook moved pattern
+        let castled_bonus = if (color==Color::White && kr==0 && (kf==6 || kf==2)) || (color==Color::Black && kr==7 && (kf==6 || kf==2)) { 12 } else { 0 };
+
+        // Combine: safety score is negative penalty plus bonus for being castled
+        return castled_bonus - (pen + danger);
     }
     0
 }
