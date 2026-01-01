@@ -163,7 +163,7 @@ fn game_phase(board: &Board) -> i32 {
 }
 
 // Public evaluation function: positive = better for White; negative = better for Black
-pub fn evaluate_position(board: &Board) -> i32 {
+pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     let mut score: i32 = 0;
     let phase = game_phase(board);
     let eg = 24 - phase; // endgame weight [0..24]
@@ -368,76 +368,46 @@ pub fn evaluate_position(board: &Board) -> i32 {
         }
     }
 
-    // Small tempo bonus to the side to move to break ties among otherwise equal quiet moves.
-    // This helps differentiate opening replies where static features are very similar.
-    // Positive = better for White, negative = better for Black.
-    // We detect the side to move by counting legal moves; cheaper: infer by parity of total moves is not available here.
-    // Instead, approximate: if White has strictly more legal moves than Black, assume White to move; vice versa.
-    // To keep it deterministic and inexpensive, give a fixed tiny bonus scaled by phase.
-    // Note: evaluation here is board-only; if a true side-to-move flag is available in GameState, prefer passing it in.
-    let tempo_bonus = 8; // in centipawns
-    // Heuristic: in opening/middlegame (phase high), apply full bonus, taper towards endgame.
-    let tempo = (tempo_bonus * phase) / 24;
-    // Estimate side to move by mobility; if equal, give no bonus.
-    let mut white_moves = 0usize;
-    let mut black_moves = 0usize;
+    // Basic attacked/defended (hanging piece) penalties
+    let (att_w, att_b) = build_attack_maps(board);
     for r in 0..8 {
         for c in 0..8 {
             if let Some(p) = board.get(r, c) {
                 let color = p.get_color();
-                match p.get_type() {
-                    PieceType::Knight => {
-                        // Knight mobility: up to 8 offsets
-                        const K: [(i32,i32);8] = [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)];
-                        for (dr, dc) in K { let nr = r as i32 + dr; let nc = c as i32 + dc; if nr>=0 && nr<8 && nc>=0 && nc<8 {
-                            if let Some(tp) = board.get(nr as usize, nc as usize) { if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } } } else { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
-                        }}
-                    }
-                    PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
-                        // Sliding mobility in basic directions
-                        let dirs: &[(i32,i32)] = match p.get_type() {
-                            PieceType::Bishop => &[(1,1),(1,-1),(-1,1),(-1,-1)],
-                            PieceType::Rook => &[(1,0),(-1,0),(0,1),(0,-1)],
-                            _ => &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)],
-                        };
-                        for (dr, dc) in dirs.iter() {
-                            let mut nr = r as i32 + dr; let mut nc = c as i32 + dc;
-                            while nr>=0 && nr<8 && nc>=0 && nc<8 {
-                                if let Some(tp) = board.get(nr as usize, nc as usize) {
-                                    if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
-                                    break;
-                                } else {
-                                    if color==Color::White { white_moves+=1; } else { black_moves+=1; }
-                                }
-                                nr += dr; nc += dc;
-                            }
-                        }
-                    }
-                    PieceType::King => {
-                        for dr in -1..=1 { for dc in -1..=1 { if dr==0 && dc==0 { continue; } let nr=r as i32+dr; let nc=c as i32+dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
-                            if let Some(tp)=board.get(nr as usize, nc as usize) { if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } } } else { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
-                        } }}
-                    }
-                    PieceType::Pawn => {
-                        // Simple pawn mobility: one step forward if empty, captures diagonally if enemy
-                        let dir: i32 = if color==Color::White { 1 } else { -1 };
-                        let nr = r as i32 + dir;
-                        if nr>=0 && nr<8 {
-                            // forward
-                            if board.get(nr as usize, c).is_none() { if color==Color::White { white_moves+=1; } else { black_moves+=1; } }
-                            // captures
-                            for dc in [-1,1] { let nc = c as i32 + dc; if nc>=0 && nc<8 {
-                                if let Some(tp)=board.get(nr as usize, nc as usize) { if tp.get_color()!=color { if color==Color::White { white_moves+=1; } else { black_moves+=1; } } }
-                            }}
-                        }
-                    }
+                let attacked_by_opp = match color {
+                    Color::White => att_b[r][c],
+                    Color::Black => att_w[r][c],
+                };
+                let defended_by_own = match color {
+                    Color::White => att_w[r][c],
+                    Color::Black => att_b[r][c],
+                };
+                if attacked_by_opp && !defended_by_own {
+                    let base_pen = match p.get_type() {
+                        PieceType::Pawn => 15,
+                        PieceType::Knight | PieceType::Bishop => 30,
+                        PieceType::Rook => 45,
+                        PieceType::Queen => 60,
+                        PieceType::King => 0,
+                    };
+                    let pen = base_pen * phase / 24; // emphasize middlegame
+                    match color { Color::White => score -= pen, Color::Black => score += pen }
                 }
             }
         }
     }
 
-    if white_moves > black_moves { score += tempo; }
-    else if black_moves > white_moves { score -= tempo; }
+    // True tempo: small bonus to the actual side to move, tapered by phase
+    let tempo_bonus = 8; // in centipawns
+    let tempo = (tempo_bonus * phase) / 24;
+    match side_to_move { Color::White => score += tempo, Color::Black => score -= tempo }
+
+    // Add a basic mobility term (pseudo-legal, lightweight), phase-weighted for middlegame
+    let (mob_w, mob_b) = mobility_activity(board);
+    // Scale: bishops/rooks/queen drive this mostly; the helper already applies type weights.
+    // Here we weight by phase to emphasize middlegame activity.
+    score += mob_w * phase / 24;
+    score -= mob_b * phase / 24;
 
     // Global light features to bias toward sound openings
     // Bishop pair (middlegame‑weighted)
@@ -627,4 +597,120 @@ fn rank_clear_between(board: &Board, c1: usize, c2: usize, rank: usize) -> bool 
     if hi < lo { return true; }
     for c in lo..=hi { if board.get(rank, c).is_some() { return false; } }
     true
+}
+
+// ---- Lightweight mobility and attack/defense helpers ----
+
+// Return a pseudo-legal mobility activity score for White and Black.
+// Type weights roughly: N=1, B=2, R=2, Q=1, K=0, P=0 (we keep K/P unweighted to avoid noise)
+fn mobility_activity(board: &Board) -> (i32, i32) {
+    let mut white: i32 = 0;
+    let mut black: i32 = 0;
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = board.get(r, c) {
+                let color = p.get_color();
+                let add = match p.get_type() {
+                    PieceType::Knight => count_knight_targets(board, r, c, color) as i32 * 1,
+                    PieceType::Bishop => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)]) as i32 * 2,
+                    PieceType::Rook   => count_slider_targets(board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 2,
+                    PieceType::Queen  => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 1,
+                    _ => 0,
+                };
+                if matches!(color, Color::White) { white += add; } else { black += add; }
+            }
+        }
+    }
+    (white, black)
+}
+
+#[inline]
+fn count_knight_targets(board: &Board, r: usize, c: usize, color: Color) -> usize {
+    const K: [(i32,i32);8] = [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)];
+    let mut n = 0usize;
+    for (dr,dc) in K { let nr = r as i32 + dr; let nc = c as i32 + dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
+        match board.get(nr as usize, nc as usize) { None => n+=1, Some(tp) if tp.get_color()!=color => n+=1, _ => {} }
+    }}
+    n
+}
+
+#[inline]
+fn count_slider_targets(board: &Board, r: usize, c: usize, color: Color, dirs: &[(i32,i32)]) -> usize {
+    let mut n = 0usize;
+    for (dr,dc) in dirs.iter() {
+        let mut nr = r as i32 + dr; let mut nc = c as i32 + dc;
+        while nr>=0 && nr<8 && nc>=0 && nc<8 {
+            if let Some(tp) = board.get(nr as usize, nc as usize) {
+                if tp.get_color()!=color { n+=1; }
+                break;
+            } else { n+=1; }
+            nr += dr; nc += dc;
+        }
+    }
+    n
+}
+
+// Attack maps (pseudo-legal): squares attacked by White and by Black
+fn build_attack_maps(board: &Board) -> ([[bool;8];8], [[bool;8];8]) {
+    let mut w = [[false;8];8];
+    let mut b = [[false;8];8];
+    for r in 0..8 { for c in 0..8 {
+        if let Some(p)=board.get(r,c) {
+            let color = p.get_color();
+            match p.get_type() {
+                PieceType::Knight => add_knight_attacks(board, r, c, color, &mut w, &mut b),
+                PieceType::Bishop => add_slider_attacks(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)], &mut w, &mut b),
+                PieceType::Rook   => add_slider_attacks(board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)], &mut w, &mut b),
+                PieceType::Queen  => add_slider_attacks(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)], &mut w, &mut b),
+                PieceType::King   => add_king_attacks(r, c, color, &mut w, &mut b),
+                PieceType::Pawn   => add_pawn_attacks(r, c, color, &mut w, &mut b),
+            }
+        }
+    }}
+    (w, b)
+}
+
+#[inline]
+fn add_knight_attacks(board: &Board, r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
+    const K: [(i32,i32);8] = [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)];
+    for (dr,dc) in K { let nr=r as i32+dr; let nc=c as i32+dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
+        match color { Color::White => w[nr as usize][nc as usize]=true, Color::Black => b[nr as usize][nc as usize]=true }
+    }}
+}
+
+#[inline]
+fn add_slider_attacks(board: &Board, r: usize, c: usize, color: Color, dirs: &[(i32,i32)], w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
+    for (dr,dc) in dirs.iter() {
+        let mut nr=r as i32+dr; let mut nc=c as i32+dc;
+        while nr>=0&&nr<8&&nc>=0&&nc<8 {
+            match color { Color::White => w[nr as usize][nc as usize]=true, Color::Black => b[nr as usize][nc as usize]=true }
+            if board.get(nr as usize, nc as usize).is_some() { break; }
+            nr += dr; nc += dc;
+        }
+    }
+}
+
+#[inline]
+fn add_king_attacks(r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
+    for dr in -1..=1 { for dc in -1..=1 { if dr==0&&dc==0 { continue; } let nr=r as i32+dr; let nc=c as i32+dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
+        match color { Color::White => w[nr as usize][nc as usize]=true, Color::Black => b[nr as usize][nc as usize]=true }
+    }}}
+}
+
+#[inline]
+fn add_pawn_attacks(r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
+    match color {
+        Color::White => {
+            if r<7 {
+                if c>0 { w[r+1][c-1]=true; }
+                if c<7 { w[r+1][c+1]=true; }
+            }
+        }
+        Color::Black => {
+            if r>0 {
+                if c>0 { b[r-1][c-1]=true; }
+                if c<7 { b[r-1][c+1]=true; }
+            }
+        }
+    }
 }

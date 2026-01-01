@@ -21,7 +21,7 @@ pub fn qsearch(
 ) -> i32 {
     // Time cutoff in quiescence as well: return a quick static eval
     if time_is_up() {
-        return evaluate_position(&*board);
+        return evaluate_position(&*board, to_move);
     }
     // Draw checks in quiescence as well
     let key_here = compute_zobrist(&*board, to_move);
@@ -35,7 +35,7 @@ pub fn qsearch(
     // Stand-pat (static) evaluation. Suppress stand-pat only when in check.
     let in_check =
         board.is_side_in_check(to_move);
-    let stand_pat = evaluate_position(&*board);
+    let stand_pat = evaluate_position(&*board, to_move);
     if !in_check {
         // Uniform alpha/beta semantics regardless of side-to-move.
         if stand_pat >= beta {

@@ -31,7 +31,7 @@ pub fn alphabeta(
     // Time cutoff: on timeout, return a static evaluation of the current node.
     // This ensures callers can still use best-so-far information gathered so far.
     if time_is_up() {
-        return evaluate_position(&*board);
+        return evaluate_position(&*board, to_move);
     }
 
     // print board

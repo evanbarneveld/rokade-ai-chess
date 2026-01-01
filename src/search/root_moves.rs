@@ -313,7 +313,7 @@ pub fn evaluate_after_root_move(
     let is_capture = base_board.get(to.0, to.1).is_some();
     let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
     let score_raw = if depth_now <= 1 {
-        evaluate_position(&tmp)
+        evaluate_position(&tmp, opposite_color(side))
     } else {
         let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
         alphabeta(

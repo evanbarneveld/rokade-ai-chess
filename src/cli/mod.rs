@@ -110,7 +110,8 @@ pub fn run_cli() {
             }
 
             if some_input.eq_ignore_ascii_case("eval") {
-                let score = evaluate_position(game.board());
+                let side = game.get_game_state().active_color();
+                let score = evaluate_position(game.board(), side);
                 println ! ("Evaluation: {}", score as f32 / 100.0);
                 continue;
             }
