@@ -1,2 +1,2 @@
-pub(crate) mod reader;
+pub mod reader;
 pub(crate) mod writer;
