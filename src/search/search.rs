@@ -33,6 +33,8 @@ const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root mo
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
 const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
+pub const MAX_PLAYING_STRENGTH: usize = 1000;
+pub const DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY: usize = 3000usize;
 
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 /// returns the evaluated score (in centipawns) for the selected move
@@ -143,7 +145,7 @@ pub fn find_best_move(
 
     // Final selection based on playing_strength from the last iteration
     if let Some((bf, bt, sc, used_depth)) = chosen {
-        if playing_strength >= 1000 {
+        if playing_strength >= MAX_PLAYING_STRENGTH {
             Some((bf, bt, sc, used_depth))
         } else {
             // Re-evaluate top K moves for stochastic selection at final depth

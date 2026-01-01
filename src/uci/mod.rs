@@ -3,10 +3,11 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_best_move, DEFAULT_SEARCH_DEPTH};
+use crate::search::search::{find_best_move, DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 use crate::search::uci_feedback::set_info_callback;
+
 // Minimal UCI interface implementation.
 // Supported commands:
 // - uci
@@ -207,7 +208,7 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
     engine.move_piece(from_idx, to_idx)
 }
 
-pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, _move_time: usize) -> (String, Option<(i32, usize)>) {
+pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, mut move_time_in_ms: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
     let mut depth = parse_depth(line).unwrap_or(DEFAULT_SEARCH_DEPTH);
     if depth > DEFAULT_SEARCH_DEPTH { depth = DEFAULT_SEARCH_DEPTH; }
@@ -215,9 +216,22 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, _move_time: usize) 
     let gs_copy = { *engine.get_game_state() };
     let history_clone = { engine.get_history().clone() };
     // Use maximum playing strength by default; time control will be enforced by search budget.
-    let playing_strength = 1000usize;
+    let mut playing_strength = MAX_PLAYING_STRENGTH;
 
+    //if move_time is set a value below 1000mS. Then the user clearly wants to use low strength.
+    //So in this case, pass use the move_time as 'strength' and override the move_time to some default
+    //value that is reasonable for low strength.
+
+    if move_time_in_ms < MAX_PLAYING_STRENGTH {
+        playing_strength = move_time_in_ms;
+        move_time_in_ms = DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY;
+    }
+
+    // Apply a time budget for this search
+    set_time_budget_ms(move_time_in_ms);
     let best = find_best_move(&gs_copy, &history_clone, depth, playing_strength);
+    clear_time_budget();
+
     if let Some(((fr, fc), (tr, tc), score_cp, depth_used)) = best {
         let mv = as_move_str((fr, fc), (tr, tc));
         return (mv, Some((score_cp, depth_used)));

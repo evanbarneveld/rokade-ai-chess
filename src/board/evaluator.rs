@@ -613,11 +613,6 @@ fn square_attacked_by_enemy_pawn(board: &Board, r: usize, c: usize, enemy: Color
     }
 }
 
-#[inline]
-fn square_attacked_by_pawn(board: &Board, r: usize, c: usize, color: Color) -> bool {
-    square_attacked_by_enemy_pawn(board, r, c, color)
-}
-
 // Conservative backward pawn detection:
 // - not passed
 // - enemy pawn ahead on same file
@@ -1005,7 +1000,7 @@ fn build_attack_maps(board: &Board) -> ([[bool;8];8], [[bool;8];8]) {
 }
 
 #[inline]
-fn add_knight_attacks(board: &Board, r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
+fn add_knight_attacks(_board: &Board, r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
     const K: [(i32,i32);8] = [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)];
     for (dr,dc) in K { let nr=r as i32+dr; let nc=c as i32+dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
         match color { Color::White => w[nr as usize][nc as usize]=true, Color::Black => b[nr as usize][nc as usize]=true }
