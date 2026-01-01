@@ -68,6 +68,12 @@ pub fn run_uci() -> io::Result<()> {
             let _ = engine.reset();
             continue;
         }
+        if line.starts_with("debug_board") {
+            //display board
+            let history = engine.get_history().clone();
+            println!("{}", engine.board().get_board_display_string(Some(&history)));
+            let _ = writeln!(stdout, "{}", engine.to_fen());
+        }
         if line.starts_with("position ") {
             handle_position(&mut engine, line.strip_prefix("position ").unwrap());
             continue;

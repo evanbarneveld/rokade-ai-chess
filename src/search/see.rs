@@ -2,7 +2,6 @@ use crate::board::Board;
 use crate::piece::pieces::{opposite_color, piece_value_cp, Color};
 
 // Root SEE-based gating and penalties
-pub const SEE_MINOR_SAC_THRESHOLD_CP: i32 = -150; // filter minor-piece sacs worse than this unless checking
 pub const SEE_PENALTY_MIN_CP: i32 = 80; // min penalty for negative SEE (non-queen)
 pub const SEE_PENALTY_MAX_CP: i32 = 300; // max penalty for negative SEE (non-queen)
 

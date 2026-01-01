@@ -114,8 +114,15 @@ impl Chess {
         if mutable_board.get(to.0, to.1).is_some() { is_capture = true; }
 
         let promotion_piece = if piece_to_move.unwrap().get_type() == PieceType::Pawn && (to.0 == 7 || to.0 == 0) {
-           Some(Piece::new(PieceType::Queen, Color::White))
-        } else { None };
+            let active_color = piece_to_move.unwrap().get_color();
+            if active_color == Color::White {
+                Some(Piece::new(PieceType::Queen, Color::White))
+            } else {
+                Some(Piece::new(PieceType::Queen, Color::Black))
+            }
+        } else {
+            None
+        };
 
         if PieceMover::move_piece(&mut self.game_state, from, to, is_capture, promotion_piece) {
             self.game_state.switch_player_turn();
