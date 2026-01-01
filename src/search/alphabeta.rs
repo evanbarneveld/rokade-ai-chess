@@ -307,7 +307,7 @@ pub fn alphabeta(
                 let avoid_lmr_for_queen_threat = any_queen_attacked_here && child_depth <= 5;
                 if quiet
                     && child_depth >= 3
-                    && move_index >= 5
+                    && move_index >= 4
                     && allow_reduce
                     && !queen_in_danger
                     && !queen_into_danger
@@ -323,15 +323,16 @@ pub fn alphabeta(
                         m.history_score(to_move, from, to)
                     });
                     let hist_good = hist > 10_000; // tuned threshold
-                    let mut r = 1 + ((move_index as usize) / 6).min(1); // cap growth
-                    if child_depth >= 6 {
-                        r += 0;
+                    // Slightly more aggressive with stronger eval; allow up to 3 plies at depth >= 8
+                    let mut r = 1 + ((move_index as usize) / 6).min(1);
+                    if child_depth >= 8 {
+                        r += 1;
                     }
                     if hist_good {
                         r = r.saturating_sub(1);
                     }
-                    // Final cap to 2 plies
-                    r = r.min(2);
+                    // Final cap to 3 plies
+                    r = r.min(3);
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // Null-window search for subsequent moves (PVS window)
@@ -521,7 +522,7 @@ pub fn alphabeta(
                 let avoid_lmr_for_queen_threat = any_queen_attacked_here && child_depth <= 5;
                 if quiet
                     && child_depth >= 3
-                    && move_index >= 5
+                    && move_index >= 4
                     && allow_reduce
                     && !queen_in_danger
                     && !queen_into_danger
@@ -534,15 +535,15 @@ pub fn alphabeta(
                             .unwrap();
                         m.history_score(to_move, from, to)
                     });
-                    let hist_good = hist < -10_000; // minimizing side: negative is good for minimizing? keep symmetric for simplicity
+                    let hist_good = hist < -10_000; // minimizing side: keep symmetric magnitude
                     let mut r = 1 + ((move_index as usize) / 6).min(1);
-                    if (child_depth as usize) >= 6 {
-                        r += 0;
+                    if (child_depth as usize) >= 8 {
+                        r += 1;
                     }
                     if hist_good {
                         r = r.saturating_sub(1);
                     }
-                    r = r.min(2);
+                    r = r.min(3);
                     reduced_depth = reduced_depth.saturating_sub(r);
                 }
                 // For the minimizing side, a null-window around beta-1 .. beta works equivalently

@@ -6,8 +6,9 @@ use crate::search::see::see_dest_estimate;
 use crate::search::time_control::time_is_up;
 use crate::search::zobrist::compute_zobrist;
 
-const FUT_MARGIN: i32 = 50;
-const DELTA_MARGIN: i32 = 150; // centipawns
+// Tighter margins with a stronger static evaluator
+const FUT_MARGIN: i32 = 40;
+const DELTA_MARGIN: i32 = 120; // centipawns
 const MAX_QUIET_PUSHES: usize = 2;
 
 // Quiescence search: consider only tactical continuations (captures) unless in check.

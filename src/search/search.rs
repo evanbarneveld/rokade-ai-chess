@@ -24,8 +24,9 @@ pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
 pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 
 // Iterative deepening aspiration window (in centipawns)
-const ASP_WINDOW_INIT_CP: i32 = 50; // initial aspiration half-window
-const ASP_WINDOW_MAX_CP: i32 = 800; // maximum expanded half-window
+// With a stronger, more stable evaluator we can start tighter and cap lower.
+const ASP_WINDOW_INIT_CP: i32 = 30; // initial aspiration half-window
+const ASP_WINDOW_MAX_CP: i32 = 400; // maximum expanded half-window
 
 // Root parallelization thresholds
 const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // enable root parallel only from this depth
@@ -321,7 +322,8 @@ fn reorder_with_tt_hint(
 
 #[inline]
 fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32) -> (i32, i32) {
-    if depth_now <= 1 {
+    // Use full window for very shallow depths where last_score is unreliable
+    if depth_now <= 2 {
         (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1)
     } else {
         (

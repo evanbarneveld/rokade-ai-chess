@@ -73,8 +73,8 @@ pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, beta: i
                     }
                 }
                 if has_non_pawn_minor {
-                    // Reduction R: capped to 2 for safety
-                    let r = if depth >= 6 { 2 } else { 2 } as usize;
+                    // Reduction R: slightly deeper at high depths with stronger eval
+                    let r: usize = if depth >= 8 { 3 } else { 2 };
                     let undo: Option<()> = None;
                     // Make a null move: switch side to move without changing board, but we still push repetition key
                     // We reuse halfmove_clock (null move does not reset it)
