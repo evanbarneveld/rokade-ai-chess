@@ -34,6 +34,18 @@ const PST_KNIGHT: [[i32; 8]; 8] = [
     [-50, -40, -30, -30, -30, -30, -40, -50],
 ];
 
+// Endgame PSTs for minor/major pieces to improve endgame play
+const PST_KNIGHT_ENDGAME: [[i32; 8]; 8] = [
+    [-40, -30, -20, -20, -20, -20, -30, -40],
+    [-30, -10,   0,   0,   0,   0, -10, -30],
+    [-20,   0,  10,  15,  15,  10,   0, -20],
+    [-20,   5,  15,  20,  20,  15,   5, -20],
+    [-20,   0,  15,  20,  20,  15,   0, -20],
+    [-20,   5,  10,  15,  15,  10,   5, -20],
+    [-30, -10,   0,   5,   5,   0, -10, -30],
+    [-40, -30, -20, -20, -20, -20, -30, -40],
+];
+
 const PST_BISHOP: [[i32; 8]; 8] = [
     [-20, -10, -10, -10, -10, -10, -10, -20],
     [-10,   5,   0,   0,   0,   0,   5, -10],
@@ -43,6 +55,17 @@ const PST_BISHOP: [[i32; 8]; 8] = [
     [-10,   0,   5,  10,  10,   5,   0, -10],
     [-10,   0,   0,   0,   0,   0,   0, -10],
     [-20, -10, -10, -10, -10, -10, -10, -20],
+];
+
+const PST_BISHOP_ENDGAME: [[i32; 8]; 8] = [
+    [-15,  -8,  -8,  -8,  -8,  -8,  -8, -15],
+    [ -8,   2,   4,   4,   4,   4,   2,  -8],
+    [ -8,   6,   8,  10,  10,   8,   6,  -8],
+    [ -8,   6,  12,  14,  14,  12,   6,  -8],
+    [ -8,   6,  12,  14,  14,  12,   6,  -8],
+    [ -8,   6,   8,  10,  10,   8,   6,  -8],
+    [ -8,   2,   4,   4,   4,   4,   2,  -8],
+    [-15,  -8,  -8,  -8,  -8,  -8,  -8, -15],
 ];
 
 const PST_ROOK: [[i32; 8]; 8] = [
@@ -56,6 +79,17 @@ const PST_ROOK: [[i32; 8]; 8] = [
     [  0,   0,   0,   0,   0,   0,   0,   0],
 ];
 
+const PST_ROOK_ENDGAME: [[i32; 8]; 8] = [
+    [  0,   0,   5,  10,  10,   5,   0,   0],
+    [  0,   0,   6,  10,  10,   6,   0,   0],
+    [  0,   2,   8,  12,  12,   8,   2,   0],
+    [  0,   4,  10,  14,  14,  10,   4,   0],
+    [  0,   4,  10,  14,  14,  10,   4,   0],
+    [  0,   2,   8,  12,  12,   8,   2,   0],
+    [  0,   0,   6,  10,  10,   6,   0,   0],
+    [  0,   0,   4,   8,   8,   4,   0,   0],
+];
+
 const PST_QUEEN: [[i32; 8]; 8] = [
     [-20, -10, -10,  -5,  -5, -10, -10, -20],
     [-10,   0,   0,   0,   0,   0,   0, -10],
@@ -65,6 +99,17 @@ const PST_QUEEN: [[i32; 8]; 8] = [
     [-10,   5,   5,   5,   5,   5,   0, -10],
     [-10,   0,   5,   0,   0,   0,   0, -10],
     [-20, -10, -10,  -5,  -5, -10, -10, -20],
+];
+
+const PST_QUEEN_ENDGAME: [[i32; 8]; 8] = [
+    [-10,  -6,  -6,  -4,  -4,  -6,  -6, -10],
+    [ -6,  -4,  -2,  -2,  -2,  -2,  -4,  -6],
+    [ -6,  -2,   0,   2,   2,   0,  -2,  -6],
+    [ -4,  -2,   2,   4,   4,   2,  -2,  -4],
+    [ -4,  -2,   2,   6,   6,   2,  -2,  -4],
+    [ -6,  -2,   0,   2,   2,   0,  -2,  -6],
+    [ -6,  -4,  -2,  -2,  -2,  -2,  -4,  -6],
+    [-10,  -6,  -6,  -4,  -4,  -6,  -6, -10],
 ];
 
 const PST_KING_MIDGAME: [[i32; 8]; 8] = [
@@ -123,10 +168,14 @@ fn pst_value_tapered(piece: PieceType, row: usize, col: usize, color: Color, pha
         PieceType::King => PST_KING_MIDGAME[r][c],
     };
 
-    // Endgame values (default to MG if no EG table is defined)
+    // Endgame values
     let eg = match piece {
+        PieceType::Pawn => PST_PAWN[r][c], // keep pawn PST identical across phases here
+        PieceType::Knight => PST_KNIGHT_ENDGAME[r][c],
+        PieceType::Bishop => PST_BISHOP_ENDGAME[r][c],
+        PieceType::Rook => PST_ROOK_ENDGAME[r][c],
+        PieceType::Queen => PST_QUEEN_ENDGAME[r][c],
         PieceType::King => PST_KING_ENDGAME[r][c],
-        _ => mg,
     };
 
     // Linear interpolation between midgame and endgame based on phase [0..24]
@@ -167,6 +216,10 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     let mut score: i32 = 0;
     let phase = game_phase(board);
     let eg = 24 - phase; // endgame weight [0..24]
+
+    // Precompute king squares for reuse
+    let king_w = find_king(board, Color::White);
+    let king_b = find_king(board, Color::Black);
 
     // Precompute whether each side still has any pawns (used for rook-on-7th bonus)
     let mut white_pawns = 0i32;
@@ -214,34 +267,65 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                         val -= (mg * phase + egp * (24 - phase)) / 24;
                     }
                     if is_passed_pawn(board, row, col, color) {
+                        // Unified passed pawn evaluation with MG/EG tapering and a per-pawn cap
                         let advance = match color { Color::White => row as i32, Color::Black => (7 - row) as i32 };
-                        // Base passer bonus grows with advancement and endgame weight (slightly steeper)
-                        val += ((8 + 4 * advance) * (8 + eg)) / 24; // ~+12..+50cp
+                        let mut pp = 0i32;
+                        // Base grows with advancement; emphasize EG
+                        pp += ((6 + 4 * advance) * (6 + eg)) / 24; // ~+9..+46
 
-                        // Additional endgame-scaled passer heuristics
-                        if eg > 0 {
-                            // Clear path to promotion bonus
-                            if has_clear_promotion_path(board, row, col, color) {
-                                val += (10 * eg) / 24; // up to +10cp
+                        // Clear path toward promotion
+                        if eg > 0 && has_clear_promotion_path(board, row, col, color) {
+                            pp += (8 * eg) / 24;
+                        }
+
+                        // Close-to-promotion extra (endgame-weighted)
+                        let close_bonus = (advance.saturating_sub(4) * 6).max(0);
+                        pp += (close_bonus * eg) / 24; // up to ~+18
+
+                        // Blocked directly ahead
+                        let next_r_opt = match color { Color::White => if row < 7 { Some(row + 1) } else { None },
+                                                       Color::Black => if row > 0 { Some(row - 1) } else { None } };
+                        if let Some(nr) = next_r_opt { if board.get(nr, col).is_some() { pp -= (14 * eg) / 24; } }
+
+                        // Free-push incentive: next square empty and not obviously unsafe (enemy king right in front)
+                        if let Some(nr) = next_r_opt { if board.get(nr, col).is_none() {
+                            let mut safe_bonus = 10;
+                            if let Some((ek_r,ek_c)) = match color { Color::White => king_b, Color::Black => king_w } {
+                                let dr = (ek_r as i32 - nr as i32).abs(); let dc = (ek_c as i32 - col as i32).abs();
+                                if dr <= 1 && dc <= 1 && ((matches!(color, Color::White) && ek_r >= nr) || (matches!(color, Color::Black) && ek_r <= nr)) { safe_bonus = 0; }
                             }
+                            pp += (safe_bonus * eg) / 24;
+                        }}
 
-                            // King proximity and blocking king
-                            if let (Some((fk_r,fk_c)), Some((ek_r,ek_c))) = (find_king(board, color), find_king(board, opponent(color))) {
-                                let pawn_sq = (row as i32, col as i32);
-                                let fk_d = chebyshev_dist((fk_r as i32, fk_c as i32), pawn_sq);
-                                let ek_d = chebyshev_dist((ek_r as i32, ek_c as i32), pawn_sq);
-
-                                // Friendly king close to passer
-                                let prox = (12 - 2 * fk_d).max(0); // up to ~+12 when adjacent
-                                val += (prox * eg) / 48;
-
-                                // Enemy king in front of the pawn and closer than friendly king
-                                if is_king_in_front_of_pawn((ek_r,ek_c), row, col, color) && ek_d + 0 <= fk_d { // strictly closer or equal
-                                    let block_pen = (14 - 2 * (ek_d as i32)).max(0);
-                                    val -= (block_pen * eg) / 48; // up to -14 scaled
-                                }
+                        // Protected/connected support
+                        let mut support = 0;
+                        let behind_r_opt = match color { Color::White => row.checked_sub(1), Color::Black => if row<7 { Some(row+1) } else { None } };
+                        if let Some(br) = behind_r_opt {
+                            for dc in [-1i32, 1] { let nc_i = col as i32 + dc; if nc_i<0||nc_i>7 { continue; }
+                                let nc = nc_i as usize; if let Some(p)=board.get(br,nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { support += 1; } }
                             }
                         }
+                        for dc in [-1i32, 1] { let nc_i = col as i32 + dc; if nc_i<0||nc_i>7 { continue; }
+                            let nc = nc_i as usize; if let Some(p)=board.get(row,nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { support += 1; } }
+                        }
+                        if support > 0 { pp += (8 * support as i32 * eg) / 24; }
+
+                        // King proximity/blocking (reusing precomputed kings)
+                        if let (Some((fk_r,fk_c)), Some((ek_r,ek_c))) = (match color { Color::White => king_w, Color::Black => king_b }, match color { Color::White => king_b, Color::Black => king_w }) {
+                            let pawn_sq = (row as i32, col as i32);
+                            let fk_d = chebyshev_dist((fk_r as i32, fk_c as i32), pawn_sq);
+                            let ek_d = chebyshev_dist((ek_r as i32, ek_c as i32), pawn_sq);
+                            let prox = (12 - 2 * fk_d).max(0);
+                            pp += (prox * eg) / 48;
+                            if is_king_in_front_of_pawn((ek_r,ek_c), row, col, color) && ek_d <= fk_d {
+                                let block_pen = (14 - 2 * (ek_d as i32)).max(0);
+                                pp -= (block_pen * eg) / 48;
+                            }
+                        }
+
+                        // Cap per-passer contribution
+                        let cap: i32 = 90; if pp > cap { pp = cap; }
+                        val += pp;
                     }
                 }
                 
@@ -284,35 +368,13 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                     }
                 }
 
-                // Early-opening discouragement: rook tucked behind two own pawns on back rank (Rb1/Rg1 patterns)
+                // Early-opening discouragement: rook boxed by own adjacent pawns on back rank (generalized)
                 if pt == PieceType::Rook && phase > 0 {
-                    // Only consider exact back rank squares b1/g1 for White and b8/g8 for Black
-                    let is_back_rank = match color { Color::White => row == 0, Color::Black => row == 7 };
-                    if is_back_rank && (col == 1 || col == 6) {
-                        // Check if both adjacent home pawns in front remain on their initial squares
-                        let both_pawns_blocking = match (color, col) {
-                            (Color::White, 1) => {
-                                matches!(board.get(1,0).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
-                                matches!(board.get(1,1).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_))
-                            }
-                            (Color::White, 6) => {
-                                matches!(board.get(1,6).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
-                                matches!(board.get(1,7).filter(|p| p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn)), Some(_))
-                            }
-                            (Color::Black, 1) => {
-                                matches!(board.get(6,0).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
-                                matches!(board.get(6,1).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_))
-                            }
-                            (Color::Black, 6) => {
-                                matches!(board.get(6,6).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_)) &&
-                                matches!(board.get(6,7).filter(|p| p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn)), Some(_))
-                            }
-                            _ => false,
-                        };
-                        if both_pawns_blocking {
-                            // Up to -18cp in full opening, taper to 0 by endgame
-                            val -= (18 * phase) / 24;
-                        }
+                    let (is_back_rank, start_row) = match color { Color::White => (row==0, 1usize), Color::Black => (row==7, 6usize) };
+                    if is_back_rank {
+                        let left_block = if col>0 { matches!(board.get(start_row, col-1), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn)) } else { false };
+                        let right_block = if col<7 { matches!(board.get(start_row, col+1), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn)) } else { false };
+                        if left_block && right_block { val -= (16 * phase) / 24; }
                     }
                 }
 
@@ -428,26 +490,21 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     let hole_mg_pen: i32 = 10; // per hole square influenced by opponent
     for r in 2..=5 { // central ranks (roughly)
         for c in 2..=5 { // central files c..f
-            // White holes
+            // White holes at (r,c)
             if is_hole_square(board, r, c, Color::White) {
-                // If Black controls the hole, penalize White
                 let influenced = att_b[r][c];
                 let occ_minor = matches!(board.get(r,c), Some(p) if p.get_color()==Color::Black && (p.get_type()==PieceType::Knight || p.get_type()==PieceType::Bishop));
                 if influenced || occ_minor {
-                    let mut pen = hole_mg_pen;
-                    if occ_minor { pen += 6; }
+                    let mut pen = hole_mg_pen; if occ_minor { pen += 6; }
                     score -= pen * phase / 24;
                 }
             }
-            // Black holes
-            if is_hole_square(board, 7 - r, c, Color::Black) {
-                // Mirror ranks for symmetry (use same band); check White influence
-                let rr = 7 - r;
-                let influenced = att_w[rr][c];
-                let occ_minor = matches!(board.get(rr,c), Some(p) if p.get_color()==Color::White && (p.get_type()==PieceType::Knight || p.get_type()==PieceType::Bishop));
+            // Black holes at the same (r,c) square (from Black’s perspective)
+            if is_hole_square(board, r, c, Color::Black) {
+                let influenced = att_w[r][c];
+                let occ_minor = matches!(board.get(r,c), Some(p) if p.get_color()==Color::White && (p.get_type()==PieceType::Knight || p.get_type()==PieceType::Bishop));
                 if influenced || occ_minor {
-                    let mut pen = hole_mg_pen;
-                    if occ_minor { pen += 6; }
+                    let mut pen = hole_mg_pen; if occ_minor { pen += 6; }
                     score += pen * phase / 24; // penalize Black → increase score for White
                 }
             }
@@ -470,18 +527,20 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
         }
     }
 
-    // Space via pawns on the 5th rank (middlegame): encourage advanced pawn chains
+    // Space via pawns exactly on 5th rank (middlegame), with light safety
     const SPACE_PAWN5_CP: i32 = 6;
-    for r in 0..8 { for c in 0..8 {
-        if let Some(p)=board.get(r,c) {
-            if p.get_type()==PieceType::Pawn {
-                match p.get_color() {
-                    Color::White => { if r >= 4 { score += SPACE_PAWN5_CP * phase / 24; } }
-                    Color::Black => { if r <= 3 { score -= SPACE_PAWN5_CP * phase / 24; } }
-                }
-            }
-        }
-    }}
+    for c in 0..8 {
+        // White pawn on 5th rank (r==4)
+        if let Some(p)=board.get(4,c) { if p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn) {
+            let safe = !square_attacked_by_enemy_pawn(board, 4, c, Color::Black) || friendly_pawn_adjacent_behind(board, 4, c, Color::White);
+            if safe { score += SPACE_PAWN5_CP * phase / 24; }
+        }}
+        // Black pawn on 5th rank from Black’s view (r==3)
+        if let Some(p)=board.get(3,c) { if p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn) {
+            let safe = !square_attacked_by_enemy_pawn(board, 3, c, Color::White) || friendly_pawn_adjacent_behind(board, 3, c, Color::Black);
+            if safe { score -= SPACE_PAWN5_CP * phase / 24; }
+        }}
+    }
 
     // Global light features to bias toward sound openings
     // Bishop pair with MG/EG taper (slightly smaller in EG)
@@ -519,6 +578,9 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
         score -= early_queen_penalty(board, Color::White) * phase / 24;
         score += early_queen_penalty(board, Color::Black) * phase / 24;
     }
+
+    // Drawish endgame tweaks
+    score = apply_drawish_tweaks(board, score);
 
     score
 }
@@ -1080,4 +1142,42 @@ fn is_hole_square(board: &Board, row: usize, col: usize, color: Color) -> bool {
         }
     }
     true
+}
+
+// ---- Drawishness helpers ----
+
+fn apply_drawish_tweaks(board: &Board, mut score: i32) -> i32 {
+    // Insufficient material: no pawns, no rooks/queens, and total minors <=1 → dead draw
+    let mut pawns = 0; let mut rooks = 0; let mut queens = 0; let mut minors = 0;
+    let mut w_bish = 0; let mut b_bish = 0; let mut w_dark = false; let mut b_dark = false;
+    for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+        match p.get_type() {
+            PieceType::Pawn => pawns += 1,
+            PieceType::Rook => rooks += 1,
+            PieceType::Queen => queens += 1,
+            PieceType::Knight => minors += 1,
+            PieceType::Bishop => {
+                minors += 1;
+                if p.get_color()==Color::White { w_bish += 1; w_dark |= ((r+c) % 2)==1; }
+                else { b_bish += 1; b_dark |= ((r+c) % 2)==1; }
+            }
+            _ => {}
+        }
+    }}}
+
+    if pawns==0 && rooks==0 && queens==0 && minors<=1 { return 0; }
+
+    // Opposite-colored bishops only and no other pieces except kings and bishops (one each)
+    let mut others = 0; for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+        match p.get_type() { PieceType::King|PieceType::Bishop => {}, _ => others += 1 }
+    }}}
+    if others==0 && w_bish==1 && b_bish==1 {
+        // Determine colors of bishops: dark if on dark square currently (approximate)
+        let w_is_dark = w_dark; let b_is_dark = b_dark;
+        if w_is_dark != b_is_dark {
+            // Pull score toward zero (¾ factor)
+            score = score - score/4;
+        }
+    }
+    score
 }
