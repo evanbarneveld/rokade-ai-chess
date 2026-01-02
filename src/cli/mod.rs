@@ -1,5 +1,9 @@
 use std::io;
 use std::io::Write;
+use std::process::exit;
+use std::thread;
+use std::time::Duration;
+use atty::Stream;
 use crate::board::evaluator::evaluate_position;
 use crate::Chess;
 use crate::generator::move_generator::generate_move_as_san;
@@ -29,7 +33,8 @@ pub fn run_cli() {
     let mut black_bot_search_depth: usize = DEFAULT_SEARCH_DEPTH;
     let mut white_bot_strength: usize = DEFAULT_STRENGTH;
     let mut black_bot_strength: usize = DEFAULT_STRENGTH;
-    // Default movetime in milliseconds (CLI command sets it in seconds)
+
+    wait_and_check_for_uci_request();
 
     println!("Welcome to chess. Type 'help' for help, enter move, or 'quit' to quit.\n");
 
@@ -39,6 +44,7 @@ pub fn run_cli() {
         eprintln!("Error resetting: {}", e);
         return;
     }
+
 
     // loop for each move
     loop {
@@ -66,10 +72,6 @@ pub fn run_cli() {
             }
 
             if some_input.eq_ignore_ascii_case("uci") {
-                println!("id name eriks-chess");
-                println!("id author erik van barneveld");
-                println!("uciok");
-                io::stdout().flush().unwrap();
                 run_uci().unwrap();
                 break;
             }
@@ -189,6 +191,28 @@ pub fn run_cli() {
             }
         }
 
+    }
+}
+
+fn wait_and_check_for_uci_request() {
+    // Wait N seconds, then check if there's already input on stdin
+    thread::sleep(Duration::from_secs(1));
+    let mut pre_input: Option<String> = None;
+    if !atty::is(Stream::Stdin) {
+        let mut line = String::new();
+        match io::stdin().read_line(&mut line) {
+            Ok(n) if n > 0 => {
+                let s = line.trim().to_string();
+                if !s.is_empty() {
+                    pre_input = Some(s);
+                    if pre_input.as_ref().unwrap().eq_ignore_ascii_case("uci") {
+                        run_uci().unwrap();
+                    }
+                    exit(0)
+                }
+            }
+            _ => {}
+        }
     }
 }
 

@@ -1,14 +1,13 @@
+use crate::board::evaluator::evaluate_position;
 use crate::history::history::History;
+use crate::piece::piece_mover::PieceMover;
+use crate::piece::pieces::{Color, Piece, PieceType};
+use crate::search::advanced_search::find_all_valid_moves;
 use crate::search::Search;
 use crate::state::game_state::GameState;
 
-/// A minimal `Search` implementation.
+/// A minimal `Search` implementation using minimax depth-limited search.
 ///
-/// This is a skeleton that simply forwards to the existing
-/// `advanced_search::find_best_move` function so it immediately
-/// satisfies the `Search` trait and compiles. You can later replace
-/// the forwarding with a simpler or different strategy while keeping
-/// the trait contract stable.
 pub struct SimpleSearch;
 
 impl Search for SimpleSearch {
@@ -18,7 +17,116 @@ impl Search for SimpleSearch {
         search_depth: usize,
         playing_strength: usize,
     ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
-       // TODO implement
-        return None;
+
+        // Fixed 4-ply minimax without any optimizations
+        let depth_limit: usize = 4;
+
+        // Generate all legal root moves
+        let moves = find_all_valid_moves(game_state);
+        if moves.is_empty() {
+            return None;
+        }
+
+        let root_side = game_state.active_color();
+
+        // Evaluate each move with a simple depth-limited minimax
+        let mut best: Option<((usize, usize), (usize, usize), i32)> = None;
+        for (from, to, promo) in moves {
+            let mut gs = *game_state;
+
+            // Determine capture and promotion piece
+            let is_capture = gs.board().get(to.0, to.1).is_some()
+                || (matches!(promo, None)
+                    && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
+                    && gs.get_en_passant_target().is_some()
+                    && Some(to) == gs.get_en_passant_target());
+
+            let promotion_piece: Option<Piece> = match promo {
+                Some('q') => Some(Piece::new(PieceType::Queen, root_side)),
+                Some('r') => Some(Piece::new(PieceType::Rook, root_side)),
+                Some('b') => Some(Piece::new(PieceType::Bishop, root_side)),
+                Some('n') => Some(Piece::new(PieceType::Knight, root_side)),
+                _ => None,
+            };
+
+            if !PieceMover::move_piece(&mut gs, from, to, is_capture, promotion_piece) {
+                // Should be rare since moves were pre-validated; skip if it happens
+                continue;
+            }
+
+            let score = minimax(gs, depth_limit - 1, root_side);
+
+            match best {
+                None => best = Some((from, to, score)),
+                Some((_bf, _bt, sc)) if score > sc => best = Some((from, to, score)),
+                _ => {}
+            }
+        }
+
+        best.map(|(bf, bt, sc)| (bf, bt, sc, depth_limit))
+    }
+}
+
+fn minimax(state: GameState, depth: usize, root_side: Color) -> i32 {
+    if depth == 0 {
+        return evaluate_position(state.board(), root_side);
+    }
+
+    let moves = find_all_valid_moves(&state);
+    if moves.is_empty() {
+        // No legal moves: fall back to static eval
+        return evaluate_position(state.board(), root_side);
+    }
+
+    let maximizing = state.active_color() == root_side;
+
+    if maximizing {
+        let mut best = i32::MIN;
+        for (from, to, promo) in moves {
+            let mut gs = state;
+            let is_capture = gs.board().get(to.0, to.1).is_some()
+                || (matches!(promo, None)
+                    && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
+                    && gs.get_en_passant_target().is_some()
+                    && Some(to) == gs.get_en_passant_target());
+            let promotion_piece: Option<Piece> = match promo {
+                Some('q') => Some(Piece::new(PieceType::Queen, state.active_color())),
+                Some('r') => Some(Piece::new(PieceType::Rook, state.active_color())),
+                Some('b') => Some(Piece::new(PieceType::Bishop, state.active_color())),
+                Some('n') => Some(Piece::new(PieceType::Knight, state.active_color())),
+                _ => None,
+            };
+            if PieceMover::move_piece(&mut gs, from, to, is_capture, promotion_piece) {
+                let val = minimax(gs, depth - 1, root_side);
+                if val > best {
+                    best = val;
+                }
+            }
+        }
+        best
+    } else {
+        let mut best = i32::MAX;
+        for (from, to, promo) in moves {
+            let mut gs = state;
+            let is_capture = gs.board().get(to.0, to.1).is_some()
+                || (matches!(promo, None)
+                    && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
+                    && gs.get_en_passant_target().is_some()
+                    && Some(to) == gs.get_en_passant_target());
+            let promotion_piece: Option<Piece> = match promo {
+                Some('q') => Some(Piece::new(PieceType::Queen, state.active_color())),
+                Some('r') => Some(Piece::new(PieceType::Rook, state.active_color())),
+                Some('b') => Some(Piece::new(PieceType::Bishop, state.active_color())),
+                Some('n') => Some(Piece::new(PieceType::Knight, state.active_color())),
+                _ => None,
+            };
+            if PieceMover::move_piece(&mut gs, from, to, is_capture, promotion_piece) {
+                let val = minimax(gs, depth - 1, root_side);
+                if val < best {
+                    best = val;
+                }
+            }
+        }
+        best
     }
 }

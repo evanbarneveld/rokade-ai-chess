@@ -32,10 +32,21 @@ pub fn run_uci() -> io::Result<()> {
     let mut engine = Chess::new();
     let mut running = true;
 
+    let m1 = "id name eriks-chess v0.1.0 build 1".to_string();
+    writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
+    let m2 = "id author erik van barneveld".to_string();
+    writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);
+    let opt = "option name searchmode type combo default advanced var advanced var simple".to_string();
+    writeln!(stdout, "{}", opt)?; log_io(&mut log, "OUT", &opt);
+    let m3 = "uciok".to_string();
+    writeln!(stdout, "{}", m3)?; log_io(&mut log, "OUT", &m3);
+    stdout.flush()?;
+
     // ensure starting position
     let _ = engine.reset();
 
     let mut input = String::new();
+
     loop {
         input.clear();
         let bytes = stdin.lock().read_line(&mut input)?;
@@ -49,18 +60,6 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
 
-        if line == "uci" {
-            let m1 = "id name eriks-chess v0.1.0 build 1".to_string();
-            writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
-            let m2 = "id author erik van barneveld".to_string();
-            writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);
-            let opt = "option name SearchMode type combo default Advanced var Advanced var Simple".to_string();
-            writeln!(stdout, "{}", opt)?; log_io(&mut log, "OUT", &opt);
-            let m3 = "uciok".to_string();
-            writeln!(stdout, "{}", m3)?; log_io(&mut log, "OUT", &m3);
-            stdout.flush()?;
-            continue;
-        }
         if line.to_ascii_lowercase().starts_with("setoption ") {
             // minimal parser for: setoption name SearchMode value <Advanced|Simple>
             let lower = line.to_ascii_lowercase();
