@@ -71,9 +71,34 @@ pub fn build_pv_for_root(
 }
 
 pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usize, usize), (usize, usize))>, filtered: &mut Vec<((usize, usize), (usize, usize))>) {
-    // Previously applied piece-specific root filtering (queen/minor handling) has been removed.
-    // With a stronger evaluator, we keep all legal root moves and rely on Search/eval to decide.
-    filtered.extend(v.iter().copied());
+    // Conservative hard filter at root: discard any quiet move that immediately hangs
+    // on the destination square according to a simple SEE probe. This avoids blatant
+    // one-ply blunders.
+    // Additionally, discard clearly losing captures at root (destination SEE strongly negative).
+    for &(from, to) in v.iter() {
+        let mut post = _board.clone();
+        let moved = match _board.get(from.0, from.1) { Some(p) => p, None => { filtered.push((from, to)); continue; } };
+        let is_capture = _board.get(to.0, to.1).is_some();
+        // Quiet move self-hang filter
+        if !is_capture {
+            post.set(from.0, from.1, None);
+            post.set(to.0, to.1, Some(moved));
+            let see = see_dest_estimate(&post, _active_color, to, 0);
+            if see < 0 { continue; }
+        } else {
+            // Losing capture gate: simulate and estimate with captured value context
+            let cap_val = _board
+                .get(to.0, to.1)
+                .map(|p| piece_value_cp(p.get_type()))
+                .unwrap_or(0);
+            post.set(from.0, from.1, None);
+            post.set(to.0, to.1, Some(moved));
+            let see = see_dest_estimate(&post, _active_color, to, cap_val);
+            // If SEE is strongly negative (worse than the standard minimum), drop it
+            if see < -SEE_PENALTY_MIN_CP { continue; }
+        }
+        filtered.push((from, to));
+    }
 }
 
 pub fn get_root_moves(game_state: &GameState, history: &History, board: &Board, active_color: Color, moves: &Vec<((usize, usize), (usize, usize))>, v: &mut Vec<((usize, usize), (usize, usize))>) {
@@ -188,6 +213,10 @@ pub fn adjust_root_score(
             if see < 0 {
                 let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
                 adjusted -= pen;
+                // Extra discouragement for quiet pawn pushes that hang the pawn immediately
+                if !is_capture && moved_is_pawn {
+                    adjusted -= SEE_PENALTY_MIN_CP; // add minimum SEE penalty again
+                }
             }
         }
     }
@@ -226,7 +255,6 @@ pub fn adjust_root_score(
         post.set(from.0, from.1, None);
         if let Some(mp) = moved_piece { post.set(to.0, to.1, Some(mp)); }
 
-        let opp = opposite_color(side);
         // Scan our pieces; if any square is attacked and SEE < 0 for us, penalize
         let mut total_penalty: i32 = 0;
         for r in 0..8 {
@@ -235,8 +263,8 @@ pub fn adjust_root_score(
                     if p.get_color() != side { continue; }
                     // Quick filter: only consider squares attacked by opponent
                     if !is_square_attacked_by_opponent(&mut post,(r, c), side) { continue; }
-                    let cap_val = piece_value_cp(p.get_type());
-                    let see = see_dest_estimate(&post, side, (r, c), 0); // TODO fix?!
+                    // No prior capture gain on these squares in a generic self-hang scan
+                    let see = see_dest_estimate(&post, side, (r, c), 0);
                     if see < 0 {
                         // Conservative: half the SEE loss, clamped to familiar bounds
                         let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
