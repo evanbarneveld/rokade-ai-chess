@@ -233,7 +233,7 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
 
 pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, mut move_time_in_ms: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
-    let mut depth = parse_depth(line).unwrap_or(DEFAULT_SEARCH_DEPTH);
+    let mut depth = parse_depth(line).unwrap_or(MAX_SEARCH_DEPTH);
     if depth > MAX_SEARCH_DEPTH { depth = MAX_SEARCH_DEPTH; }
 
     let gs_copy = { *engine.get_game_state() };
