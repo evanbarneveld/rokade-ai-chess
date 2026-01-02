@@ -202,14 +202,13 @@ pub fn run_cli() {
 fn wait_and_check_for_uci_request() {
     // Wait N seconds, then check if there's already input on stdin
     thread::sleep(Duration::from_secs(1));
-    let mut pre_input: Option<String> = None;
     if !atty::is(Stream::Stdin) {
         let mut line = String::new();
         match io::stdin().read_line(&mut line) {
             Ok(n) if n > 0 => {
                 let s = line.trim().to_string();
                 if !s.is_empty() {
-                    pre_input = Some(s);
+                    let pre_input: Option<String> = Some(s);
                     if pre_input.as_ref().unwrap().eq_ignore_ascii_case("uci") {
                         run_uci().unwrap();
                     }

@@ -13,9 +13,9 @@ pub struct SimpleSearch;
 impl Search for SimpleSearch {
     fn find_best_move(
         game_state: &GameState,
-        history: &History,
+        _history: &History,
         search_depth: usize,
-        playing_strength: usize,
+        _playing_strength: usize,
     ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
 
         let depth_limit: usize = search_depth;

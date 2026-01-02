@@ -1,11 +1,9 @@
-use rand::{rng, Rng};
 use crate::board::Board;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
 use crate::search::alphabeta::alphabeta;
-use crate::search::playing_strength::strength_noise_sigma;
 use crate::search::advanced_search::find_all_valid_moves;
 use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
 use crate::search::tt::{decode_move, TranspositionTable};
@@ -195,7 +193,7 @@ pub fn adjust_root_score(
     is_capture: bool,
     moved_is_pawn: bool,
     score_raw: i32,
-    strength_ps: i32,
+    _strength_ps: i32,
 ) -> i32 {
     // Base root bonus
     let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
@@ -276,8 +274,8 @@ pub fn adjust_root_score(
             }
         }
         // Cap aggregate penalty so a cluster of minor hangs doesn't explode the score
-        let AGG_CAP: i32 = SEE_PENALTY_MAX_CP * 2; // up to 2x max per move
-        if total_penalty > 0 { adjusted -= total_penalty.min(AGG_CAP); }
+        let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2; // up to 2x max per move
+        if total_penalty > 0 { adjusted -= total_penalty.min(agg_cap); }
     }
 
     adjusted

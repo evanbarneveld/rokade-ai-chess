@@ -403,7 +403,7 @@ pub(crate) fn find_all_valid_moves(
 /// This is intended for debugging/tests. It returns a single string with moves separated by spaces.
 /// By default it uses simple coordinate notation like e2e4; when `to_san` is true and a GameState is
 /// provided, it will attempt to convert to SAN.
-pub fn dump_all_valid_moves(
+pub fn _dump_all_valid_moves(
     game_state: &GameState,
     to_san: bool,
 ) {
