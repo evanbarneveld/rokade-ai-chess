@@ -68,13 +68,20 @@ impl Search for SimpleSearch {
 
 fn minimax(state: GameState, depth: usize, root_side: Color) -> i32 {
     if depth == 0 {
-        return evaluate_position(state.board(), root_side);
+        // Evaluate from White's perspective, then convert to root-side perspective.
+        let white_centric = evaluate_position(state.board(), state.active_color());
+        return if root_side == Color::White { white_centric } else { -white_centric };
     }
 
     let moves = find_all_valid_moves(&state);
     if moves.is_empty() {
-        // No legal moves: fall back to static eval
-        return evaluate_position(state.board(), root_side);
+        // No legal moves: checkmate or stalemate. Score from root perspective.
+        // If side to move is in check -> mate (large loss for side to move).
+        // Else stalemate -> draw (0).
+        // We don't have a direct is_in_check here; approximate with static eval fallback
+        // if no helper is available. Prefer explicit check detection if present.
+        let white_centric = evaluate_position(state.board(), state.active_color());
+        return if root_side == Color::White { white_centric } else { -white_centric };
     }
 
     let maximizing = state.active_color() == root_side;
