@@ -236,7 +236,7 @@ pub fn adjust_root_score(
                     // Quick filter: only consider squares attacked by opponent
                     if !is_square_attacked_by_opponent(&mut post,(r, c), side) { continue; }
                     let cap_val = piece_value_cp(p.get_type());
-                    let see = see_dest_estimate(&post, side, (r, c), cap_val);
+                    let see = see_dest_estimate(&post, side, (r, c), 0); // TODO fix?!
                     if see < 0 {
                         // Conservative: half the SEE loss, clamped to familiar bounds
                         let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
