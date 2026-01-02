@@ -73,24 +73,33 @@ pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usiz
     // on the destination square according to a simple SEE probe. This avoids blatant
     // one-ply blunders.
     // Additionally, discard clearly losing captures at root (destination SEE strongly negative).
+    // IMPORTANT: Never discard moves that give check — tactical checks/sacrifices must be allowed.
     for &(from, to) in v.iter() {
         let mut post = _board.clone();
         let moved = match _board.get(from.0, from.1) { Some(p) => p, None => { filtered.push((from, to)); continue; } };
         let is_capture = _board.get(to.0, to.1).is_some();
+
+        // Simulate the move once
+        post.set(from.0, from.1, None);
+        post.set(to.0, to.1, Some(moved));
+
+        // If the move gives check, keep it regardless of SEE — don't filter out checking sacs.
+        let opponent = opposite_color(_active_color);
+        if post.is_side_in_check(opponent) {
+            filtered.push((from, to));
+            continue;
+        }
+
         // Quiet move self-hang filter
         if !is_capture {
-            post.set(from.0, from.1, None);
-            post.set(to.0, to.1, Some(moved));
             let see = see_dest_estimate(&post, _active_color, to, 0);
             if see < 0 { continue; }
         } else {
-            // Losing capture gate: simulate and estimate with captured value context
+            // Losing capture gate: estimate with captured value context
             let cap_val = _board
                 .get(to.0, to.1)
                 .map(|p| piece_value_cp(p.get_type()))
                 .unwrap_or(0);
-            post.set(from.0, from.1, None);
-            post.set(to.0, to.1, Some(moved));
             let see = see_dest_estimate(&post, _active_color, to, cap_val);
             // If SEE is strongly negative (worse than the standard minimum), drop it
             if see < -SEE_PENALTY_MIN_CP { continue; }
@@ -198,8 +207,16 @@ pub fn adjust_root_score(
     // Base root bonus
     let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
 
-    // SEE-based root penalty (uniform across pieces)
-    {
+    // Detect if the move gives check to the opponent; checking sacs should not be punished by SEE.
+    let mut post_probe = base_board.clone();
+    let moved_probe = base_board.get(from.0, from.1);
+    if let Some(mp) = moved_probe { post_probe.set(to.0, to.1, Some(mp)); }
+    post_probe.set(from.0, from.1, None);
+    let opp = opposite_color(side);
+    let gives_check = post_probe.is_side_in_check(opp);
+
+    // SEE-based root penalty (uniform across pieces) — skip for checking moves to allow tactical sacs
+    if !gives_check {
         let mut post = base_board.clone();
         let moved_piece = base_board.get(from.0, from.1);
         let captured = base_board.get(to.0, to.1);
@@ -245,10 +262,30 @@ pub fn adjust_root_score(
     }
     */
 
+    // Extra root-level king safety: strongly discourage moving the king into attacked squares
+    let moved_is_king = base_board
+        .get(from.0, from.1)
+        .map(|p| p.get_type() == PieceType::King)
+        .unwrap_or(false);
+    if moved_is_king {
+        let mut postk = base_board.clone();
+        let mvp = base_board.get(from.0, from.1);
+        postk.set(from.0, from.1, None);
+        if let Some(mp) = mvp { postk.set(to.0, to.1, Some(mp)); }
+        // If destination is attacked by opponent, apply a hefty penalty (walking into fire)
+        if is_square_attacked_by_opponent(&mut postk, to, side) {
+            adjusted -= SEE_PENALTY_MAX_CP.max(300);
+        }
+        // Discourage king captures at root; typically unsafe in middlegame
+        if is_capture {
+            adjusted -= 600;
+        }
+    }
+
     // Root-level self-hanging penalty: if this move leaves any of our pieces
     // immediately losable (opponent can capture with negative SEE for us),
     // apply a bounded penalty. This complements the destination SEE check.
-    {
+    if !gives_check {
         let mut post = base_board.clone();
         // simulate the move
         let moved_piece = base_board.get(from.0, from.1);
@@ -276,6 +313,9 @@ pub fn adjust_root_score(
         // Cap aggregate penalty so a cluster of minor hangs doesn't explode the score
         let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2; // up to 2x max per move
         if total_penalty > 0 { adjusted -= total_penalty.min(agg_cap); }
+    } else {
+        // Stronger tie-break for checking moves at root to favor forcing tactics
+        adjusted += 60;
     }
 
     adjusted
@@ -301,6 +341,8 @@ pub fn evaluate_after_root_move(
         .unwrap_or(false);
     let is_capture = base_board.get(to.0, to.1).is_some();
     let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
+    // Root selective extension: extend by 1 ply for checking moves (helps find forcing lines like mates)
+    let gives_check = tmp.is_side_in_check(opposite_color(side));
     let score_raw = if depth_now <= 1 {
         // At shallow depth, avoid plain static eval to prevent horizon blunders.
         // Use quiescence search to account for immediate captures/tactics.
@@ -314,10 +356,11 @@ pub fn evaluate_after_root_move(
         )
     } else {
         let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
+        let ext = if gives_check { 2 } else { 0 };
         alphabeta(
             &mut tmp,
             opposite_color(side),
-            depth_now - 1,
+            depth_now - 1 + ext,
             a,
             b,
             1,

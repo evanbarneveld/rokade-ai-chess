@@ -1,71 +1,159 @@
 use crate::board::Board;
 use crate::piece::as_square_str;
-use crate::piece::pieces::{Color, PieceType};
+use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
+use crate::search::advanced_search::find_all_valid_moves;
 use crate::state::game_state::GameState;
 
-pub fn convert_move_to_san(game_state : GameState, generated_move: Option<((usize, usize), (usize, usize))>) -> Option<String> {
-
-    if generated_move.is_none() { return None; }
-
-    let some_generated_move = generated_move.unwrap();
-
+pub fn convert_move_to_san(
+    game_state: GameState,
+    generated_move: Option<((usize, usize), (usize, usize))>,
+) -> Option<String> {
+    let (from, to) = generated_move?;
     let board = game_state.board();
 
-    let square_move = get_san_move_if_casting_move(board, some_generated_move.0, some_generated_move.1);
+    let moving_piece: Piece = board.get(from.0, from.1)?;
+    let pt = moving_piece.get_type();
+    let side = moving_piece.get_color();
 
-    if square_move.is_some() {
-        return square_move;
-    }
-
-    let (prefix, is_pawn_promotion) = get_san_move_piece_prefix(board, some_generated_move.0, some_generated_move.1);
-    // If this is a capture, reflect that in the SAN-like output by inserting an 'x'
-    if board.get(some_generated_move.1.0, some_generated_move.1.1).is_some() {
-        let pawn_promotion = if is_pawn_promotion { "=Q" } else { "" };
-        return Some(format!("{}{}x{}{}", prefix, as_square_str(some_generated_move.0), as_square_str(some_generated_move.1), pawn_promotion));
-    }
-
-    // Default to simple coordinate move (e.g., e2e4), with optional prefix for piece type
-    let pawn_promotion = if is_pawn_promotion { "=Q" } else { "" };
-    Some(format!("{}{}{}{}", prefix, as_square_str(some_generated_move.0), as_square_str(some_generated_move.1), pawn_promotion))
-}
-
-fn get_san_move_piece_prefix(board: &Board, from: (usize, usize), to: (usize, usize)) -> (String, bool) {
-    // Determine SAN piece prefix (empty for pawns)
-    let mut prefix = String::new();
-    let mut is_pawn_promotion = false;
-    if let Some(p) = board.get(from.0, from.1) {
-        prefix = match p.get_type() {
-            PieceType::Pawn => String::new(),
-            PieceType::Knight => String::from("N"),
-            PieceType::Bishop => String::from("B"),
-            PieceType::Rook => String::from("R"),
-            PieceType::Queen => String::from("Q"),
-            PieceType::King => String::from("K"),
-        };
-
-        // Detect pawn promotion (assume promotion to a queen)
-        if p.get_type() == PieceType::Pawn {
-            is_pawn_promotion =
-                (p.get_color() == Color::White && to.0 == 7) ||
-                    (p.get_color() == Color::Black && to.0 == 0);
+    // 1) Castling detection (O-O / O-O-O)
+    if pt == PieceType::King && from.0 == to.0 {
+        let dr = 0usize;
+        let dc = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
+        if dr == 0 && dc == 2 {
+            // King side vs queen side
+            let san = if to.1 == from.1 + 2 { "O-O" } else { "O-O-O" };
+            // Determine +/#
+            let check_suffix = check_or_mate_suffix(board, from, to, side);
+            return Some(format!("{}{}", san, check_suffix));
         }
     }
-    (prefix, is_pawn_promotion)
+
+    // 2) Capture detection, including en-passant heuristic for pawns (diagonal move to empty square)
+    let is_target_occupied = board.get(to.0, to.1).is_some();
+    let is_pawn_diagonal = pt == PieceType::Pawn && from.1 != to.1 && from.0 != to.0;
+    let is_capture = is_target_occupied || is_pawn_diagonal;
+
+    // 3) Build SAN components
+    let mut san = String::new();
+    if pt != PieceType::Pawn {
+        san.push(piece_letter(pt));
+        // Disambiguation for N/B/R/Q when another same-type piece can also move to 'to'
+        let disamb = disambiguation_string(board, side, pt, from, to);
+        san.push_str(&disamb);
+        if is_capture { san.push('x'); }
+        san.push_str(&as_square_str(to));
+    } else {
+        // Pawn SAN: file letter on capture, just destination on quiet
+        if is_capture {
+            san.push(file_char(from.1));
+            san.push('x');
+        }
+        san.push_str(&as_square_str(to));
+        // Promotion: default to =Q if pawn reaches last rank
+        if (side == Color::White && to.0 == 7) || (side == Color::Black && to.0 == 0) {
+            san.push_str("=Q");
+        }
+    }
+
+    // 4) Append + or #
+    let suffix = check_or_mate_suffix(board, from, to, side);
+    san.push_str(&suffix);
+    Some(san)
 }
 
-fn get_san_move_if_casting_move(board: &Board, from: (usize, usize), to: (usize, usize)) -> Option<String> {
-    // Castling detection (king moves two files)
-    if let Some(p) = board.get(from.0, from.1) {
-        if p.get_type() == PieceType::King {
-            // king side castle
-            if to.1 == from.1 + 2 {
-                return Some(String::from("O-O"));
-            }
-            // queen side castle
-            if from.1 >= 2 && to.1 + 2 == from.1 {
-                return Some(String::from("O-O-O"));
+#[inline]
+fn piece_letter(pt: PieceType) -> char {
+    match pt {
+        PieceType::King => 'K',
+        PieceType::Queen => 'Q',
+        PieceType::Rook => 'R',
+        PieceType::Bishop => 'B',
+        PieceType::Knight => 'N',
+        PieceType::Pawn => panic!("Pawns have no piece letter in SAN"),
+    }
+}
+
+#[inline]
+fn file_char(col: usize) -> char {
+    (b'a' + (col as u8)) as char
+}
+
+#[inline]
+fn rank_char(row: usize) -> char {
+    // internal row 0..7 == ranks 1..8
+    char::from_u32((row as u32) + 1).unwrap()
+}
+
+// Determine if the position after (from->to) is check or mate, and return "", "+" or "#"
+fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize), side: Color) -> String {
+    let mut tmp = board.clone();
+    let _u = tmp.make_move_simple(from, to);
+    let opp = opposite_color(side);
+    let in_check = tmp.is_side_in_check(opp);
+    if !in_check {
+        return String::new();
+    }
+    // Check for mate: if opponent has no legal moves
+    let opp_state = GameState::from_board_and_side(tmp, opp);
+    let legals = find_all_valid_moves(&opp_state);
+    if legals.is_empty() { "#".to_string() } else { "+".to_string() }
+}
+
+// Compute SAN disambiguation for N/B/R/Q
+fn disambiguation_string(
+    board: &Board,
+    side: Color,
+    pt: PieceType,
+    from: (usize, usize),
+    to: (usize, usize),
+) -> String {
+    // Collect candidates: other same-type pieces of same color that can legally move to 'to'
+    let mut same_file_conflict = false;
+    let mut same_rank_conflict = false;
+    let mut any_conflict = false;
+
+    for r in 0..8 {
+        for c in 0..8 {
+            if (r, c) == from { continue; }
+            if let Some(p) = board.get(r, c) {
+                if p.get_color() != side || p.get_type() != pt { continue; }
+                if can_piece_move_to(board.clone(), pt, (r, c), to) {
+                    any_conflict = true;
+                    if c == from.1 { same_file_conflict = true; }
+                    if r == from.0 { same_rank_conflict = true; }
+                }
             }
         }
     }
-    None
+
+    if !any_conflict {
+        return String::new();
+    }
+    if !same_file_conflict {
+        return file_char(from.1).to_string();
+    }
+    if !same_rank_conflict {
+        return rank_char(from.0).to_string();
+    }
+    format!("{}{}", file_char(from.1), rank_char(from.0))
+}
+
+// Use validators with pin/self-check enabled to test if a piece at `from` could legally move to `to`.
+fn can_piece_move_to(mut board: Board, pt: PieceType, from: (usize, usize), to: (usize, usize)) -> bool {
+    match pt {
+        PieceType::Knight => {
+            crate::piece::move_validators::knight_move_validator::is_valid_knight_move(&mut board, from, to, true)
+        }
+        PieceType::Bishop => {
+            crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move(&mut board, from, to, true)
+        }
+        PieceType::Rook => {
+            crate::piece::move_validators::rook_move_validator::is_valid_rook_move(&mut board, from, to, true)
+        }
+        PieceType::Queen => {
+            crate::piece::move_validators::queen_move_validator::is_valid_queen_move(&mut board, from, to, true)
+        }
+        PieceType::King => false, // no disambiguation needed (unique piece per side)
+        PieceType::Pawn => false, // handled separately in SAN; not needed for disambiguation
+    }
 }

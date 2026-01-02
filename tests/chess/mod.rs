@@ -6,3 +6,4 @@ mod perft;
 mod eval;
 mod blunder_tests;
 mod moves;
+mod gen_moves_debug;

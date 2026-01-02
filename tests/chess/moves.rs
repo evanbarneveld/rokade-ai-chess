@@ -14,5 +14,7 @@ fn test_mate_in_2_move1() {
     //get best move
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 20, 10000, 1000).unwrap();
     println!("Best move: {:?}", san_move);
+    // the engine chooses Ke1xd1, which is certainly not the best move
+    // Expect official SAN with disambiguation and check marker
     assert_eq!(san_move, "Nf6+");
 }

@@ -1,4 +1,4 @@
-pub(crate) mod advanced_search;
+pub mod advanced_search;
 pub(crate) mod tt;
 pub(crate) mod zobrist;
 pub(crate) mod heuristics;

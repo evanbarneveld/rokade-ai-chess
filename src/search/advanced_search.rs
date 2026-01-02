@@ -1,7 +1,7 @@
 use crate::board::Board;
 use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
-use crate::piece::pieces::{Color, Piece, PieceType};
+use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
 use crate::search::locking::get_tt_mutex;
 use crate::search::playing_strength::{select_move_based_using_strength, PLAYING_STRENGTH_MAX};
 use crate::search::root_moves::{
@@ -18,6 +18,7 @@ use rayon::prelude::*;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 use crate::book::book::book_pick;
 use crate::search::Search;
+use crate::board::san_move::convert_move_to_san;
 
 pub const DEFAULT_SEARCH_DEPTH: usize = 10;
 pub const MAX_SEARCH_DEPTH: usize = 20;
@@ -146,13 +147,32 @@ pub fn find_best_move(
         // Hard root filter: drop unsafe queen moves (SEE<0) and unsafe minor-piece non-check sacs
         // (SEE<=SEE_MINOR_SAC_THRESHOLD_CP and not giving check)
         // If filtering removes all, keep original set.
-        if SEE_FILTERING_ENABLED && !v.is_empty() {
+        let mut base: Vec<((usize, usize), (usize, usize))> = if SEE_FILTERING_ENABLED && !v.is_empty() {
             let mut filtered: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(v.len());
             hard_root_filter(board, active_color, &mut v, &mut filtered);
             if filtered.is_empty() { v } else { filtered }
         } else {
             v
-        }
+        };
+
+        // Heuristic ordering at root: prioritize checking moves, then captures by MVV, then others.
+        base.sort_by(|&(f1,t1), &(f2,t2)| {
+            use crate::piece::pieces::{piece_value_cp};
+            let mut b1 = board.clone();
+            let mut b2 = board.clone();
+            let p1 = board.get(f1.0, f1.1);
+            let p2 = board.get(f2.0, f2.1);
+            let cap1 = board.get(t1.0, t1.1);
+            let cap2 = board.get(t2.0, t2.1);
+            if let Some(mp) = p1 { b1.set(t1.0, t1.1, Some(mp)); b1.set(f1.0, f1.1, None); }
+            if let Some(mp) = p2 { b2.set(t2.0, t2.1, Some(mp)); b2.set(f2.0, f2.1, None); }
+            let check1 = if p1.is_some() { b1.is_side_in_check(opposite_color(active_color)) } else { false };
+            let check2 = if p2.is_some() { b2.is_side_in_check(opposite_color(active_color)) } else { false };
+            let key1 = (check1 as i32) * 10000 + cap1.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
+            let key2 = (check2 as i32) * 10000 + cap2.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
+            key2.cmp(&key1) // descending
+        });
+        base
     };
 
     // Iterative Deepening + Aspiration windows at root (serial evaluation for stability)
@@ -307,7 +327,66 @@ pub fn find_best_move(
     }
 }
 
-pub(crate) fn find_all_valid_moves(
+/// Debug helper: rank root moves for the current position, returning (SAN, adjusted_score, raw_score)
+/// Sorted by side to move preference (White: descending; Black: ascending).
+pub fn debug_rank_root_moves(
+    game_state: &GameState,
+    history: &History,
+    depth: usize,
+    playing_strength: usize,
+) -> Vec<(String, i32, i32)> {
+    let board = game_state.board();
+    let active_color = game_state.active_color();
+    let base_hmc = game_state.half_move_clock();
+    let gen_moves = find_all_valid_moves(game_state);
+    let moves: Vec<((usize, usize), (usize, usize))> = gen_moves.iter().map(|(f,t,_)| (*f,*t)).collect();
+
+    let mut v = Vec::with_capacity(moves.len());
+    get_root_moves(game_state, history, board, active_color, &moves, &mut v);
+    let mut filtered: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(v.len());
+    hard_root_filter(board, active_color, &mut v, &mut filtered);
+    let root = if filtered.is_empty() { v } else { filtered };
+
+    // No TT needed for a one-shot evaluation per move here
+    let mut tt = get_tt_mutex().lock().unwrap();
+    let mut out: Vec<(String,i32,i32)> = Vec::with_capacity(root.len());
+    for (from, to) in root {
+        let (raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+            board,
+            active_color,
+            from,
+            to,
+            depth.max(1),
+            MIN_EVAL_VALUE + 1,
+            MAX_EVAL_VALUE - 1,
+            &mut tt,
+            base_hmc,
+        );
+        let adj = adjusted_root_eval_for_move(
+            board,
+            active_color,
+            from,
+            to,
+            base_hmc,
+            raw,
+            is_capture,
+            moved_is_pawn,
+            playing_strength as i32,
+        );
+        let san = convert_move_to_san(*game_state, Some((from,to))).unwrap_or_else(|| {
+            format!("{}{}", crate::piece::as_square_str(from), crate::piece::as_square_str(to))
+        });
+        out.push((san, adj, raw));
+    }
+    if active_color == Color::White {
+        out.sort_by(|a,b| b.1.cmp(&a.1));
+    } else {
+        out.sort_by(|a,b| a.1.cmp(&b.1));
+    }
+    out
+}
+
+pub fn find_all_valid_moves(
     game_state: &GameState,
 ) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
     let mut result: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::new();
@@ -486,7 +565,7 @@ fn reorder_with_tt_hint(
 #[inline]
 fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32) -> (i32, i32) {
     // Use full window for very shallow depths where last_score is unreliable
-    if depth_now <= 2 {
+    if depth_now <= 3 {
         (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1)
     } else {
         (
@@ -763,6 +842,7 @@ fn probe_with_aspiration(
     //eprintln!("[asp] depth={} init a={} b={} last={}", depth_now, a, b, last_score);
 
     let mut tried = 0;
+    let mut did_fallback_full = false;
     loop {
         tried += 1;
 
@@ -795,9 +875,7 @@ fn probe_with_aspiration(
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
             a = bounds.0;
-            if tried < 3 {
-                continue;
-            }
+            if tried < 3 { continue; }
         } else if best_score_raw >= b {
             // fail-high: widen up
 
@@ -807,9 +885,29 @@ fn probe_with_aspiration(
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
             b = bounds.1;
-            if tried < 3 {
-                continue;
-            }
+            if tried < 3 { continue; }
+        }
+        // At this point we have tried a few widened windows but still failed to land inside bounds.
+        // To ensure a stable PV update at this depth, fall back to a full-width search once.
+        if !did_fallback_full {
+            // Reset to full window and a modest aspiration window for subsequent depths
+            *window = (*window).max(ASP_WINDOW_INIT_CP);
+            let (fa, fb) = (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1);
+            let (mv2, best_adj2, best_raw2) = evaluate_root_for_bounds(
+                board,
+                active_color,
+                root_moves,
+                depth_now,
+                fa,
+                fb,
+                tt,
+                base_hmc,
+                ps,
+                game_state,
+                history,
+            );
+            did_fallback_full = true;
+            return (mv2, best_adj2, best_raw2);
         }
         return (mv, best_adjusted, best_score_raw);
     }
