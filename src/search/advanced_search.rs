@@ -33,19 +33,19 @@ const STRENGTH_MODE_ENABLED: bool = false; // TODO not the default
 // Global toggle to enable/disable Zobrist hashing across the engine.
 // When disabled, features relying on Zobrist keys (like TT and repetition checks)
 // will be bypassed.
-pub(crate) const ZOBRIST_HASHING_ENABLED: bool = false;
+pub(crate) const ZOBRIST_HASHING_ENABLED: bool = true;
 
 // Tie the transposition table to Zobrist hashing. Without Zobrist keys, TT is disabled.
 pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = ZOBRIST_HASHING_ENABLED; // WARNING: Disabling TT can be 2–10x slower
 
 pub(crate) const NULL_MOVE_PRUNING_ENABLED: bool = false;
-pub(crate) const SEE_FILTERING_ENABLED: bool = false;
-pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = false;
+pub(crate) const SEE_FILTERING_ENABLED: bool = true;
+pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true;
 
-pub(crate) const QUIESCENCE_ENABLED: bool = false ; // TODO Disabling may cause horizon effects
-pub(crate) const QSEE_PRUNING_ENABLED: bool = false; // SEE-based pruning inside qsearch
-pub(crate) const MVV_LVA_ENABLED: bool = false; // Capture ordering heuristic
-pub(crate) const LMR_ENABLED: bool = false; // Late Move Reductions
+pub(crate) const QUIESCENCE_ENABLED: bool = true ; // TODO Disabling may cause horizon effects
+pub(crate) const QSEE_PRUNING_ENABLED: bool = true; // SEE-based pruning inside qsearch
+pub(crate) const MVV_LVA_ENABLED: bool = true; // Capture ordering heuristic
+pub(crate) const LMR_ENABLED: bool = true; // Late Move Reductions
 pub(crate) const ID_ITERATIONS_ENABLED: bool = false; // Iterative deepening loop
 
 // Iterative deepening aspiration window (in centipawns)
@@ -81,6 +81,7 @@ impl Search for AdvancedSearch {
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 /// returns the evaluated score (in centipawns) for the selected move
 /// and the effective Search depth that was actually used internally.
+
 pub fn find_best_move(
     game_state: &GameState,
     history: &History,

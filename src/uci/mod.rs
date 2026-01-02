@@ -33,7 +33,7 @@ pub fn run_uci() -> io::Result<()> {
     let mut engine = Chess::new();
     let mut running = true;
 
-    let m1 = format!("id name eriks-chess v0.1.0 (build#{}", BUILD_NUMBER).to_string();
+    let m1 = format!("id name eriks-chess v0.1.0 (build#{})", BUILD_NUMBER).to_string();
     writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
     let m2 = "id author erik van barneveld".to_string();
     writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);
@@ -98,7 +98,7 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line.starts_with("go ") || line == "go" {
-            let mut movetime = 10_000; // default 10 seconds per move
+            let mut movetime = 0; // default unlimited time per move
 
             let line_parts: Vec<&str> = line.split(' ').filter(|w| !w.is_empty()).collect();
             if line_parts.len() > 1 && line_parts[1] == "movetime" {
@@ -129,9 +129,7 @@ pub fn run_uci() -> io::Result<()> {
             set_info_callback(Some(info_cb));
 
             // Apply a time budget for this Search
-            set_time_budget_ms(movetime);
             let (best_move_str, info_opt) = go_bestmove_with_info(&mut engine, line, movetime);
-            clear_time_budget();
             // Clear the callback after Search completes
             set_info_callback(None);
             let elapsed_ms = start.elapsed().as_millis();
