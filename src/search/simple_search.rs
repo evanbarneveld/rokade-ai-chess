@@ -18,8 +18,7 @@ impl Search for SimpleSearch {
         playing_strength: usize,
     ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
 
-        // Fixed 4-ply minimax without any optimizations
-        let depth_limit: usize = 4;
+        let depth_limit: usize = search_depth;
 
         // Generate all legal root moves
         let moves = find_all_valid_moves(game_state);

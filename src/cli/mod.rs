@@ -25,6 +25,11 @@ enum GameMode {
 
 const DEFAULT_STRENGTH: usize = 1000;
 
+pub const BUILD_NUMBER: &str = match option_env!("BUILD_NUMBER") {
+    Some(v) => v,
+    None => "0",
+};
+
 pub fn run_cli() {
     let mut mode = GameMode::PlayerVsPlayer;
     let mut white_bot_movetime: usize = 5;
@@ -36,7 +41,7 @@ pub fn run_cli() {
 
     wait_and_check_for_uci_request();
 
-    println!("Welcome to chess. Type 'help' for help, enter move, or 'quit' to quit.\n");
+    println!("Welcome to chess (build#{}). Type 'help' for help, enter move, or 'quit' to quit.\n", BUILD_NUMBER);
 
     let mut game = Chess::new();
 

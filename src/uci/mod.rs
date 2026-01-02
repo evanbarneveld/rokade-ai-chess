@@ -2,6 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
+use crate::cli::BUILD_NUMBER;
 use crate::piece::as_move_str;
 use crate::search::advanced_search::{DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH, MAX_SEARCH_DEPTH};
 use crate::search::{find_best_move_with_mode, SearchMode};
@@ -32,7 +33,7 @@ pub fn run_uci() -> io::Result<()> {
     let mut engine = Chess::new();
     let mut running = true;
 
-    let m1 = "id name eriks-chess v0.1.0 build 1".to_string();
+    let m1 = format!("id name eriks-chess v0.1.0 (build#{}", BUILD_NUMBER).to_string();
     writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
     let m2 = "id author erik van barneveld".to_string();
     writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);

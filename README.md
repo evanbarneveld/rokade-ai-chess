@@ -1,8 +1,7 @@
 
 BUGS
 
-- on promotion the queen is always white!
-
+- advanced search makes bad moves, worse than simple search
 
 TODO
 
