@@ -238,12 +238,14 @@ pub fn adjust_root_score(
         }
     }
 
+    /*
     // Playing-strength noise (suppressed in deterministic mode)
     let sigma = if crate::search::is_deterministic() { 0 } else { strength_noise_sigma(strength_ps as usize) };
     if sigma > 0 {
         let n: i32 = rng().random_range(-sigma..=sigma);
         adjusted += n;
     }
+    */
 
     // Root-level self-hanging penalty: if this move leaves any of our pieces
     // immediately losable (opponent can capture with negative SEE for us),
