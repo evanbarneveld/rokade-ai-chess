@@ -5,4 +5,4 @@ mod pv_test;
 mod perft;
 mod eval;
 mod moves;
-mod blundering;
+mod blunder_tests;
