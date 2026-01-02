@@ -291,37 +291,3 @@ fn test_mates_generic() {
     assert!(total > 0, "No puzzles found in provided files");
     assert!(solved > 0, "Engine failed to solve any provided puzzles");
 }
-
-fn piece_letter(s: &str) -> Option<char> {
-    let c = s.chars().next()?;
-    match c {
-        'K' | 'Q' | 'R' | 'B' | 'N' => Some(c),
-        _ => None, // no explicit piece letter => treat as pawn or UCI-like without leading piece
-    }
-}
-
-fn dest_square(s: &str) -> Option<&str> {
-    let bytes = s.as_bytes();
-    // scan from the end and pick the last [a-h][1-8]
-    for i in (1..bytes.len()).rev() {
-        let f = bytes[i - 1] as char;
-        let r = bytes[i] as char;
-        if ('a'..='h').contains(&f) && ('1'..='8').contains(&r) {
-            return Some(&s[i - 1..=i]);
-        }
-    }
-    None
-}
-
-fn moves_equivalent(a: &str, b: &str) -> bool {
-    let a_piece = piece_letter(a);
-    let b_piece = piece_letter(b);
-    // if either explicitly specifies a piece and they disagree, not equivalent
-    if a_piece.is_some() || b_piece.is_some() {
-        if a_piece != b_piece { return false; }
-    }
-    match (dest_square(a), dest_square(b)) {
-        (Some(da), Some(db)) => da == db,
-        _ => false,
-    }
-}
