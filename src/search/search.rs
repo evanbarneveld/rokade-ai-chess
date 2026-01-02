@@ -26,7 +26,13 @@ pub(crate) const ROOT_PARALLELIZATION_ENABLED: bool = true; // TODO WARNING
 const ORDERBOOK_ENABLED: bool = false; // TODO WARNING
 const STRENGTH_MODE_ENABLED: bool = false; // TODO WARNING
 
-pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = true; // TODO WARNING Disabling TT can be 2–10x slower
+// Global toggle to enable/disable Zobrist hashing across the engine.
+// When disabled, features relying on Zobrist keys (like TT and repetition checks)
+// will be bypassed.
+pub(crate) const ZOBRIST_HASHING_ENABLED: bool = true;
+
+// Tie the transposition table to Zobrist hashing. Without Zobrist keys, TT is disabled.
+pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = ZOBRIST_HASHING_ENABLED; // WARNING: Disabling TT can be 2–10x slower
 
 // Optimization feature toggles (compile-time booleans)
 // Set to true to enable the corresponding optimization.
@@ -38,7 +44,7 @@ pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true;
 // Focused debug toggles (compile-time booleans)
 // Warning: Disabling some of these can cause large slowdowns and strength drops.
 // Keep defaults true to preserve current behavior.
-pub(crate) const QUIESCENCE_ENABLED: bool = true; // Disabling may cause horizon effects
+pub(crate) const QUIESCENCE_ENABLED: bool = false ; // TODO Disabling may cause horizon effects
 pub(crate) const QSEE_PRUNING_ENABLED: bool = true; // SEE-based pruning inside qsearch
 pub(crate) const MVV_LVA_ENABLED: bool = true; // Capture ordering heuristic
 pub(crate) const LMR_ENABLED: bool = true; // Late Move Reductions

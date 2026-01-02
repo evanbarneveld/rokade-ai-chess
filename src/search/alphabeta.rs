@@ -38,11 +38,15 @@ pub fn alphabeta(
     // print board
     //println!("alpha-beta\n{}", board.get_board_display_string(None));
 
-    // Repetition/50-move draw checks at node entry
-    let key_here = compute_zobrist(&*board, to_move);
-    // If this key already exists in the current line, it's a repetition -> draw
-    if rep_stack.iter().any(|&k| k == key_here) {
-        return 0;
+    // Repetition/50-move draw checks at node entry (only if Zobrist hashing is enabled)
+    let key_here: u64 = if crate::search::search::ZOBRIST_HASHING_ENABLED {
+        compute_zobrist(&*board, to_move)
+    } else { 0 };
+    if crate::search::search::ZOBRIST_HASHING_ENABLED {
+        // If this key already exists in the current line, it's a repetition -> draw
+        if rep_stack.iter().any(|&k| k == key_here) {
+            return 0;
+        }
     }
     // 50-move rule
     if halfmove_clock >= HUNDRED_HALF_MOVES {
@@ -168,8 +172,11 @@ pub fn alphabeta(
     let original_alpha = alpha;
     let original_beta = beta;
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
-    // Push current position to repetition stack for descendants
-    rep_stack.push(key_here);
+    // Push current position to repetition stack for descendants (only if enabled)
+    let pushed_rep = if crate::search::search::ZOBRIST_HASHING_ENABLED {
+        rep_stack.push(key_here);
+        true
+    } else { false };
 
     // Create/extend search heuristics container (stack-allocated per call chain depth)
     // We pass it implicitly via thread-local static since function signatures are fixed; for simplicity,
@@ -483,7 +490,7 @@ pub fn alphabeta(
     };
 
     // Pop this node key
-    let _ = rep_stack.pop();
+    if pushed_rep { let _ = rep_stack.pop(); }
 
     // Store to TT
     let bound = if value <= original_alpha {

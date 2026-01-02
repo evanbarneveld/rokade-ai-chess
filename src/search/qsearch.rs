@@ -29,10 +29,12 @@ pub fn qsearch(
     if time_is_up() {
         return evaluate_position(&*board, to_move);
     }
-    // Draw checks in quiescence as well
-    let key_here = compute_zobrist(&*board, to_move);
-    if rep_stack.iter().any(|&k| k == key_here) {
-        return 0;
+    // Draw checks in quiescence as well (only if Zobrist hashing is enabled)
+    if crate::search::search::ZOBRIST_HASHING_ENABLED {
+        let key_here = compute_zobrist(&*board, to_move);
+        if rep_stack.iter().any(|&k| k == key_here) {
+            return 0;
+        }
     }
     if halfmove_clock >= 100 {
         return 0;
