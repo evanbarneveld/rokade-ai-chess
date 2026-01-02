@@ -447,21 +447,37 @@ fn parse_uci_move(uci: &str) -> Option<((usize, usize), (usize, usize), Option<P
 // Returns a legal (from,to) if a book entry exists and passes validation.
 pub fn book_pick(game_state: &GameState) -> Option<((usize, usize), (usize, usize))> {
     use crate::state::fen::writer::game_state_to_fen_string;
+    use crate::search::is_deterministic;
     // Build truncated FEN key (first 4 fields)
     let fen = game_state_to_fen_string(*game_state);
     let key: String = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
 
     // Find entry
     let entry = BOOK.iter().find(|(k, _)| k == &key)?.1;
-    // Weighted pick (deterministic fallback to highest weight if rng not available)
-    let total: u32 = entry.iter().map(|(_, w)| *w).sum();
-    if total == 0 { return None; }
-    let pick = rng().random_range(0..total);
-    let mut acc = 0u32;
-    let chosen = entry.iter().find(|(_, w)| {
-        acc += *w;
-        acc > pick
-    })?;
+    // Deterministic: pick the highest-weight move; tie-break by lexicographical order.
+    let chosen = if is_deterministic() {
+        let mut best: Option<(&str, u32)> = None;
+        for (uci, w) in entry.iter().copied() {
+            best = match best {
+                None => Some((uci, w)),
+                Some((buci, bw)) => {
+                    if w > bw || (w == bw && uci < buci) { Some((uci, w)) } else { Some((buci, bw)) }
+                }
+            };
+        }
+        let (uci, _w) = best?;
+        entry.iter().find(|(u, _)| *u == uci)?
+    } else {
+        // Weighted pick
+        let total: u32 = entry.iter().map(|(_, w)| *w).sum();
+        if total == 0 { return None; }
+        let pick = rng().random_range(0..total);
+        let mut acc = 0u32;
+        entry.iter().find(|(_, w)| {
+            acc += *w;
+            acc > pick
+        })?
+    };
 
     // Parse UCI
     let (from, to, _promo) = parse_uci_move(chosen.0)?;

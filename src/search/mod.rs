@@ -2,7 +2,7 @@ pub(crate) mod advanced_search;
 pub(crate) mod tt;
 pub(crate) mod zobrist;
 pub(crate) mod heuristics;
-pub(crate) mod playing_strength;
+pub mod playing_strength;
 pub(crate) mod time_control;
 pub mod uci_feedback;
 pub(crate) mod threading;
@@ -14,6 +14,24 @@ pub(crate) mod see;
 mod alphabeta;
 mod root_moves;
 mod simple_search;
+
+// Determinism toggle for search/engine behavior
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static DETERMINISTIC: AtomicBool = AtomicBool::new(false);
+
+/// Enable or disable deterministic behavior across the engine.
+/// When enabled, all random choices and evaluation noise are suppressed,
+/// and components should pick the most stable/best option instead of sampling.
+pub fn set_deterministic(on: bool) {
+    DETERMINISTIC.store(on, Ordering::Relaxed);
+}
+
+/// Returns true when deterministic behavior is enabled.
+#[inline]
+pub fn is_deterministic() -> bool {
+    DETERMINISTIC.load(Ordering::Relaxed)
+}
 
 // Trait interface for Search implementations
 // Note: The method is an associated function (no &self) to match the existing API.

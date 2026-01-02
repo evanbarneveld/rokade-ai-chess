@@ -1,6 +1,6 @@
 use rand::{rng, Rng};
 use crate::board::Board;
-use crate::board::evaluator::evaluate_position;
+use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
@@ -209,11 +209,45 @@ pub fn adjust_root_score(
         }
     }
 
-    // Playing-strength noise
-    let sigma = strength_noise_sigma(strength_ps as usize);
+    // Playing-strength noise (suppressed in deterministic mode)
+    let sigma = if crate::search::is_deterministic() { 0 } else { strength_noise_sigma(strength_ps as usize) };
     if sigma > 0 {
         let n: i32 = rng().random_range(-sigma..=sigma);
         adjusted += n;
+    }
+
+    // Root-level self-hanging penalty: if this move leaves any of our pieces
+    // immediately losable (opponent can capture with negative SEE for us),
+    // apply a bounded penalty. This complements the destination SEE check.
+    {
+        let mut post = base_board.clone();
+        // simulate the move
+        let moved_piece = base_board.get(from.0, from.1);
+        post.set(from.0, from.1, None);
+        if let Some(mp) = moved_piece { post.set(to.0, to.1, Some(mp)); }
+
+        let opp = opposite_color(side);
+        // Scan our pieces; if any square is attacked and SEE < 0 for us, penalize
+        let mut total_penalty: i32 = 0;
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(p) = post.get(r, c) {
+                    if p.get_color() != side { continue; }
+                    // Quick filter: only consider squares attacked by opponent
+                    if !is_square_attacked_by_opponent(&mut post,(r, c), side) { continue; }
+                    let cap_val = piece_value_cp(p.get_type());
+                    let see = see_dest_estimate(&post, side, (r, c), cap_val);
+                    if see < 0 {
+                        // Conservative: half the SEE loss, clamped to familiar bounds
+                        let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
+                        total_penalty += pen;
+                    }
+                }
+            }
+        }
+        // Cap aggregate penalty so a cluster of minor hangs doesn't explode the score
+        let AGG_CAP: i32 = SEE_PENALTY_MAX_CP * 2; // up to 2x max per move
+        if total_penalty > 0 { adjusted -= total_penalty.min(AGG_CAP); }
     }
 
     adjusted

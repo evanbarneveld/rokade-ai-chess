@@ -1,5 +1,7 @@
 use rand::{rng, Rng};
 
+use crate::search::is_deterministic;
+
 pub const PLAYING_STRENGTH_MAX: usize = 1000;
 
 // Controlled by the strength parameter, the Search will not always return the best move.
@@ -10,6 +12,12 @@ pub fn select_move_based_using_strength(
 ) -> Option<((usize, usize), (usize, usize))> {
     if sorted_moves.is_empty() {
         return None;
+    }
+
+    // Deterministic mode: always pick the best move (index 0) from the already sorted list.
+    if is_deterministic() {
+        let pick = &sorted_moves[0];
+        return Some((pick.0, pick.1));
     }
 
     // Clamp strength to [1..1000]
