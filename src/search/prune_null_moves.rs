@@ -2,7 +2,7 @@ use crate::board::Board;
 use crate::piece::pieces::{opposite_color, Color, PieceType};
 use crate::search::alphabeta::alphabeta;
 use crate::search::tt::TranspositionTable;
-use crate::search::search::NULL_MOVE_PRUNING_ENABLED;
+use crate::search::advanced_search::NULL_MOVE_PRUNING_ENABLED;
 
 const NULL_MOVE_PRUNING_START_DEPTH: usize = 4;
 
@@ -48,7 +48,7 @@ pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, beta: i
                 // We reuse halfmove_clock (null move does not reset it)
                 // To keep Book/Board API simple, emulate by switching to_move only in recursive call
                 // and NOT modifying the board.
-                // Probe a null-window search; use (beta-1, beta) window which is standard for NMP
+                // Probe a null-window Search; use (beta-1, beta) window which is standard for NMP
                 let score = alphabeta(
                     board,
                     opposite_color(to_move),

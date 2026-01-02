@@ -7,13 +7,15 @@ use crate::history::history::History;
 use crate::piece::as_square_str;
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
+use crate::search::SearchMode;
 
 #[derive(Debug)]
 pub struct Chess<> {
     game_state: GameState,
     move_parser: MoveParser,
     starting_fen: String,
-    history: History
+    history: History,
+    search_mode: SearchMode,
 }
 impl Chess {
     pub const DEFAULT_CHESS_STARTING_FEN: &'static str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -27,14 +29,23 @@ impl Chess {
                     Err(e) => panic!("Error parsing FEN: {}", e)
                 },
             move_parser: MoveParser::new(),
-            history: History::new()
+            history: History::new(),
+            search_mode: SearchMode::Advanced,
         }
     }
 
     pub fn get_history(&mut self) -> &History {
         &self.history
     }
-    
+
+    pub fn set_search_mode(&mut self, mode: SearchMode) {
+        self.search_mode = mode;
+    }
+
+    pub fn get_search_mode(&self) -> SearchMode {
+        self.search_mode
+    }
+
     pub fn reset(&mut self) -> Result<(), String> {
         self.history.reset();
         match reset_from_fen(&self.starting_fen) {

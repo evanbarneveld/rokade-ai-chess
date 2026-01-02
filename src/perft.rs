@@ -1,5 +1,5 @@
 use crate::piece::piece_mover::PieceMover;
-use crate::search::search::find_all_valid_moves;
+use crate::search::advanced_search::find_all_valid_moves;
 use crate::state::game_state::GameState;
 
 #[inline]

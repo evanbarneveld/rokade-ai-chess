@@ -1,7 +1,7 @@
 use crate::board::Board;
 use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{piece_value_cp, Color, PieceType};
-use crate::search::search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED};
+use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED};
 use crate::state::game_state::GameState;
 use crate::search::see::see_dest_estimate;
 use crate::search::time_control::time_is_up;
@@ -12,7 +12,7 @@ const FUT_MARGIN: i32 = 40;
 const DELTA_MARGIN: i32 = 120; // centipawns
 const MAX_QUIET_PUSHES: usize = 2;
 
-// Quiescence search: consider only tactical continuations (captures) unless in check.
+// Quiescence Search: consider only tactical continuations (captures) unless in check.
 pub fn qsearch(
     board: &mut Board,
     to_move: Color,
@@ -30,7 +30,7 @@ pub fn qsearch(
         return evaluate_position(&*board, to_move);
     }
     // Draw checks in quiescence as well (only if Zobrist hashing is enabled)
-    if crate::search::search::ZOBRIST_HASHING_ENABLED {
+    if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
         let key_here = compute_zobrist(&*board, to_move);
         if rep_stack.iter().any(|&k| k == key_here) {
             return 0;

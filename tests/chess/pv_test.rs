@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use chess::generator::move_generator::generate_move_as_san;
+use chess::search::SearchMode;
 use chess::search::uci_feedback::set_info_callback;
 
 #[test]
@@ -16,7 +18,7 @@ fn depth2_pv_first_move_is_exd5() {
 
     let history = game.get_history().clone();
     let depth = 2usize;
-    let _san = chess::generator::move_generator::generate_move_as_san(
+    let _san = generate_move_as_san(SearchMode::Advanced,
         *game.get_game_state(), &history, depth, 10_000, 1000
     ).unwrap();
 

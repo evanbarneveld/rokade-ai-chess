@@ -6,7 +6,7 @@ use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
 use crate::search::alphabeta::alphabeta;
 use crate::search::playing_strength::strength_noise_sigma;
-use crate::search::search::find_all_valid_moves;
+use crate::search::advanced_search::find_all_valid_moves;
 use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
 use crate::search::tt::{decode_move, TranspositionTable};
 use crate::search::zobrist::compute_zobrist;
@@ -72,7 +72,7 @@ pub fn build_pv_for_root(
 
 pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usize, usize), (usize, usize))>, filtered: &mut Vec<((usize, usize), (usize, usize))>) {
     // Previously applied piece-specific root filtering (queen/minor handling) has been removed.
-    // With a stronger evaluator, we keep all legal root moves and rely on search/eval to decide.
+    // With a stronger evaluator, we keep all legal root moves and rely on Search/eval to decide.
     filtered.extend(v.iter().copied());
 }
 

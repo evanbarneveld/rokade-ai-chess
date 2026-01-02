@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_best_move, DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH, MAX_SEARCH_DEPTH};
+use crate::search::advanced_search::{DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH, MAX_SEARCH_DEPTH};
+use crate::search::{find_best_move_with_mode, SearchMode};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 use crate::search::uci_feedback::set_info_callback;
@@ -15,7 +16,7 @@ use crate::search::uci_feedback::set_info_callback;
 // - ucinewgame
 // - position [startpos|fen <fen>] [moves <move1> <move2> ...]
 // - go depth N
-// - stop (no-op for instant search)
+// - stop (no-op for instant Search)
 // - quit
 // Notes:
 // - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
@@ -53,9 +54,27 @@ pub fn run_uci() -> io::Result<()> {
             writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
             let m2 = "id author erik van barneveld".to_string();
             writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);
+            let opt = "option name SearchMode type combo default Advanced var Advanced var Simple".to_string();
+            writeln!(stdout, "{}", opt)?; log_io(&mut log, "OUT", &opt);
             let m3 = "uciok".to_string();
             writeln!(stdout, "{}", m3)?; log_io(&mut log, "OUT", &m3);
             stdout.flush()?;
+            continue;
+        }
+        if line.to_ascii_lowercase().starts_with("setoption ") {
+            // minimal parser for: setoption name SearchMode value <Advanced|Simple>
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("name searchmode") {
+                if let Some(idx) = lower.find("value ") {
+                    let val = line[(idx+6)..].trim();
+                    let mode = match val.to_ascii_lowercase().as_str() {
+                        "advanced" => Some(SearchMode::Advanced),
+                        "simple" => Some(SearchMode::Simple),
+                        _ => None,
+                    };
+                    if let Some(m) = mode { engine.set_search_mode(m); }
+                }
+            }
             continue;
         }
         if line == "isready" {
@@ -109,17 +128,17 @@ pub fn run_uci() -> io::Result<()> {
             });
             set_info_callback(Some(info_cb));
 
-            // Apply a time budget for this search
+            // Apply a time budget for this Search
             set_time_budget_ms(movetime);
             let (best_move_str, info_opt) = go_bestmove_with_info(&mut engine, line, movetime);
             clear_time_budget();
-            // Clear the callback after search completes
+            // Clear the callback after Search completes
             set_info_callback(None);
             let elapsed_ms = start.elapsed().as_millis();
             let nodes = get_nodes();
             let nps = if elapsed_ms == 0 { 0 } else { ((nodes as u128 * 1000u128) / elapsed_ms) as u128 };
 
-            // If we have extra info from the search, emit a UCI info line
+            // If we have extra info from the Search, emit a UCI info line
             if let Some((score_cp, depth_used)) = info_opt {
                 let info = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, score_cp as f32, elapsed_ms, nodes, nps, best_move_str);
                 writeln!(stdout, "{}", info)?; log_io(&mut log, "OUT", &info);
@@ -131,7 +150,7 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line == "stop" {
-            // no search thread yet
+            // no Search thread yet
             continue;
         }
         if line == "quit" {
@@ -221,7 +240,7 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, mut move_time_in_ms
 
     let gs_copy = { *engine.get_game_state() };
     let history_clone = { engine.get_history().clone() };
-    // Use maximum playing strength by default; time control will be enforced by search budget.
+    // Use maximum playing strength by default; time control will be enforced by Search budget.
     let mut playing_strength = MAX_PLAYING_STRENGTH;
 
     //if move_time is set a value below 1000mS. Then the user clearly wants to use low strength.
@@ -233,9 +252,9 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, mut move_time_in_ms
         move_time_in_ms = DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY;
     }
 
-    // Apply a time budget for this search
+    // Apply a time budget for this Search
     set_time_budget_ms(move_time_in_ms);
-    let best = find_best_move(&gs_copy, &history_clone, depth, playing_strength);
+    let best = find_best_move_with_mode(engine.get_search_mode(), &gs_copy, &history_clone, depth, playing_strength);
     clear_time_budget();
 
     if let Some(((fr, fc), (tr, tc), score_cp, depth_used)) = best {

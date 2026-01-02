@@ -5,7 +5,7 @@ use crate::piece::pieces::{Color, PieceType};
 use crate::search::heuristics::SearchHeuristics;
 use crate::search::prune_null_moves::prune_null_moves;
 use crate::search::qsearch::qsearch;
-use crate::search::search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE};
+use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 use crate::state::game_state::GameState;
 use crate::search::telemetry::bump_node;
 use crate::search::time_control::time_is_up;
@@ -14,7 +14,7 @@ use crate::search::zobrist::compute_zobrist;
 
 const HUNDRED_HALF_MOVES: u32 = 100;
 
-// Alpha-beta pruning search. Returns evaluation in centipawns (positive is better for White).
+// Alpha-beta pruning Search. Returns evaluation in centipawns (positive is better for White).
 pub fn alphabeta(
     board: &mut Board,
     to_move: Color,
@@ -39,10 +39,10 @@ pub fn alphabeta(
     //println!("alpha-beta\n{}", board.get_board_display_string(None));
 
     // Repetition/50-move draw checks at node entry (only if Zobrist hashing is enabled)
-    let key_here: u64 = if crate::search::search::ZOBRIST_HASHING_ENABLED {
+    let key_here: u64 = if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
         compute_zobrist(&*board, to_move)
     } else { 0 };
-    if crate::search::search::ZOBRIST_HASHING_ENABLED {
+    if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
         // If this key already exists in the current line, it's a repetition -> draw
         if rep_stack.iter().any(|&k| k == key_here) {
             return 0;
@@ -113,7 +113,7 @@ pub fn alphabeta(
         }
         tail.sort_by_key(|&(from, to)| {
             // Base MVV-LVA score (optional)
-            let mut key = if crate::search::search::MVV_LVA_ENABLED {
+            let mut key = if crate::search::advanced_search::MVV_LVA_ENABLED {
                 board_ref.move_score_mvv_lva(from, to)
             } else { 0 };
             let moved_is_pawn = board_ref
@@ -173,12 +173,12 @@ pub fn alphabeta(
     let original_beta = beta;
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
     // Push current position to repetition stack for descendants (only if enabled)
-    let pushed_rep = if crate::search::search::ZOBRIST_HASHING_ENABLED {
+    let pushed_rep = if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
         rep_stack.push(key_here);
         true
     } else { false };
 
-    // Create/extend search heuristics container (stack-allocated per call chain depth)
+    // Create/extend Search heuristics container (stack-allocated per call chain depth)
     // We pass it implicitly via thread-local static since function signatures are fixed; for simplicity,
     // keep a single heuristics instance at root using OnceLock. This is conservative but effective.
     thread_local! {
@@ -253,7 +253,7 @@ pub fn alphabeta(
                 // Strictly avoid reducing checking moves at shallow depth
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
-                if crate::search::search::LMR_ENABLED {
+                if crate::search::advanced_search::LMR_ENABLED {
                     if quiet
                         && child_depth >= 3
                         && move_index >= 4
@@ -282,7 +282,7 @@ pub fn alphabeta(
                         reduced_depth = reduced_depth.saturating_sub(r);
                     }
                 }
-                // Null-window search for subsequent moves (PVS window)
+                // Null-window Search for subsequent moves (PVS window)
                 score = alphabeta(
                     board,
                     Color::Black,
@@ -295,7 +295,7 @@ pub fn alphabeta(
                     rep_stack,
                 );
                 if score > alpha && score < beta {
-                    // Re-search with full window on fail-high/improvement inside window
+                    // Re-Search with full window on fail-high/improvement inside window
                     score = alphabeta(
                         board,
                         Color::Black,
@@ -404,7 +404,7 @@ pub fn alphabeta(
                 // Strictly avoid reducing checking moves at shallow depth
                 // Never reduce checking moves at shallow depths
                 let allow_reduce = !(gives_check && child_depth <= 5);
-                if crate::search::search::LMR_ENABLED {
+                if crate::search::advanced_search::LMR_ENABLED {
                     if quiet
                         && child_depth >= 3
                         && move_index >= 4

@@ -1,6 +1,6 @@
 use crate::piece::pieces::{PieceType};
 use crate::state::game_state::GameState;
-use crate::search::search::find_all_valid_moves;
+use crate::search::advanced_search::find_all_valid_moves;
 use rand::{rng, Rng};
 
 // A tiny in-code opening book keyed by truncated FEN (first 4 fields).

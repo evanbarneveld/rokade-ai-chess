@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-// --- Global time budget (deadline) for search ---
+// --- Global time budget (deadline) for Search ---
 static DEADLINE_CELL: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 
 #[inline]
@@ -10,7 +10,7 @@ fn deadline_cell() -> &'static Mutex<Option<Instant>> {
 }
 
 
-/// Set a hard time budget for the ongoing search. Passing 0 disables the budget.
+/// Set a hard time budget for the ongoing Search. Passing 0 disables the budget.
 pub(crate) fn set_time_budget_ms(ms: usize) {
     let mut guard = deadline_cell().lock().unwrap();
     if ms == 0 {
@@ -20,7 +20,7 @@ pub(crate) fn set_time_budget_ms(ms: usize) {
     }
 }
 
-/// Clear any active time budget (search will run to completion by depth).
+/// Clear any active time budget (Search will run to completion by depth).
 pub(crate) fn clear_time_budget() {
     let mut guard = deadline_cell().lock().unwrap();
     *guard = None;

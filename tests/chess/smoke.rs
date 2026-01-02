@@ -202,7 +202,7 @@ fn test_weird_move1() {
     let last_move = history.get_last_move();
     println!("Last move: {:?}", last_move);
     //get best move
-    let san_move = generate_move_as_san(*game.get_game_state(), &history, 7, 10000, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 7, 10000, 1000).unwrap();
     println!("Best move: {:?}", san_move);
     assert_ne!(san_move, "Kd1xc2");
 }
@@ -215,7 +215,7 @@ fn test_weird_move2() {
     println!("Fen: {}", fen);
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
-    let san_move = generate_move_as_san(*game.get_game_state(), &history, 7, 10000, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 7, 10000, 1000).unwrap();
     println!("Best move: {:?}", san_move);
     assert_ne!(san_move, "Bc8h3");
 }

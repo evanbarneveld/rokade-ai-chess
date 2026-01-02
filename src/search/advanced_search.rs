@@ -17,8 +17,9 @@ use crate::state::game_state::GameState;
 use rayon::prelude::*;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 use crate::book::book::book_pick;
+use crate::search::Search;
 
-pub const DEFAULT_SEARCH_DEPTH: usize = 7;
+pub const DEFAULT_SEARCH_DEPTH: usize = 4;
 pub const MAX_SEARCH_DEPTH: usize = 20;
 
 // Root parallelization settings
@@ -32,20 +33,20 @@ const STRENGTH_MODE_ENABLED: bool = false; // TODO not the default
 // Global toggle to enable/disable Zobrist hashing across the engine.
 // When disabled, features relying on Zobrist keys (like TT and repetition checks)
 // will be bypassed.
-pub(crate) const ZOBRIST_HASHING_ENABLED: bool = true;
+pub(crate) const ZOBRIST_HASHING_ENABLED: bool = false;
 
 // Tie the transposition table to Zobrist hashing. Without Zobrist keys, TT is disabled.
 pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = ZOBRIST_HASHING_ENABLED; // WARNING: Disabling TT can be 2–10x slower
 
-pub(crate) const NULL_MOVE_PRUNING_ENABLED: bool = true;
-pub(crate) const SEE_FILTERING_ENABLED: bool = true;
-pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true;
+pub(crate) const NULL_MOVE_PRUNING_ENABLED: bool = false;
+pub(crate) const SEE_FILTERING_ENABLED: bool = false;
+pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = false;
 
 pub(crate) const QUIESCENCE_ENABLED: bool = false ; // TODO Disabling may cause horizon effects
-pub(crate) const QSEE_PRUNING_ENABLED: bool = true; // SEE-based pruning inside qsearch
-pub(crate) const MVV_LVA_ENABLED: bool = true; // Capture ordering heuristic
-pub(crate) const LMR_ENABLED: bool = true; // Late Move Reductions
-pub(crate) const ID_ITERATIONS_ENABLED: bool = true; // Iterative deepening loop
+pub(crate) const QSEE_PRUNING_ENABLED: bool = false; // SEE-based pruning inside qsearch
+pub(crate) const MVV_LVA_ENABLED: bool = false; // Capture ordering heuristic
+pub(crate) const LMR_ENABLED: bool = false; // Late Move Reductions
+pub(crate) const ID_ITERATIONS_ENABLED: bool = false; // Iterative deepening loop
 
 // Iterative deepening aspiration window (in centipawns)
 // With a stronger, more stable evaluator we can start tighter and cap lower.
@@ -57,9 +58,29 @@ const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
 pub const MAX_PLAYING_STRENGTH: usize = 1000;
 pub const DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY: usize = 3000usize;
 
+// Provide a simple implementor of the `Search` trait that forwards to this module's function.
+// This keeps existing callers of the free function intact while enabling trait-based use.
+pub struct AdvancedSearch;
+
+impl Search for AdvancedSearch {
+    fn find_best_move(
+        game_state: &GameState,
+        history: &History,
+        search_depth: usize,
+        playing_strength: usize,
+    ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
+        find_best_move(
+            game_state,
+            history,
+            search_depth,
+            playing_strength,
+        )
+    }
+}
+
 /// Find the best move for the given game state, the search_depth, and the playing_strength
 /// returns the evaluated score (in centipawns) for the selected move
-/// and the effective search depth that was actually used internally.
+/// and the effective Search depth that was actually used internally.
 pub fn find_best_move(
     game_state: &GameState,
     history: &History,
@@ -69,7 +90,7 @@ pub fn find_best_move(
     init_rayon_pool_if_needed();
 
     // Persistent Transposition Table across searches: initialize once and reuse.
-    // We keep it behind a Mutex to allow mutable access in this serial root search.
+    // We keep it behind a Mutex to allow mutable access in this serial root Search.
 
     let tt_mutex = get_tt_mutex();
 
@@ -192,7 +213,7 @@ pub fn find_best_move(
             chosen = Some((bf, bt, best_adj, depth_now));
         }
     } else {
-        // Single-depth search without iterative deepening
+        // Single-depth Search without iterative deepening
         let depth_now = effective_depth;
         tt.next_age();
         let ((bf, bt), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
@@ -509,7 +530,7 @@ fn evaluate_root_for_bounds(
         && depth_now >= ROOT_PARALLEL_MIN_DEPTH
         && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
     if enable_parallel {
-        //eprintln!("Parallel root search enabled");
+        //eprintln!("Parallel root Search enabled");
         // 1) Search the first (best-ordered) move serially to establish PV and bounds
         let &(pv_from, pv_to) = ordered.first().unwrap();
         {

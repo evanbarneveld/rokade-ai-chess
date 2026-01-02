@@ -3,8 +3,9 @@ use std::io::Write;
 use crate::board::evaluator::evaluate_position;
 use crate::Chess;
 use crate::generator::move_generator::generate_move_as_san;
+use crate::search::SearchMode;
 use crate::pgn_player::pgn_player::PgnPlayer;
-use crate::search::search::DEFAULT_SEARCH_DEPTH;
+use crate::search::advanced_search::DEFAULT_SEARCH_DEPTH;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 
@@ -73,10 +74,33 @@ pub fn run_cli() {
                 break;
             }
 
+            // set search mode
+            if some_input.to_ascii_lowercase().starts_with("searchmode") {
+                let parts: Vec<&str> = some_input.split_whitespace().collect();
+                if parts.len() == 1 {
+                    println!("Current search mode: {:?}", game.get_search_mode());
+                    continue;
+                }
+                if parts.len() == 2 {
+                    let mode_str = parts[1].to_ascii_lowercase();
+                    let new_mode = match mode_str.as_str() {
+                        "advanced" => Some(SearchMode::Advanced),
+                        "simple" => Some(SearchMode::Simple),
+                        _ => None,
+                    };
+                    if let Some(m) = new_mode {
+                        game.set_search_mode(m);
+                        println!("Set search mode to {:?}", m);
+                    } else {
+                        println!("Invalid mode. Use: searchmode [advanced|simple]");
+                    }
+                    continue;
+                }
+            }
+
             if handle_game_mode_commands(&mut mode, &some_input) {
                 continue;
             }
-
 
             if some_input.eq_ignore_ascii_case("fen") {
                 println!("{}\n", game.to_fen());
@@ -145,7 +169,7 @@ pub fn run_cli() {
             let movetime = if game.active_color_is_white() { white_bot_movetime } else { black_bot_movetime };
             let gs_copy = *game.get_game_state();
             let history_clone = game.get_history().clone();
-            if let Some(generated_move) = generate_move_as_san(gs_copy, &history_clone, search_depth, movetime, strength) {
+            if let Some(generated_move) = generate_move_as_san(game.get_search_mode(), gs_copy, &history_clone, search_depth, movetime, strength) {
                 println ! ("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {
@@ -175,7 +199,7 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
     let first = parts.next();
 
     if first.is_none() {
-        println!("White bot search depth {}, black bot search depth {}", white_bot_search_depth, black_bot_search_depth);
+        println!("White bot Search depth {}, black bot Search depth {}", white_bot_search_depth, black_bot_search_depth);
         return true
     }
     let second = parts.next();
@@ -194,7 +218,7 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
             if let Some(v) = parse_depth(n) {
                 *white_bot_search_depth = v;
                 *black_bot_search_depth = v;
-                println!("Set both bot search depths to {} (0..10).", v);
+                println!("Set both bot Search depths to {} (0..10).", v);
             } else {
                 println!("Invalid strength. Use: depth <0..10> | depth white <0..10> | depth black <0..10>");
             }
@@ -204,9 +228,9 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("white") => {
             if let Some(v) = parse_depth(n) {
                 *white_bot_search_depth = v;
-                println!("Set white bot search depth to {} (0..10).", v);
+                println!("Set white bot Search depth to {} (0..10).", v);
             } else {
-                println!("Invalid search depth for white. Use: depth white <0..10>");
+                println!("Invalid Search depth for white. Use: depth white <0..10>");
             }
             return true
         }
@@ -214,9 +238,9 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("black") => {
             if let Some(v) = parse_depth(n) {
                 *black_bot_search_depth = v;
-                println!("Set black bot search depth to {} (0..10).", v);
+                println!("Set black bot Search depth to {} (0..10).", v);
             } else {
-                println!("Invalid search depth for black. Use: depth black <0..10>");
+                println!("Invalid Search depth for black. Use: depth black <0..10>");
             }
             return true
         }
@@ -446,21 +470,24 @@ fn print_help() {
     println!("reset standard           - set the initial position to the standard position and reset the board");
     println!("pgn_database <file>      - replay the given PGN file");
     println!("fen                      - print the current FEN position");
-    println!("depth                    - get the search depths of the bots (higher = stronger)");
-    println!("depth <0..10>            - set both bots' search dept");
-    println!("depth white <0..10>      - set white bot search dept");
-    println!("depth black <0..10>      - set black bot search dept");
+    println!("depth                    - get the Search depths of the bots (higher = stronger)");
+    println!("depth <0..10>            - set both bots' Search dept");
+    println!("depth white <0..10>      - set white bot Search dept");
+    println!("depth black <0..10>      - set black bot Search dept");
     println!("strength                 - get the strength of the bots (0..1000)");
     println!("strength <0..1000>       - set both bots' strength");
     println!("strength white <0..1000> - set white bot strength");
     println!("strength black <0..1000> - set black bot strength");
     println!("movetime                 - get the movetime of the bots (higher = stronger)");
-    println!("movetime <0..600>       - set both bots' movetime");
-    println!("movetime white <0..600> - set white bot movetime");
-    println!("movetime black <0..600> - set black bot movetime");
+    println!("movetime <0..600>        - set both bots' movetime");
+    println!("movetime white <0..600>  - set white bot movetime");
+    println!("movetime black <0..600>  - set black bot movetime");
     println!("eval                     - evaluate the current position");
     println!("bvsb                     - set playing mode 'bot vs bot'");
     println!("pvp                      - set playing mode 'player vs player'");
+    println!("searchmode               - get search mode (advanced or simple)");
+    println!("searchmode advanced      - set search mode to advanced");
+    println!("searchmode simple        - set search mode to simple");
 }
 
 fn handle_game_mode_commands(mode: &mut GameMode, some_input: &String) -> bool {
