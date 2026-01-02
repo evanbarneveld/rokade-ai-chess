@@ -1,6 +1,9 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
 
+pub const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000;
+pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
+
 // Material scores (centipawns)
 const PAWN: i32 = 100;
 const KNIGHT: i32 = 320;

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use crate::Chess;
 use crate::piece::as_move_str;
-use crate::search::search::{find_best_move, DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH};
+use crate::search::search::{find_best_move, DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH, MAX_SEARCH_DEPTH};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 use crate::search::uci_feedback::set_info_callback;
@@ -217,7 +217,7 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
 pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, mut move_time_in_ms: usize) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
     let mut depth = parse_depth(line).unwrap_or(DEFAULT_SEARCH_DEPTH);
-    if depth > DEFAULT_SEARCH_DEPTH { depth = DEFAULT_SEARCH_DEPTH; }
+    if depth > MAX_SEARCH_DEPTH { depth = MAX_SEARCH_DEPTH; }
 
     let gs_copy = { *engine.get_game_state() };
     let history_clone = { engine.get_history().clone() };

@@ -15,16 +15,19 @@ use crate::search::zobrist::compute_zobrist;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 use rayon::prelude::*;
+pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 use crate::book::book::book_pick;
 
-pub const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000;
-pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
+pub const DEFAULT_SEARCH_DEPTH: usize = 7;
+pub const MAX_SEARCH_DEPTH: usize = 20;
 
-pub const DEFAULT_SEARCH_DEPTH: usize = 15;
+// Root parallelization settings
+pub(crate) const ROOT_PARALLELIZATION_ENABLED: bool = false; // TODO not the default
+const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // TODO not the default enable root parallel only from this depth
+const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
 
-pub(crate) const ROOT_PARALLELIZATION_ENABLED: bool = true; // TODO WARNING
-const ORDERBOOK_ENABLED: bool = false; // TODO WARNING
-const STRENGTH_MODE_ENABLED: bool = false; // TODO WARNING
+const ORDERBOOK_ENABLED: bool = false; // TODO not the default
+const STRENGTH_MODE_ENABLED: bool = false; // TODO not the default
 
 // Global toggle to enable/disable Zobrist hashing across the engine.
 // When disabled, features relying on Zobrist keys (like TT and repetition checks)
@@ -34,16 +37,10 @@ pub(crate) const ZOBRIST_HASHING_ENABLED: bool = true;
 // Tie the transposition table to Zobrist hashing. Without Zobrist keys, TT is disabled.
 pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = ZOBRIST_HASHING_ENABLED; // WARNING: Disabling TT can be 2–10x slower
 
-// Optimization feature toggles (compile-time booleans)
-// Set to true to enable the corresponding optimization.
-// Note: These are coarse global switches primarily for experimentation.
 pub(crate) const NULL_MOVE_PRUNING_ENABLED: bool = true;
 pub(crate) const SEE_FILTERING_ENABLED: bool = true;
 pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true;
 
-// Focused debug toggles (compile-time booleans)
-// Warning: Disabling some of these can cause large slowdowns and strength drops.
-// Keep defaults true to preserve current behavior.
 pub(crate) const QUIESCENCE_ENABLED: bool = false ; // TODO Disabling may cause horizon effects
 pub(crate) const QSEE_PRUNING_ENABLED: bool = true; // SEE-based pruning inside qsearch
 pub(crate) const MVV_LVA_ENABLED: bool = true; // Capture ordering heuristic
@@ -54,10 +51,6 @@ pub(crate) const ID_ITERATIONS_ENABLED: bool = true; // Iterative deepening loop
 // With a stronger, more stable evaluator we can start tighter and cap lower.
 const ASP_WINDOW_INIT_CP: i32 = 30; // initial aspiration half-window
 const ASP_WINDOW_MAX_CP: i32 = 400; // maximum expanded half-window
-
-// Root parallelization thresholds
-const ROOT_PARALLEL_MIN_DEPTH: usize = 15; // enable root parallel only from this depth
-const ROOT_PARALLEL_MIN_MOVES: usize = 3; // and when at least this many root moves exist
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
 const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
