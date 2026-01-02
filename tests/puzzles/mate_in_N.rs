@@ -199,6 +199,9 @@ fn test_mates_generic() {
                         matched_all_engine_moves = false;
                         break;
                     }
+                } else {
+                    println!("Engine move {} == expected move {}", engine_move_san.clone().unwrap(), expected_engine_san_str);
+
                 }
 
                 // Apply the engine move (according to expected token) to advance the position

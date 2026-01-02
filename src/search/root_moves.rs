@@ -316,6 +316,22 @@ pub fn adjust_root_score(
     } else {
         // Stronger tie-break for checking moves at root to favor forcing tactics
         adjusted += 60;
+
+        // Opponent mobility after a checking move: fewer replies -> larger bonus.
+        // Compute opponent legal moves in the checked position and scale bonus inversely.
+        let opp_state = crate::state::game_state::GameState::from_board_and_side(post_probe.clone(), opp);
+        let legals = crate::search::advanced_search::find_all_valid_moves(&opp_state);
+        let replies = legals.len() as i32;
+        // Scale: up to +120 when replies are 0-2, diminishing thereafter.
+        let mobility_bonus = match replies {
+            0 => 120, // mate next: huge bonus
+            1..=2 => 100,
+            3..=5 => 60,
+            6..=8 => 30,
+            9..=12 => 10,
+            _ => 0,
+        };
+        adjusted += mobility_bonus;
     }
 
     adjusted
