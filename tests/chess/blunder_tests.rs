@@ -16,6 +16,10 @@ fn test_blunder_avoidance() {
     set_deterministic(true);
     // Each case: (FEN, known blunder in coordinate SAN form like "g7g6")
     let cases = [
+       (
+            "r1b1k2B/ppp4p/5p2/3pp3/8/8/PP1NPPPP/R3KB1R b q - 0 13",
+            "Bc8h3",
+        ),
         (
             "r1bqkb1r/pppppppp/2n5/7n/3PP3/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 2 4",
             "Nc6xd4", // Nc6xd4 looses the knight

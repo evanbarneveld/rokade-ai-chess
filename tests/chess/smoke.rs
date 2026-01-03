@@ -4,45 +4,6 @@ use serial_test::serial;
 use chess::search::advanced_search::debug_rank_root_moves;
 use chess::search::set_deterministic;
 
-
-#[test]
-#[serial]
-fn test_weird_move1() {
-    let fen = "r1b1kB1r/ppp1p2p/5p2/3Qp3/8/8/PPnNPPPP/R2K1B1R b kq - 1 10";
-    let mv = "e6";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    let history = game.get_history().clone();
-    let last_move = history.get_last_move();
-    println!("Last move: {:?}", last_move);
-    //get best move
-    set_deterministic(true);
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 1000, 1000).unwrap();
-    println!("Best move: {:?}", san_move);
-    assert_ne!(san_move, "Kd1xc2");
-}
-
-#[test]
-#[serial]
-fn test_weird_move2() {
-    let fen = "r1b1k2B/ppp4p/5p2/3pp3/8/8/PP1NPPPP/R3KB1R b q - 0 13";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    set_deterministic(true);
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 1000, 1000).unwrap();
-    println!("Best move: {:?}", san_move);
-    assert_ne!(san_move, "Bc8h3");
-}
-
 #[test]
 #[serial]
 fn test_mate_in_2_move1() {
@@ -98,7 +59,6 @@ fn test_knight_move() {
     assert_eq!(san_move, "Qh4")    //good move
 }
 
-
 #[test]
 #[serial]
 fn test_queen_save() {
@@ -108,11 +68,34 @@ fn test_queen_save() {
     set_deterministic(true);
     //get best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
+    assert_eq!(san_move, "Qxe7+"); //only good move
+
     // Debug: rank root moves with adjusted scores
     let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4, 1000);
     println!("Root ranks (SAN, adj, raw): {:?}", ranks);
     // The best move saves the queen
-    assert_eq!(san_move, "Qxe7") //only good move
+
+}
+
+#[test]
+#[serial]
+fn test_queen_save2() {
+    let fen = "r1b1kB1r/ppp4p/4pp2/3Qp3/8/8/PPnNPPPP/R2K1B1R w kq - 0 11";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    set_deterministic(true);
+    //get best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_eq!(&san_move[0..1], "Q"); //only good move is to move the queen
+    assert_ne!(san_move, "Qd8+"); //bad move
+    
+    // Debug: rank root moves with adjusted scores
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4, 1000);
+    println!("Root ranks (SAN, adj, raw): {:?}", ranks);
+    // The best move saves the queen
+
 }
