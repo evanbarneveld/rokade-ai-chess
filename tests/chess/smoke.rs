@@ -96,3 +96,21 @@ fn test_queen_save2() {
     assert_eq!(&san_move[0..1], "Q"); //only good move is to move the queen
     assert_ne!(san_move, "Qd8+"); //bad move
 }
+
+
+#[test]
+#[serial]
+fn test_bad_queen_offer() {
+    // in this position the engine generates a move that checks the white king (Qe5+), but doing so the queen
+    // can immediately be captured by the knight on f3 (with Nf3xe5)
+    // therefore, this is a very bad move that must be avoided.
+    let fen = "rnb1kbnr/ppp1pp1p/6p1/3q4/3P4/5N2/PPP2PPP/RNBQKB1R b KQkq - 1 4 ";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    set_deterministic(true);
+    //get best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Qe5+"); //bad move
+}

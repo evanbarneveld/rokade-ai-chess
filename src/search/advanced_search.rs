@@ -842,7 +842,6 @@ fn probe_with_aspiration(
     //eprintln!("[asp] depth={} init a={} b={} last={}", depth_now, a, b, last_score);
 
     let mut tried = 0;
-    let mut did_fallback_full = false;
     loop {
         tried += 1;
 
@@ -889,7 +888,7 @@ fn probe_with_aspiration(
         }
         // At this point we have tried a few widened windows but still failed to land inside bounds.
         // To ensure a stable PV update at this depth, fall back to a full-width search once.
-        if !did_fallback_full {
+         {
             // Reset to full window and a modest aspiration window for subsequent depths
             *window = (*window).max(ASP_WINDOW_INIT_CP);
             let (fa, fb) = (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1);
@@ -906,10 +905,8 @@ fn probe_with_aspiration(
                 game_state,
                 history,
             );
-            did_fallback_full = true;
             return (mv2, best_adj2, best_raw2);
         }
-        return (mv, best_adjusted, best_score_raw);
     }
 }
 
