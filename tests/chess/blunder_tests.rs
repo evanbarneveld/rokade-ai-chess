@@ -9,13 +9,7 @@ use chess::board::san_move::convert_move_to_san;
 use chess::state::game_state::GameState;
 use chess::piece::pieces::{Color, PieceType};
 
-fn best_move_for_fen(fen: &str, depth: usize) -> Option<String> {
-    let gs = reset_from_fen(fen).expect("valid FEN");
-    let history = History::new();
-    // movetime=0 means fixed-depth only
-    generate_move_as_san(SearchMode::Advanced, gs, &history, depth, 0, PLAYING_STRENGTH_MAX)
-}
-
+/// this test checks if, for a given FEN, the blundering move is not made by the engine
 #[test]
 fn test_blunder_avoidance() {
     // Ensure deterministic behavior for this test run
@@ -51,7 +45,7 @@ fn test_blunder_avoidance() {
     ];
 
     for (fen, blunder) in cases {
-        let got = best_move_for_fen(fen, 4)
+        let got = best_move_using_depth_search_no_time_limit_for_fen(fen, 4)
             .unwrap_or_else(|| panic!("No move found for FEN: {}", fen));
         eprintln!("FEN: {}\nchose: {}\n", fen, got);
         assert_ne!(
@@ -74,7 +68,8 @@ fn debug_moves_after_e7e5() {
     let mut e7e5_from_to: Option<((usize, usize), (usize, usize))> = None;
     for (from, to, _promo) in &black_moves {
         if let Some(s) = convert_move_to_san(gs, Some((*from, *to))) {
-            if s == "e7e5" {
+            //println!("SAN: {}", s);
+            if s == "e5" {
                 e7e5_from_to = Some((*from, *to));
                 break;
             }
@@ -96,7 +91,7 @@ fn debug_moves_after_e7e5() {
             if s.contains('x') { // capture formatting uses 'x'
                 sans.push(s.clone());
             }
-            if s == "d4xe5" || s == "d4e5" { // accept either strict or coordinate capture style
+            if s == "dxe5" { // accept either strict or coordinate capture style
                 has_dxe5 = true;
             }
         }
@@ -134,4 +129,11 @@ fn enumerate_legal_moves(game_state: &GameState) -> Vec<((usize, usize), (usize,
         }
     }
     result
+}
+
+fn best_move_using_depth_search_no_time_limit_for_fen(fen: &str, depth: usize) -> Option<String> {
+    let gs = reset_from_fen(fen).expect("valid FEN");
+    let history = History::new();
+    // movetime=0 means fixed-depth only
+    generate_move_as_san(SearchMode::Advanced, gs, &history, depth, 0, PLAYING_STRENGTH_MAX)
 }

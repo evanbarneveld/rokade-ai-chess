@@ -304,14 +304,15 @@ pub fn adjust_root_score(
                     // Reward safe evacuation
                     let mut evac_bonus = 0;
                     let see_new = see_dest_estimate(&post, side, to, 0);
-                    if !still_attacked || see_new >= 0 { evac_bonus += 2000; }
+                    // General safe-evacuation reward (non-pawn threats): keep modest
+                    if !still_attacked || see_new >= 0 { evac_bonus += 400; }
                     if pt == PieceType::Knight {
                         // centralization bonus and preference for d5
                         let (nr,nc) = to;
                         let centers=[(3,3),(3,4),(4,3),(4,4)];
-                        let mut cb=0; for &(cr,cc) in &centers { let dr = if nr>cr {nr-cr}else{cr-nr}; let dc=if nc>cc{nc-cc}else{cc-nc}; let dist=(dr+dc) as i32; cb=cb.max(300-50*dist); }
-                        if to==(3,3) { cb += 500; }
-                        if !knight_safe.is_empty() && knight_safe.iter().any(|&sq| sq==to) { cb += 300; }
+                        let mut cb=0; for &(cr,cc) in &centers { let dr = if nr>cr {nr-cr}else{cr-nr}; let dc=if nc>cc{nc-cc}else{cc-nc}; let dist=(dr+dc) as i32; cb=cb.max(60-10*dist); }
+                        if to==(3,3) { cb += 80; }
+                        if !knight_safe.is_empty() && knight_safe.iter().any(|&sq| sq==to) { cb += 80; }
                         evac_bonus += cb.max(0);
                     }
                     // Absolute priority clamp: if the knight was pawn-threatened and has any safe squares,
@@ -330,7 +331,7 @@ pub fn adjust_root_score(
                     }
                     // General penalty for leaving an attacked minor as-is
                     if still_attacked {
-                        let pen = match pt { PieceType::Knight|PieceType::Bishop => 900, PieceType::Rook=>500, PieceType::Queen=>350, PieceType::Pawn=>120, PieceType::King=>2000 };
+                        let pen = match pt { PieceType::Knight|PieceType::Bishop => 200, PieceType::Rook=>120, PieceType::Queen=>80, PieceType::Pawn=>40, PieceType::King=>400 };
                         let val = if by_pawn { pen+400 } else { pen };
                         adjusted -= side_mul * val;
                     }
@@ -485,24 +486,53 @@ pub fn adjust_root_score(
         let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2; // up to 2x max per move
         if total_penalty > 0 { adjusted -= total_penalty.min(agg_cap); }
     } else {
-        // Stronger tie-break for checking moves at root to favor forcing tactics
-        adjusted += 60;
+        // Stronger tie-break for checking moves at root to favor forcing tactics.
+        // Use side-aware sign so it helps both White (maximizer) and Black (minimizer).
+        let side_mul: i32 = if side == Color::White { 1 } else { -1 };
+        // Base check tie-break (side-aware): strong to let forcing moves compete with evacuations
+        adjusted += side_mul * 400;
 
         // Opponent mobility after a checking move: fewer replies -> larger bonus.
         // Compute opponent legal moves in the checked position and scale bonus inversely.
         let opp_state = crate::state::game_state::GameState::from_board_and_side(post_probe.clone(), opp);
         let legals = crate::search::advanced_search::find_all_valid_moves(&opp_state);
         let replies = legals.len() as i32;
-        // Scale: up to +120 when replies are 0-2, diminishing thereafter.
+        // Scale: larger magnitudes so decisive checks can outrank passive evacuations at root.
         let mobility_bonus = match replies {
-            0 => 120, // mate next: huge bonus
-            1..=2 => 100,
-            3..=5 => 60,
-            6..=8 => 30,
-            9..=12 => 10,
-            _ => 0,
+            0 => 4000, // mate next: huge bonus
+            1..=2 => 3000,
+            3..=5 => 2000,
+            6..=8 => 1200,
+            9..=12 => 600,
+            _ => 200,
         };
-        adjusted += mobility_bonus;
+        adjusted += side_mul * mobility_bonus;
+    }
+
+    // Queen king-side pressure heuristic: reward creating direct threats on f2/h2 or f7/h7
+    // This captures common motifs like ...Qh4 aiming at f2/h2 (for Black) and Qh5/Qh4 ideas for White.
+    if let Some(mp) = base_board.get(from.0, from.1) {
+        if mp.get_type() == PieceType::Queen {
+            let mut post = base_board.clone();
+            post.set(from.0, from.1, None);
+            post.set(to.0, to.1, Some(mp));
+
+            let side_mul: i32 = if side == Color::White { 1 } else { -1 };
+            let targets: &[(usize,usize)] = if side == Color::White { &[(1,5),(1,7)] } else { &[(6,5),(6,7)] }; // f7/h7 or f2/h2
+            let mut hit_count = 0;
+            for &sq in targets {
+                let mut tmp = post.clone();
+                // Pass opponent as active_color so the function checks attacks by our side
+                let active_for_query = opposite_color(side);
+                if is_square_attacked_by_opponent(&mut tmp, sq, active_for_query) {
+                    hit_count += 1;
+                }
+            }
+            if hit_count > 0 {
+                let bonus = match hit_count { 1 => 350, _ => 700 };
+                adjusted += side_mul * bonus;
+            }
+        }
     }
 
     adjusted
