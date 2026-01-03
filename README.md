@@ -1,7 +1,8 @@
 
 BUGS
 
-- advanced search makes bad moves, worse than simple search
+- in deterministic mode, I still see variations
+- improve the heuristics by adding tests for bad moves
 
 TODO
 
