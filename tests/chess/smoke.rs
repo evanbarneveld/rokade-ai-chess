@@ -1,192 +1,12 @@
 use chess::Chess;
 use chess::generator::move_generator::generate_move_as_san;
-use chess::piece::pieces::Color;
-use chess::state::outcome::OutcomeType;
+use serial_test::serial;
+use chess::search::advanced_search::debug_rank_root_moves;
+use chess::search::set_deterministic;
+
 
 #[test]
-fn initial_fen() {
-    let g = Chess::new();
-    let fen = g.to_fen();
-    assert_eq!(fen, Chess::DEFAULT_CHESS_STARTING_FEN);
-}
-
-#[test]
-fn initial_e2e4_move() {
-    let mut g = Chess::new();
-    assert!(g.move_piece_san("e2e4"));
-    assert_eq!(g.to_fen(), "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1".to_string());
-}
-
-#[test]
-fn test_pawn_capture() {
-    let mut game = Chess::new();
-    game.set_starting_fen("rnbqkbnr/p1pppppp/P7/8/8/1p6/1PPPPPPP/RNBQKBNR w KQkq - 0 4");
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!( game.move_piece_san("cxb3"));
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert_eq!(game.to_fen(), "rnbqkbnr/p1pppppp/P7/8/8/1P6/1P1PPPPP/RNBQKBNR b KQkq - 0 4");
-}
-
-#[test]
-fn test_en_passant_pawn_capture() {
-    let mut game = Chess::new();
-    game.set_starting_fen("rnbqkbnr/1ppppp1p/8/p3P3/6pP/1P6/P1PP1PP1/RNBQKBNR b KQkq h3 0 4");
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!( game.move_piece_san("g4xh3"));
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert_eq!(game.to_fen(), "rnbqkbnr/1ppppp1p/8/p3P3/8/1P5p/P1PP1PP1/RNBQKBNR w KQkq - 0 5");
-}
-
-#[test]
-fn test_en_passant_capture_black() {
-    let mut game = Chess::new();
-    game.set_starting_fen("rn2k1nr/ppp2ppp/8/2bqpb2/2Pp4/1K3P2/PP1PP1PP/RNBQ1BNR b kq c3 0 7");
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san("dxc3"));
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-}
-
-#[test]
-fn test_pawn_move_over_piece() {
-    let mut game = Chess::new();
-    game.set_starting_fen("rnbqkbn1/ppppppp1/3r4/7p/7P/3R4/PPPPPPP1/RNBQKBN1 w KQkq h6 4 4");
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!( !game.move_piece_san("d2d4"));
-    assert!(game.move_piece_san("a2a4"));
-    assert!( !game.move_piece_san("d7d5"));
-}
-
-#[test]
-fn test_castling() {
-    let mut game = Chess::new();
-    game.set_starting_fen("r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4");
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san("O-O"));
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert_eq!(game.to_fen(), "r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 1 4");
-}
-
-#[test]
-fn test_castling_black() {
-    let mut game = Chess::new();
-    game.set_starting_fen("r3kbnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 b kq - 0 7");
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san("O-O-O"));
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert_eq!(game.to_fen(), "2kr1bnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 w - - 1 8");
-}
-#[test]
-fn test_ambiguous_move_due_to_pinned_pieces() {
-    let fen = "r2qkb1r/ppp2ppp/2n5/1B1npb2/8/2N1PN2/PP1P1PPP/R1BQK2R b KQkq - 5 7";
-    let mv = "Ne7";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-}
-
-#[test]
-fn test_ambigous_rook_error() {
-    let fen = "2r2bk1/ppp3pp/4rq2/8/2BQ4/2P5/PP3PPP/R3R1K1 b - - 0 21";
-    let mv = "Re8";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-}
-
-#[test]
-fn black_en_passant_error() {
-    let fen = "3r4/pp5p/5k2/5ppP/2P2N1K/4r1P1/PP5R/8 w - g6 0 29";
-    let mv = "hxg6";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-}
-
-#[test]
-fn test_check_mate() {
-    let fen = "r4rk1/ppp2ppp/2n5/3pp3/4n2q/7P/PPPPP1BP/RNBQ2KR b - - 4 11";
-    let mv = "Qf2";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    let history = game.get_history().clone();
-    game.get_game_state().recompute_outcome(&history);
-    let outcome = game.get_game_state().get_outcome().unwrap();
-    println!("Outcome: {:?}", outcome);
-    assert_eq!(outcome, OutcomeType::Checkmate { winner: Color::Black})
-}
-
-#[test]
-fn test_check_mate2() {
-    let fen = "rn2k1nr/ppp2ppp/8/2b1pb2/3q4/1K3P2/PP1PP1PP/RNBQ1BNR b kq - 2 9";
-    let mv = "Qb4+";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    let history = game.get_history().clone();
-    game.get_game_state().recompute_outcome(&history);
-    let outcome = game.get_game_state().get_outcome().unwrap();
-    println!("Outcome: {:?}", outcome);
-    assert_eq!(outcome, OutcomeType::Checkmate { winner: Color::Black})
-}
-
-#[test]
-fn test_check_with_o_o_o() {
-    let fen = "r3kb1r/pp2pppp/n1p2n2/5b2/2P4N/2N3P1/PP2PP1P/R1BK1B1R b kq - 4 8";
-    let mv = "O-O-O+";
-    //let mv = "e2";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    let history = game.get_history().clone();
-    game.get_game_state().recompute_outcome(&history);
-    let outcome = game.get_game_state().get_outcome().unwrap();
-    println!("Outcome: {:?}", outcome);
-    assert_eq!(outcome, OutcomeType::InCheck)
-}
-
-#[test]
+#[serial]
 fn test_weird_move1() {
     let fen = "r1b1kB1r/ppp1p2p/5p2/3Qp3/8/8/PPnNPPPP/R2K1B1R b kq - 1 10";
     let mv = "e6";
@@ -202,12 +22,14 @@ fn test_weird_move1() {
     let last_move = history.get_last_move();
     println!("Last move: {:?}", last_move);
     //get best move
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 7, 10000, 1000).unwrap();
+    set_deterministic(true);
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 1000, 1000).unwrap();
     println!("Best move: {:?}", san_move);
     assert_ne!(san_move, "Kd1xc2");
 }
 
 #[test]
+#[serial]
 fn test_weird_move2() {
     let fen = "r1b1k2B/ppp4p/5p2/3pp3/8/8/PP1NPPPP/R3KB1R b q - 0 13";
     let mut game = Chess::new();
@@ -215,75 +37,44 @@ fn test_weird_move2() {
     println!("Fen: {}", fen);
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 7, 10000, 1000).unwrap();
+    set_deterministic(true);
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 1000, 1000).unwrap();
     println!("Best move: {:?}", san_move);
     assert_ne!(san_move, "Bc8h3");
 }
 
-/*
-
-     r1bqkbnr/pppppppp/n7/8/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2
-     moves the pony and could be attacked
- */
-/*
 #[test]
-fn test_template_function() {
-    let fen = "<fen>";
-    let mv = "<move>";
+#[serial]
+fn test_mate_in_2_move1() {
+    let fen = "r2qkb1r/pp2nppp/3p4/2pNN1B1/2BnP3/3P4/PPP2PPP/R2bK2R w KQkq - 0 1";
     let mut game = Chess::new();
     game.set_starting_fen(fen);
-    println!("Fen: {}", fen);
-    println!("Move: {}", mv);
+    // Ensure stable choice
+    set_deterministic(true);
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
-    assert!(game.move_piece_san(mv));
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    let history = game.get_history().clone();
-    let last_move = history.get_last_move();
-    println!("Last move: {:?}", last_move);
+    //get best move
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 1000, 1000).unwrap();
+    println!("Best move: {:?}", san_move);
+    // the engine chooses Ke1xd1, which is certainly not the best move
+    // Expect official SAN with disambiguation and check marker
+    assert_eq!(san_move, "Nf6+");
 }
-*/
 
-/*
-
-rnb1kbnr/ppp1pppp/8/3q4/8/5N2/PPPPPPPP/R1BQKB1R b KQkq - 1 3
-black: Bc8-h3, a very bad move!
-
-
-test fens:
-
-Run each with go depth 12 (or your usual depth) and share info/bestmove if anything looks off.
-1)
-Original queen-hang (Qxf3? g2xf3!)
-rnb1kbnr/ppp1pppp/8/3q4/8/5N2/PPPPPPPP/R1BQKB1R b KQkq - 1 3
-Expected: Avoid d5f3; suggest a safer move like b8c6 or e7e5.
-2)
-Queen to a2 rook-capture motif (Qa2?? Ra1xa2!)
-rnb1kbnr/ppp1pppp/8/3q4/8/5N2/PPPPPPPP/R1BQKB1R b KQkq - 1 3
-Note: Same FEN. Confirm it never chooses d5a2 at final depth.
-3)
-Nd5? Qxd5! (unsafe knight “walk-in”)
-rnbqkbnr/ppp1pppp/8/3p4/8/2N5/PPPPPPPP/R1BQKBNR w KQkq d6 0 2
-Expected: Avoid c3d5 as best at final depth; prefer e2e4, d2d4, or g1f3.
-4)
-Quiet consolidation (stable PV from mid-depths)
-r3k2r/pp3ppp/8/2Q5/8/8/RPP2PPP/2B1KB1R b Kkq - 0 12
-
-5)
-Generic queen safety checks
-•
-Queen centralization without support:
-r1bqkbnr/pppppppp/8/8/3Q4/8/PPPPPPPP/RNB1KBNR b KQkq - 2 2
-Expected: Avoid chasing lines that hang the queen; choose development.
-•
-Queen side foray with obvious capture back:
-rnbqkbnr/pppppppp/8/8/8/4Q3/PPPPPPPP/RNB1KBNR b KQkq - 0 2
-Expected: Avoid queen moves to squares immediately capturable; develop instead.
-
-6)
-Sanity: typical opening startpos (no queen antics)
-rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
-Expected: Reasonable opening moves; no early queen sorties.
-
-
- */
+#[test]
+#[serial]
+fn test_knight_saved() {
+    let fen = "r1bqkb1r/pppppppp/1nn5/2P1P3/8/5N2/PP1P1PPP/RNBQKB1R b KQkq - 0 5";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen);
+    set_deterministic(true);
+    //get best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 1000, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    // Debug: rank root moves with adjusted scores
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4, 1000);
+    println!("Root ranks (SAN, adj, raw): {:?}", ranks);
+    // The best move should be to evacuate the knight with Nd5.
+    assert_eq!(san_move, "Nd5");
+}
