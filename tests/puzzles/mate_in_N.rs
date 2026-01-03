@@ -155,7 +155,7 @@ fn test_mates_generic() {
 
                 // Generate best move; use a depth based on remaining plies (cap at 16) and some time buffer for the first move
                 let depth = 20;
-                let time_ms = 5000;
+                let time_ms = 1000;
                 let engine_move_san = generate_move_as_san(
                     SearchMode::Advanced,
                     gs,

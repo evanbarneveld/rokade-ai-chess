@@ -18,7 +18,7 @@ mod simple_search;
 // Determinism toggle for search/engine behavior
 use std::sync::atomic::{AtomicBool, Ordering};
 
-static DETERMINISTIC: AtomicBool = AtomicBool::new(false);
+static DETERMINISTIC: AtomicBool = AtomicBool::new(true);
 
 /// Enable or disable deterministic behavior across the engine.
 /// When enabled, all random choices and evaluation noise are suppressed,
