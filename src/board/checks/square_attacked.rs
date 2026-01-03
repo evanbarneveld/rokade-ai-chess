@@ -16,16 +16,16 @@ pub fn is_square_attacked_by_opponent(board: &mut Board, square: (usize, usize),
                 }
                 match p.get_type() {
                     PieceType::Pawn => {
-                        // Pawns attack forward diagonals relative to their color
+                        // Pawns attack "forward" relative to their own color.
+                        // Board indexing uses row 0 at the top (rank 8) and row 7 at the bottom (rank 1).
+                        // Therefore, White pawns (moving up the board from White's perspective) attack r-1,
+                        // while Black pawns attack r+1.
                         if opponent == Color::White {
-                            if r + 1 == square.0 && (c as i32 - square.1 as i32).abs() == 1 {
+                            if r > 0 && r - 1 == square.0 && (c as i32 - square.1 as i32).abs() == 1 {
                                 return true;
                             }
                         } else {
-                            if r == 0 {
-                                continue;
-                            }
-                            if r - 1 == square.0 && (c as i32 - square.1 as i32).abs() == 1 {
+                            if r + 1 < 8 && r + 1 == square.0 && (c as i32 - square.1 as i32).abs() == 1 {
                                 return true;
                             }
                         }

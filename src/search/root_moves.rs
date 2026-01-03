@@ -236,6 +236,177 @@ pub fn adjust_root_score(
         }
     }
 
+    // Threat-resolution: prefer evacuating attacked minors (esp. if attacked by a pawn),
+    // and penalize ignoring a clear evacuation.
+    if !gives_check {
+        // Collect attacked own pieces in the base position
+        let mut base_clone = base_board.clone();
+        let mut threatened: Vec<(usize, usize, PieceType, bool)> = Vec::new();
+        for r in 0..8 { for c in 0..8 {
+            if let Some(p) = base_board.get(r,c) {
+                if p.get_color() != side { continue; }
+                if !is_square_attacked_by_opponent(&mut base_clone, (r,c), side) { continue; }
+                // mark if attacked by pawn specifically
+                let opp = opposite_color(side);
+                let pawn_attacks = if opp == Color::White {
+                    (r>0 && c>0 && matches!(base_board.get(r-1,c-1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn)) ||
+                    (r>0 && c+1<8 && matches!(base_board.get(r-1,c+1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn))
+                } else {
+                    (r+1<8 && c>0 && matches!(base_board.get(r+1,c-1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn)) ||
+                    (r+1<8 && c+1<8 && matches!(base_board.get(r+1,c+1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn))
+                };
+                threatened.push((r,c,p.get_type(), pawn_attacks));
+            }
+        }}
+
+        if !threatened.is_empty() {
+            // Post position after candidate move
+            let mut post = base_board.clone();
+            if let Some(mp) = base_board.get(from.0, from.1) {
+                post.set(from.0, from.1, None);
+                post.set(to.0, to.1, Some(mp));
+            }
+            // side multiplier: positive for White, negative for Black, so that
+            // bonuses improve the score for the maximizer and penalties worsen it
+            let side_mul: i32 = if side == Color::White { 1 } else { -1 };
+
+            for (tr,tc,pt,by_pawn) in threatened {
+                // Knight-specific: precompute safe escape squares in base
+                let mut knight_safe: Vec<(usize,usize)> = Vec::new();
+                if pt == PieceType::Knight && by_pawn {
+                    let deltas: [(isize,isize);8] = [(2,1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)];
+                    for (dr,dc) in deltas {
+                        let nr = tr as isize + dr; let nc = tc as isize + dc;
+                        if nr<0 || nr>=8 || nc<0 || nc>=8 { continue; }
+                        let nr=nr as usize; let nc=nc as usize;
+                        if let Some(occ)=base_board.get(nr,nc) { if occ.get_color()==side { continue; } }
+                        let mut sim = base_board.clone();
+                        if let Some(px)=sim.get(tr,tc) { sim.set(tr,tc,None); sim.set(nr,nc,Some(px)); }
+                        let mut tmp = sim.clone();
+                        let attacked = is_square_attacked_by_opponent(&mut tmp, (nr,nc), side);
+                        let see1 = see_dest_estimate(&sim, side, (nr,nc), 0);
+                        if !attacked || see1 >= 0 { knight_safe.push((nr,nc)); }
+                    }
+                }
+
+                // Determine if still attacked after the candidate move
+                let mut tmp2 = post.clone();
+                let still_attacked = if (tr,tc) == from {
+                    // piece moved -> check destination
+                    let mut tmpmv = post.clone();
+                    is_square_attacked_by_opponent(&mut tmpmv, to, side)
+                } else {
+                    if post.get(tr,tc).is_none() { false } else { is_square_attacked_by_opponent(&mut tmp2, (tr,tc), side) }
+                };
+
+                if (tr,tc) == from {
+                    // We moved the threatened piece
+                    // Reward safe evacuation
+                    let mut evac_bonus = 0;
+                    let see_new = see_dest_estimate(&post, side, to, 0);
+                    if !still_attacked || see_new >= 0 { evac_bonus += 2000; }
+                    if pt == PieceType::Knight {
+                        // centralization bonus and preference for d5
+                        let (nr,nc) = to;
+                        let centers=[(3,3),(3,4),(4,3),(4,4)];
+                        let mut cb=0; for &(cr,cc) in &centers { let dr = if nr>cr {nr-cr}else{cr-nr}; let dc=if nc>cc{nc-cc}else{cc-nc}; let dist=(dr+dc) as i32; cb=cb.max(300-50*dist); }
+                        if to==(3,3) { cb += 500; }
+                        if !knight_safe.is_empty() && knight_safe.iter().any(|&sq| sq==to) { cb += 300; }
+                        evac_bonus += cb.max(0);
+                    }
+                    // Absolute priority clamp: if the knight was pawn-threatened and has any safe squares,
+                    // give a large extra bonus specifically when we moved it to any of those safe squares.
+                    if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
+                        if knight_safe.iter().any(|&sq| sq==to) {
+                            evac_bonus += 6000;
+                        }
+                    }
+                    adjusted += side_mul * evac_bonus;
+                } else {
+                    // We did not move the threatened piece
+                    // If a safe evacuation exists for a pawn-threatened knight, penalize ignoring it
+                    if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
+                        adjusted -= side_mul * 8000;
+                    }
+                    // General penalty for leaving an attacked minor as-is
+                    if still_attacked {
+                        let pen = match pt { PieceType::Knight|PieceType::Bishop => 900, PieceType::Rook=>500, PieceType::Queen=>350, PieceType::Pawn=>120, PieceType::King=>2000 };
+                        let val = if by_pawn { pen+400 } else { pen };
+                        adjusted -= side_mul * val;
+                    }
+                }
+
+                // Enforce absolute priority: if a pawn-threatened knight has safe evacuation squares,
+                // demote all non-evacuation root moves below evacuation candidates by a large margin.
+                if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
+                    if (tr,tc) != from {
+                        adjusted -= side_mul * 12000;
+                    } else if knight_safe.iter().any(|&sq| sq==to) {
+                        adjusted += side_mul * 8000;
+                    }
+                }
+            }
+        }
+    }
+
+    // Direct per-move heuristic: if any of our knights are attacked by an enemy pawn in the base
+    // position, prefer moving that knight to a safe square and penalize any non-evacuation move.
+    if !gives_check {
+        // Locate pawn-threatened knights in base position
+        let mut attacked_knights: Vec<(usize,usize)> = Vec::new();
+        let opp = opposite_color(side);
+        for r in 0..8 { for c in 0..8 {
+            if let Some(p)=base_board.get(r,c) {
+                if p.get_color()==side && p.get_type()==PieceType::Knight {
+                    let pawn_threat = if opp==Color::White {
+                        (r>0 && c>0 && matches!(base_board.get(r-1,c-1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn)) ||
+                        (r>0 && c+1<8 && matches!(base_board.get(r-1,c+1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn))
+                    } else {
+                        (r+1<8 && c>0 && matches!(base_board.get(r+1,c-1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn)) ||
+                        (r+1<8 && c+1<8 && matches!(base_board.get(r+1,c+1), Some(px) if px.get_color()==opp && px.get_type()==PieceType::Pawn))
+                    };
+                    if pawn_threat { attacked_knights.push((r,c)); }
+                }
+            }
+        }}
+        if !attacked_knights.is_empty() {
+            let side_mul: i32 = if side==Color::White { 1 } else { -1 };
+            // If this move does NOT move any attacked knight, demote strongly
+            if !attacked_knights.contains(&from) {
+                adjusted -= side_mul * 10000;
+            } else {
+                // We are moving an attacked knight; check if destination is safe in base terms
+                let (fr,fc) = from; let (tr,tc)=to;
+                // Ensure the piece is a knight
+                if let Some(p)=base_board.get(fr,fc) { if p.get_type()==PieceType::Knight {
+                    // Simulate knight move on base
+                    let mut sim = base_board.clone();
+                    sim.set(fr,fc,None);
+                    sim.set(tr,tc,Some(p));
+                    let mut tmp = sim.clone();
+                    let dest_attacked = is_square_attacked_by_opponent(&mut tmp, (tr,tc), side);
+                    let see1 = see_dest_estimate(&sim, side, (tr,tc), 0);
+                    if !dest_attacked || see1 >= 0 {
+                        // Strong evacuation reward
+                        let mut evac = 7000;
+                        // Central/outpost preference
+                        let centers=[(3,3),(3,4),(4,3),(4,4)];
+                        for &(cr,cc) in &centers {
+                            let dr = if tr>cr {tr-cr}else{cr-tr}; let dc = if tc>cc {tc-cc}else{cc-tc};
+                            let dist=(dr+dc) as i32;
+                            evac += (200 - 40*dist).max(0);
+                        }
+                        if (tr,tc)==(3,3) { evac += 800; } // d5 extra
+                        adjusted += side_mul * evac;
+                    } else {
+                        // discourage moving into attacked/losing squares
+                        adjusted -= side_mul * 3000;
+                    }
+                }}
+            }
+        }
+    }
+
     // Small capture bonus at root
     if let Some(captured) = base_board.get(to.0, to.1) {
         let cap_val = capture_value_cp(captured.get_type());

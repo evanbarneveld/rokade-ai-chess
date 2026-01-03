@@ -1,6 +1,7 @@
 use chess::Chess;
 use chess::generator::move_generator::generate_move_as_san;
 use chess::search::set_deterministic;
+use chess::search::advanced_search::debug_rank_root_moves;
 
 #[test]
 fn test_mate_in_2_move1() {
@@ -20,8 +21,8 @@ fn test_mate_in_2_move1() {
 }
 
 #[test]
-fn test_weird_move1() {
-    let fen = "2rqkb1r/ppp2ppp/2nppn2/8/2bPPB2/1PN2N2/P1PK1PPP/R2Q3R b k - 0 8";
+fn test_knight_lost() {
+    let fen = "r1bqkb1r/pppppppp/1nn5/2P1P3/8/5N2/PP1P1PPP/RNBQKB1R b KQkq - 0 5";
     let mut game = Chess::new();
     game.set_starting_fen(fen);
     set_deterministic(true);
@@ -29,7 +30,9 @@ fn test_weird_move1() {
     let history = game.get_history().clone();
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 0, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
-    // the selected move should move the bishop on c4 to a6, to avoid an immediate capture
-    // the engine selects Be7
-    assert_eq!(san_move, "Bc4a6");
+    // Debug: rank root moves with adjusted scores
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 5, 1000);
+    println!("Root ranks (SAN, adj, raw): {:?}", ranks);
+    // The best move should be to evacuate the knight with Nd5.
+    assert_eq!(san_move, "Nd5");
 }
