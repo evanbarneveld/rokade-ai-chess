@@ -83,9 +83,17 @@ pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usiz
         post.set(from.0, from.1, None);
         post.set(to.0, to.1, Some(moved));
 
-        // If the move gives check, keep it regardless of SEE — don't filter out checking sacs.
+        // If the move gives check, generally keep it — but explicitly drop suicidal queen checks
+        // where the destination SEE is clearly losing for the mover (e.g., hanging the queen).
         let opponent = opposite_color(_active_color);
         if post.is_side_in_check(opponent) {
+            let moved_is_queen = matches!(moved.get_type(), PieceType::Queen);
+            if moved_is_queen {
+                // For a checking queen move, still gate with SEE to avoid blatant queen drops.
+                // Use captured value context (0 for quiet) because the loss happens after the check.
+                let see_q = see_dest_estimate(&post, _active_color, to, 0);
+                if see_q < -SEE_PENALTY_MIN_CP { continue; }
+            }
             filtered.push((from, to));
             continue;
         }
