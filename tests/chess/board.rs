@@ -3,6 +3,8 @@ use chess::Chess;
 use chess::piece::pieces::Color;
 use chess::state::outcome::OutcomeType;
 
+/// tests to see if the chess board is behaving as expected
+/// 
 #[test]
 #[serial]
 fn initial_fen() {

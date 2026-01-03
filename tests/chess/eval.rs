@@ -1,20 +1,7 @@
 use chess::board::evaluator::evaluate_position;
 use chess::state::fen::reader::reset_from_fen;
 
-/// Helper to assert evaluation for a single FEN with a target score and tolerance (centipawns).
-fn assert_eval(fen: &str, expected_cp: i32, tol_cp: i32) {
-    let gs = reset_from_fen(fen).expect("valid FEN");
-    let score = evaluate_position(gs.board(), gs.active_color());
-    assert!(
-        (score - expected_cp).abs() <= tol_cp,
-        "FEN: {}\nexpected: {} cp ±{}; got: {} cp",
-        fen,
-        expected_cp,
-        tol_cp,
-        score
-    );
-}
-
+/// tests for the evaluation function
 #[test]
 fn eval_single_positions() {
     // You can add or change these cases freely. Scores are in centipawns.
@@ -39,5 +26,19 @@ fn eval_single_positions() {
         "r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
         30,
         60,
+    );
+}
+
+/// Helper to assert evaluation for a single FEN with a target score and tolerance (centipawns).
+fn assert_eval(fen: &str, expected_cp: i32, tol_cp: i32) {
+    let gs = reset_from_fen(fen).expect("valid FEN");
+    let score = evaluate_position(gs.board(), gs.active_color());
+    assert!(
+        (score - expected_cp).abs() <= tol_cp,
+        "FEN: {}\nexpected: {} cp ±{}; got: {} cp",
+        fen,
+        expected_cp,
+        tol_cp,
+        score
     );
 }

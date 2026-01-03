@@ -2,6 +2,8 @@ use chess::perft::{perft_count, perft_divide};
 use chess::state::fen::reader::reset_from_fen;
 use chess::Chess;
 
+/// perft tests, see https://www.chessprogramming.org/Perft_Results
+///
 #[test]
 fn perft_startpos_depths() {
     let fen = Chess::DEFAULT_CHESS_STARTING_FEN;

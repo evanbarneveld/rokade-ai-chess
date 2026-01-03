@@ -214,6 +214,9 @@ pub fn adjust_root_score(
     post_probe.set(from.0, from.1, None);
     let opp = opposite_color(side);
     let gives_check = post_probe.is_side_in_check(opp);
+    let moved_is_queen = moved_probe
+        .map(|p| p.get_type() == PieceType::Queen)
+        .unwrap_or(false);
 
     // SEE-based root penalty (uniform across pieces) — skip for checking moves to allow tactical sacs
     if !gives_check {
@@ -231,6 +234,27 @@ pub fn adjust_root_score(
                 // Extra discouragement for quiet pawn pushes that hang the pawn immediately
                 if !is_capture && moved_is_pawn {
                     adjusted -= SEE_PENALTY_MIN_CP; // add minimum SEE penalty again
+                }
+            }
+        }
+    } else {
+        // Special-case: even for checking moves, avoid suicidal queen checks that drop the queen by force.
+        // Apply a bounded SEE penalty to queen moves if destination SEE is negative.
+        if moved_is_queen {
+            let mut post = base_board.clone();
+            if let Some(mp) = base_board.get(from.0, from.1) {
+                post.set(from.0, from.1, None);
+                post.set(to.0, to.1, Some(mp));
+                let cap_val = base_board
+                    .get(to.0, to.1)
+                    .map(|p| piece_value_cp(p.get_type()))
+                    .unwrap_or(0);
+                let see = see_dest_estimate(&post, side, to, cap_val);
+                if see < 0 {
+                    // For queens, a losing checking move is usually catastrophic; scale penalty strongly.
+                    // Scale with SEE magnitude and clamp to a large bound so it can outweigh check bonuses.
+                    let q_pen = ((-see) * 6).clamp(600, 6000);
+                    adjusted -= q_pen;
                 }
             }
         }

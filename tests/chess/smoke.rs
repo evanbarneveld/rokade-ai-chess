@@ -82,6 +82,9 @@ fn test_queen_save() {
 #[test]
 #[serial]
 fn test_queen_save2() {
+    // in this position the white queen is under attack by a black pawn on e6.
+    // therefore, white should move the queen to a safe square.
+    // d8 is a bad square, because it can be immediately captured by the black king.
     let fen = "r1b1kB1r/ppp4p/4pp2/3Qp3/8/8/PPnNPPPP/R2K1B1R w kq - 0 11";
     let mut game = Chess::new();
     game.set_starting_fen(fen);
@@ -92,10 +95,4 @@ fn test_queen_save2() {
     println!("Selected move: {:?}", san_move);
     assert_eq!(&san_move[0..1], "Q"); //only good move is to move the queen
     assert_ne!(san_move, "Qd8+"); //bad move
-    
-    // Debug: rank root moves with adjusted scores
-    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4, 1000);
-    println!("Root ranks (SAN, adj, raw): {:?}", ranks);
-    // The best move saves the queen
-
 }

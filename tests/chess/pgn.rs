@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use chess::parser::pgn_document::PGNDocument;
 
+/// tests related to reading PGN files
 #[test]
 fn read_simple_pgn_and_iterate_moves() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
