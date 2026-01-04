@@ -1,4 +1,4 @@
-mod smoke;
+mod move_tests;
 mod pgn;
 mod test_games_of_pgn_library;
 mod pv_test;
