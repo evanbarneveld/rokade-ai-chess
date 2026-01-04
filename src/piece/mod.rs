@@ -2,6 +2,7 @@ pub mod pieces;
 pub mod move_validators;
 pub mod piece_mover;
 pub mod piece_movers;
+pub mod perft;
 
 pub fn as_square_str(square:(usize, usize)) -> String{
     let square_col = (b'a' + square.1 as u8) as char;

@@ -10,6 +10,5 @@ pub mod history;
 pub mod uci;
 pub mod cli;
 pub mod book;
-pub mod perft;
 
 pub use crate::chess::Chess;

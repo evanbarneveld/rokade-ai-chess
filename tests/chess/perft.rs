@@ -1,5 +1,5 @@
 use serial_test::serial;
-use chess::perft::{perft_count, perft_divide};
+use chess::piece::perft::{perft_count, perft_divide};
 use chess::state::fen::reader::reset_from_fen;
 use chess::Chess;
 use chess::search::advanced_search::_dump_all_valid_moves;
@@ -43,8 +43,6 @@ fn perft_position2_depth1() {
 fn perft_position3_depth1() {
     let fen = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1";
     let gs = reset_from_fen(fen).expect("valid FEN");
-    // Dump all valid moves for debugging this perft position
-    _dump_all_valid_moves(&gs, false);
     assert_eq!(perft_count(&gs, 1), 14);
 }
 
@@ -53,6 +51,8 @@ fn perft_position3_depth1() {
 fn perft_position3_depth2() {
     let fen = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1";
     let gs = reset_from_fen(fen).expect("valid FEN");
+    // Dump all valid moves for debugging this perft position
+    _dump_all_valid_moves(&gs, false);
     assert_eq!(perft_count(&gs, 2), 191);
 }
 
