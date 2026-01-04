@@ -1,3 +1,4 @@
+use serial_test::serial;
 use chess::generator::move_generator::generate_move_as_san;
 use chess::search::SearchMode;
 use chess::search::set_deterministic;
@@ -11,6 +12,7 @@ use chess::piece::pieces::{Color, PieceType};
 
 /// this test checks if, for a given FEN, the blundering move is not made by the engine
 #[test]
+#[serial]
 fn test_blunder_avoidance() {
     // Ensure deterministic behavior for this test run
     set_deterministic(true);
@@ -61,6 +63,7 @@ fn test_blunder_avoidance() {
 }
 
 #[test]
+#[serial]
 fn debug_moves_after_e7e5() {
     // Diagnostic: verify that after ...e7e5, White has d4xe5 available
     set_deterministic(true);

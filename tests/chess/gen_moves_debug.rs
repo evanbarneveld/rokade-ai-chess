@@ -1,3 +1,4 @@
+use serial_test::serial;
 use chess::Chess;
 use chess::search::advanced_search::{find_all_valid_moves, _dump_all_valid_moves};
 use chess::board::san_move::convert_move_to_san;
@@ -8,6 +9,7 @@ use chess::search::advanced_search::debug_rank_root_moves;
 
 // Diagnostic test to enumerate legal moves for the mate-in-2 FEN and assert Nf6+ is present (official SAN)
 #[test]
+#[serial]
 fn debug_list_moves_mate_in_2_position() {
     let fen = "r2qkb1r/pp2nppp/3p4/2pNN1B1/2BnP3/3P4/PPP2PPP/R2bK2R w KQkq - 0 1";
     let mut game = Chess::new();
@@ -38,6 +40,7 @@ fn debug_list_moves_mate_in_2_position() {
 
 // Pin/self-check diagnostic for the same FEN to see why Nd5-f6 might be rejected
 #[test]
+#[serial]
 fn debug_check_self_check_for_nd5f6() {
     let fen = "r2qkb1r/pp2nppp/3p4/2pNN1B1/2BnP3/3P4/PPP2PPP/R2bK2R w KQkq - 0 1";
     let mut game = Chess::new();
@@ -57,6 +60,7 @@ fn debug_check_self_check_for_nd5f6() {
 
 // Print ranked root moves with adjusted and raw scores to diagnose ordering/selection
 #[test]
+#[serial]
 fn debug_rank_root_moves_for_mate_in_2() {
     let fen = "r2qkb1r/pp2nppp/3p4/2pNN1B1/2BnP3/3P4/PPP2PPP/R2bK2R w KQkq - 0 1";
     let mut game = Chess::new();

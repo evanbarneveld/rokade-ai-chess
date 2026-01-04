@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use chess::generator::move_generator::generate_move_as_san;
-use chess::search::SearchMode;
+use chess::search::{set_deterministic, SearchMode};
 use chess::search::uci_feedback::set_info_callback;
 
 #[test]
@@ -9,6 +9,7 @@ fn depth2_pv_first_move_is_exd5() {
     let fen = "8/8/4p3/3Q4/8/8/8/2K2k2 b - - 0 1";
     let mut game = Chess::new();
     game.set_starting_fen(fen);
+    set_deterministic(true);
 
     let last_pv: Arc<std::sync::Mutex<Vec<((usize, usize), (usize, usize))>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let last_pv_clone = last_pv.clone();
@@ -30,5 +31,5 @@ fn depth2_pv_first_move_is_exd5() {
     let last_pv_guard = last_pv.lock().unwrap();
     assert!(!last_pv_guard.is_empty(), "PV should not be empty");
     let first_move_san = convert_move_to_san(gs, Some(last_pv_guard[0])).unwrap();
-    assert!(first_move_san.starts_with("e6xd5"), "expected PV to start with exd5, got {}", first_move_san);
+    assert!(first_move_san.starts_with("exd5"), "expected PV to start with exd5, got {}", first_move_san);
 }

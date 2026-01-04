@@ -1,6 +1,6 @@
 mod move_tests;
 mod pgn;
-mod test_games_of_pgn_library;
+mod valid_move_test_using_pgn_library;
 mod pv_test;
 mod perft;
 mod eval;

@@ -2,3 +2,11 @@ please check root_moves.rs
 
 is there code that can be generalized?
 is there code that can be refactored to make it more readable?
+
+please summarize your findings in a single list with a maximum of 7 items with the most important ones first.
+
+---
+
+do all refactorings from the list
+at the end of the refactoring, please run the tests again (in move_tests.rs) and check if they still pass
+

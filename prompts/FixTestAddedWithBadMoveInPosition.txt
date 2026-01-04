@@ -16,6 +16,5 @@ Change code without asking. I will review the code changes once the test works.
 If the test still doesn't work after 5 attempts, ask me what I want to do.
 
 If the test is working, run all tests in move_tests.rs to see if there is a regression.
-Let me know if all test work, very clearly. For example:
-
-Hey Erik, all tests in move_tests.rs succeed!
+Let me know if all test work, very clearly. For example: "all tests in move_tests.rs succeed"
+Otherwise, say, "some tests in move_tests.rs fail".

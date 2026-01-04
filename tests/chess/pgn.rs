@@ -7,7 +7,7 @@ fn read_simple_pgn_and_iterate_moves() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests");
     path.push("data");
-    path.push("simple.pgn_database");
+    path.push("simple.pgn");
 
     let mut doc = PGNDocument::from_file(&path).expect("should load PGN");
 
@@ -28,7 +28,7 @@ fn read_pgn_and_iterate_moves() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests");
     path.push("data");
-    path.push("with_timers.pgn_database");
+    path.push("with_timers.pgn");
 
     let mut doc = PGNDocument::from_file(&path).expect("should load PGN");
 

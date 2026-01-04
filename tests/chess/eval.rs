@@ -1,8 +1,10 @@
+use serial_test::serial;
 use chess::board::evaluator::evaluate_position;
 use chess::state::fen::reader::reset_from_fen;
 
 /// tests for the evaluation function
 #[test]
+#[serial]
 fn eval_single_positions() {
     // You can add or change these cases freely. Scores are in centipawns.
     // Tolerance accounts for minor tweaks in the evaluator.
