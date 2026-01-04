@@ -17,6 +17,17 @@ pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: 
             return false;
         }
 
+        // Additional safeguard: destination square must not be attacked by opponent pawns.
+        // This explicitly covers cases where generic attacked-square detection might miss
+        // pawn directions in this path.
+        if let Some(king_piece) = game_state.board().get(from.0, from.1) {
+            let color = king_piece.get_color();
+            let opponent = match color { Color::White => Color::Black, Color::Black => Color::White };
+            if game_state.board().is_square_pawn_attacked_by(opponent, to) {
+                return false;
+            }
+        }
+
         //println!("valid king move: {}", as_square_str(from, to));
         return true;
     }
