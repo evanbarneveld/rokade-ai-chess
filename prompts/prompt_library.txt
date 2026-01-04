@@ -3,4 +3,6 @@ please check root_moves.rs
 is there code that can be generalized?
 is there code that can be refactored to make it more readable?
 
+please summarize your findings in a single list with a maximum of 10 items
+
 ----------
