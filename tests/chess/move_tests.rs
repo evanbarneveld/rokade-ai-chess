@@ -124,19 +124,6 @@ fn test_queen_losing_move() {
     // therefore, this is a very bad move that must be avoided
 
     /*
-
-    Good analysis done by AnMon chess:
-
-    FEN: r1b1kb1r/pppq1p1p/2np1np1/1B1Pp3/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 w kq e6 0 9
-
-    AnMon 5.75:
-    1+	00:00	 3	13	-2.89	b7xc6
-    1	00:00	 4	18	-2.89	b7xc6
-    2	00:00	 106	452	-2.86	b7xc6 Bb5-c4
-    */
-
-    /*
-
     Bad analysis done by our chess engine:
 
     FEN: r1bnkb1r/pppqpp1p/3p1np1/1B1P4/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 w kq - 5 9
@@ -149,8 +136,16 @@ fn test_queen_losing_move() {
      5	00:02	 121k	57k	-211.98	Nc6-d8 Bb5xd7+ Bc8xd7 Qd1-d4
      5	00:02	 122k	57k	-211.98	Nc6-d8
 
-    */
 
+    Here is way better analysis done by AnMon chess in the same position
+
+    FEN: r1b1kb1r/pppq1p1p/2np1np1/1B1Pp3/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 w kq e6 0 9
+
+    AnMon 5.75:
+    1+	00:00	 3	13	-2.89	b7xc6
+    1	00:00	 4	18	-2.89	b7xc6
+    2	00:00	 106	452	-2.86	b7xc6 Bb5-c4
+    */
 
     let fen = "r1b1kb1r/pppqpp1p/2np1np1/1B1P4/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 b kq - 4 8";
     let mut game = Chess::new();
@@ -195,3 +190,28 @@ fn test_unnecessary_king_move_losing_castling_rights() {
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Nd8"); //bad move
 }
+
+/*
+
+In case a new failing test is added, use this prompt for AI code gen:
+
+test '<name-of-test>' is failing.
+See the comments in the test: it explains what happens.
+
+There is also the analysis of our chess engine.
+Depending on the test, I may have added a good analysis of another
+existing chess engine that does a better job in this position.
+
+Please fix the code of the chess engine.
+Always prefer a generic solution, rather than a specific one.
+The other tests should keep working off course.
+Execute the test without asking.
+Change code without asking. I will review the code changes once the test works.
+If the test still doesn't work after 5 attempts, ask me what I want to do.
+
+If the test is working, run all tests in move_tests.rs to see if there is a regression.
+Let me know if all test work, very clearly. For example:
+
+Hey Erik, all tests in move_tests.rs succeed!
+
+*/

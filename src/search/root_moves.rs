@@ -112,6 +112,25 @@ pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usiz
             // If SEE is strongly negative (worse than the standard minimum), drop it
             if see < -SEE_PENALTY_MIN_CP { continue; }
         }
+        // Additional hard filter: if this move leaves our queen en prise with negative SEE, drop it.
+        // This prevents obvious blunders like uncovering a discovered attack on our queen.
+        let mut queen_hanging = false;
+        'scan: for r in 0..8 {
+            for c in 0..8 {
+                if let Some(pq) = post.get(r, c) {
+                    if pq.get_color() == _active_color && pq.get_type() == PieceType::Queen {
+                        // Quick attack probe on the queen's square
+                        let mut tmpq = post.clone();
+                        if is_square_attacked_by_opponent(&mut tmpq, (r, c), _active_color) {
+                            let see_q = see_dest_estimate(&post, _active_color, (r, c), 0);
+                            if see_q < -SEE_PENALTY_MIN_CP { queen_hanging = true; }
+                        }
+                        break 'scan;
+                    }
+                }
+            }
+        }
+        if queen_hanging { continue; }
         filtered.push((from, to));
     }
 }
@@ -503,19 +522,30 @@ pub fn adjust_root_score(
                 if let Some(p) = post.get(r, c) {
                     if p.get_color() != side { continue; }
                     // Quick filter: only consider squares attacked by opponent
-                    if !is_square_attacked_by_opponent(&mut post,(r, c), side) { continue; }
+                    // Use a fresh clone for the attack query to avoid side effects across iterations.
+                    let mut post_for_query = post.clone();
+                    if !is_square_attacked_by_opponent(&mut post_for_query,(r, c), side) { continue; }
                     // No prior capture gain on these squares in a generic self-hang scan
                     let see = see_dest_estimate(&post, side, (r, c), 0);
                     if see < 0 {
                         // Conservative: half the SEE loss, clamped to familiar bounds
                         let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
                         total_penalty += pen;
+
+                        // SPECIAL CASE: if the endangered piece is our queen, this is usually catastrophic
+                        // (e.g., uncovering a discovered attack on the queen). Add a strong extra penalty
+                        // scaled by SEE magnitude so it decisively outweighs shallow positional preferences.
+                        if p.get_type() == PieceType::Queen {
+                            // Scale between 4000 and 12000 based on the loss, very heavy to avoid queen blunders
+                            let q_extra = ((-see) * 12).clamp(4000, 12000);
+                            total_penalty += q_extra;
+                        }
                     }
                 }
             }
         }
         // Cap aggregate penalty so a cluster of minor hangs doesn't explode the score
-        let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2; // up to 2x max per move
+        let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2 + 4000; // allow room for queen extra penalty
         if total_penalty > 0 { adjusted -= total_penalty.min(agg_cap); }
     } else {
         // Stronger tie-break for checking moves at root to favor forcing tactics.
