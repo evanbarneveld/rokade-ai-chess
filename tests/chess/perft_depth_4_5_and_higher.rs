@@ -1,8 +1,7 @@
 use serial_test::serial;
-use chess::piece::perft::{perft_count, perft_divide};
+use chess::piece::perft::{perft_count};
 use chess::state::fen::reader::reset_from_fen;
 use chess::Chess;
-use chess::search::advanced_search::_dump_all_valid_moves;
 
 /// perft tests, see https://www.chessprogramming.org/Perft_Results
 ///
@@ -19,10 +18,17 @@ fn perft_position2_depth4() { //last tested at 6-jan-2026
 #[test]
 #[serial]
 fn perft_position2_depth5() {
+    let time_start = std::time::Instant::now();
     let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     let gs = reset_from_fen(fen).expect("valid FEN");
-    assert_eq!(perft_count(&gs, 5), 193_690_690); // stockfish: Nodes searched: 193690690
-    //assert_eq!(perft_count(&gs, 5), 193_699_275); //TODO this version?? diff = 8585???? promotions?
+    let nodes:i64 = perft_count(&gs, 5) as i64;
+    let expected: i64 = 193_690_690;
+
+    if nodes - expected != 0 {
+        println!("diff = {}", (nodes - expected).abs());
+    }
+    println!("elapsed time {:?}", time_start.elapsed());
+    assert_eq!(nodes, expected);
 }
 
 #[test]

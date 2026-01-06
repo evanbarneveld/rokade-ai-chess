@@ -478,6 +478,80 @@ pub fn find_all_valid_moves(
     result
 }
 
+// Lightweight move for perft: includes capture flag and promotion marker.
+#[derive(Clone, Copy, Debug)]
+pub struct PerftMove {
+    pub from: (usize, usize),
+    pub to: (usize, usize),
+    pub is_capture: bool,
+    pub promo: Option<char>,
+}
+
+/// Fill `out` with all legal moves for the active side, including capture flag and promotion marker.
+/// This mirrors `find_all_valid_moves` but avoids allocating a new Vec every call and returns flags.
+pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<PerftMove>) {
+    out.clear();
+    let board = game_state.board();
+    let active_color = game_state.active_color();
+
+    for r in 0..8 {
+        for c in 0..8 {
+            let piece = match board.get(r, c) { Some(p) => p, None => continue };
+            if piece.get_color() != active_color { continue; }
+
+            for tr in 0..8 {
+                for tc in 0..8 {
+                    let from = (r, c);
+                    let to = (tr, tc);
+                    if from == to { continue; }
+
+                    let target_piece_is_some = board.get(tr, tc).is_some();
+                    let is_capture = target_piece_is_some
+                        || (piece.get_type() == PieceType::Pawn
+                            && game_state.en_passant_target().is_some()
+                            && to == game_state.en_passant_target().unwrap());
+                    let is_pawn_move = piece.get_type() == PieceType::Pawn;
+                    if !game_state.move_from_and_to_validation_check(
+                        from, to, active_color, is_capture, is_pawn_move, game_state.en_passant_target(),
+                    ) { continue; }
+
+                    let mut gs = *game_state;
+                    let is_pawn_promotion = piece.get_type() == PieceType::Pawn
+                        && ((active_color == Color::White && tr == 7)
+                            || (active_color == Color::Black && tr == 0));
+
+                    if is_pawn_promotion {
+                        let promo_types = [
+                            PieceType::Queen,
+                            PieceType::Rook,
+                            PieceType::Bishop,
+                            PieceType::Knight,
+                        ];
+                        for pt in promo_types.iter() {
+                            let mut gs_var = gs;
+                            let promo_piece = Some(Piece::new(*pt, active_color));
+                            if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece) {
+                                let ch = match pt {
+                                    PieceType::Queen => Some('q'),
+                                    PieceType::Rook => Some('r'),
+                                    PieceType::Bishop => Some('b'),
+                                    PieceType::Knight => Some('n'),
+                                    _ => None,
+                                };
+                                out.push(PerftMove { from, to, is_capture, promo: ch });
+                            }
+                        }
+                    } else {
+                        if PieceMover::move_piece(&mut gs, from, to, is_capture, None) {
+                            out.push(PerftMove { from, to, is_capture, promo: None });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Dump all legal moves for the given side from the current board, formatted as SAN or coordinate pairs.
 /// This is intended for debugging/tests. It returns a single string with moves separated by spaces.
 /// By default it uses simple coordinate notation like e2e4; when `to_san` is true and a GameState is
@@ -847,7 +921,7 @@ fn probe_with_aspiration(
 
         //eprintln!("[asp] depth={} try={} a={} b={}", depth_now, tried, a, b);
 
-        let (mv, best_adjusted, best_score_raw) = evaluate_root_for_bounds(
+        let (_mv, _best_adjusted, best_score_raw) = evaluate_root_for_bounds(
             board,
             active_color,
             root_moves,

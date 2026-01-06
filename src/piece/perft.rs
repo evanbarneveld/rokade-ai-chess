@@ -1,4 +1,4 @@
-use crate::search::advanced_search::find_all_valid_moves;
+use crate::search::advanced_search::{find_all_valid_moves, find_all_valid_moves_into_perft, PerftMove};
 use crate::search::zobrist::compute_zobrist;
 use crate::state::game_state::GameState;
 use std::cell::RefCell;
@@ -51,15 +51,17 @@ fn perft_count_mut(gs: &mut GameState, depth: u32) -> u64 {
         return hit;
     }
 
-    let moves = find_all_valid_moves(gs);
+    // Reuse a local buffer for move generation in this frame
+    let mut moves_buf: Vec<PerftMove> = Vec::with_capacity(64);
+    find_all_valid_moves_into_perft(gs, &mut moves_buf);
 
     if depth == 1 {
-        return moves.len() as u64;
+        return moves_buf.len() as u64;
     }
 
     let mut nodes: u64 = 0;
-    for (from, to, promo) in moves {
-        let undo = gs.make_move_fast(from, to, promo);
+    for mv in moves_buf.into_iter() {
+        let undo = gs.make_move_fast(mv.from, mv.to, mv.promo);
         nodes += perft_count_mut(gs, depth - 1);
         gs.unmake_move_fast(undo);
     }
