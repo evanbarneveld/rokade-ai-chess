@@ -17,7 +17,7 @@ fn perft_position2_depth4() { //last tested at 6-jan-2026
 
 #[test]
 #[serial]
-fn perft_position2_depth5() {
+fn perft_position2_depth5() { //last tested at 6-jan-2026 (412 seconds)
     let time_start = std::time::Instant::now();
     let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     let gs = reset_from_fen(fen).expect("valid FEN");
