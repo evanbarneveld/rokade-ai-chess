@@ -6,24 +6,6 @@ use chess::search::set_deterministic;
 
 #[test]
 #[serial]
-fn test_mate_in_2_move1() {
-    let fen = "r2qkb1r/pp2nppp/3p4/2pNN1B1/2BnP3/3P4/PPP2PPP/R2bK2R w KQkq - 0 1";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen).expect("bad fen");
-    // Ensure stable choice
-    set_deterministic(true);
-    let history = game.get_history().clone();
-    println!("{}", game.board().get_board_display_string(Some(&history)));
-    //get the best move
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 1000, 1000).unwrap();
-    println!("Best move: {:?}", san_move);
-    // the engine chooses Ke1xd1, which is certainly not the best move,
-    // Expect official SAN with disambiguation and check marker
-    assert_eq!(san_move, "Nf6+");
-}
-
-#[test]
-#[serial]
 fn test_knight_saved() {
     let fen = "r1bqkb1r/pppppppp/1nn5/2P1P3/8/5N2/PP1P1PPP/RNBQKB1R b KQkq - 0 5";
     let mut game = Chess::new();

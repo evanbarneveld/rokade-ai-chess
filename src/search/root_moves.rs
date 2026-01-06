@@ -347,12 +347,12 @@ fn apply_destination_see_penalties(
     base_board: &Board,
     post_after: &Board,
     side: Color,
-    _from: (usize, usize),
+    from: (usize, usize),
     to: (usize,usize),
     is_capture: bool,
     moved_is_pawn: bool,
     gives_check: bool,
-    moved_is_queen: bool,
+    _moved_is_queen: bool,
 ) -> i32 {
     let mut delta = 0;
     if !gives_check {
@@ -360,14 +360,100 @@ fn apply_destination_see_penalties(
         let see = see_after(post_after, side, to, captured);
         if see < 0 {
             let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
-            delta -= pen;
-            if !is_capture && moved_is_pawn { delta -= SEE_PENALTY_MIN_CP; }
+            delta += apply_for_side(-pen, side);
+            if !is_capture && moved_is_pawn { delta += apply_for_side(-SEE_PENALTY_MIN_CP, side); }
         }
-    } else if moved_is_queen {
-        // Guard suicidal queen checks
+    } else {
+        // Guard suicidal checking moves for major pieces using SEE at the destination.
+        // Previously this only applied to the queen; extend to rooks (and lightly to minors)
         let captured = base_board.get(to.0, to.1);
         let see = see_after(post_after, side, to, captured);
-        if see < 0 { delta -= ((-see) * 6).clamp(600, 6000); }
+        if see < 0 {
+            // Determine moved piece type
+            let moved_pt = base_board
+                .get(from.0, from.1)
+                .map(|p| p.get_type());
+            // Scale penalty based on piece importance
+            let pen = match moved_pt {
+                // Keep queen guard as before
+                Some(PieceType::Queen) => ((-see) * 6).clamp(600, 6000),
+                // Strengthen rook guard: checking moves that hang the rook should be strongly discouraged
+                // Set a higher minimum clamp to overcome generic check-mobility bonuses.
+                Some(PieceType::Rook) => ((-see) * 4).clamp(3600, 6000),
+                // Increase minors penalty so that hanging knight/bishop checks are avoided more reliably
+                Some(PieceType::Bishop) | Some(PieceType::Knight) => ((-see) * 4).clamp(600, 3600),
+                Some(PieceType::Pawn) => ((-see) * 2).clamp(200, 2000),
+                _ => ((-see) * 3).clamp(300, 3000),
+            };
+            // Temporary debug: trace SEE penalty for checking moves
+            if let Some(mp) = moved_pt { if mp == PieceType::Rook {
+                println!("[ROOT DEBUG] Rook checking move {:?}->{:?}: SEE={} pen={} (side={:?})", from, to, see, pen, side);
+            }}
+            // side-aware penalty (penalize mover regardless of color)
+            delta += apply_for_side(-pen, side);
+        }
+
+        // Additional specific guard for hanging knight/bishop checks immediately
+        // recaptured by a pawn on the destination square (e.g., Na5+ b4xa5).
+        // We check for opponent pawn attacks on the destination in the post position.
+        if let Some(moved_pt) = base_board.get(from.0, from.1).map(|p| p.get_type()) {
+            if moved_pt == PieceType::Knight || moved_pt == PieceType::Bishop {
+                let opp = opposite_color(side);
+                if attacked_by_pawn(post_after, to, opp) {
+                    // Apply a strong penalty to outweigh generic check bonuses and prefer safer alternatives
+                    let strong_minor_pen = 1200; // ~ minor piece value with margin
+                    delta += apply_for_side(-strong_minor_pen, side);
+                }
+            }
+        }
+
+        // Additional direct guard for checking moves: if the opponent king can immediately
+        // capture the checking piece on the destination square and remain safe, apply a
+        // very strong penalty regardless of SEE approximation.
+        // This specifically addresses patterns like Rd1+, Re1+, Rxb3+ dropping the rook to Kx.
+        // Determine moved piece type first.
+        if let Some(moved_pt2) = base_board.get(from.0, from.1).map(|p| p.get_type()) {
+            // Only consider heavy penalty for rook/queen; minors handled by SEE scaling above.
+            if moved_pt2 == PieceType::Rook || moved_pt2 == PieceType::Queen {
+                let opp = opposite_color(side);
+                // Find opponent king square in the post position (after our checking move)
+                let mut king_sq: Option<(usize,usize)> = None;
+                'seek: for r in 0..8 { for c in 0..8 {
+                    if let Some(px) = post_after.get(r,c) {
+                        if px.get_color()==opp && px.get_type()==PieceType::King { king_sq = Some((r,c)); break 'seek; }
+                    }
+                }}
+                if let Some((kr,kc)) = king_sq {
+                    // King can capture if destination is adjacent and occupied by our moved piece
+                    let dr = if kr>to.0 { kr - to.0 } else { to.0 - kr };
+                    let dc = if kc>to.1 { kc - to.1 } else { to.1 - kc };
+                    let adjacent = dr <= 1 && dc <= 1;
+                    if adjacent {
+                        // Ensure the destination holds our moved piece in the post position
+                        if let Some(on_to) = post_after.get(to.0, to.1) {
+                            if on_to.get_color()==side {
+                                // Simulate king capture and verify king safety
+                                let mut after_kx = post_after.clone();
+                                // Remove king from old square
+                                after_kx.set(kr, kc, None);
+                                // Place king on destination (capturing our piece)
+                                after_kx.set(to.0, to.1, Some(Piece::new(PieceType::King, opp)));
+                                // Check if king on new square is attacked by our side; if not, it's a safe capture
+                                let mut tmp_chk = after_kx.clone();
+                                let unsafe_for_king = is_square_attacked_by_opponent(&mut tmp_chk, to, opp);
+                                if !unsafe_for_king {
+                                    // Apply a strong penalty: at least the piece value plus margin to overcome check bonuses
+                                    let base_pen = match moved_pt2 { PieceType::Queen => 900, PieceType::Rook => 500, _ => 300 };
+                                    let strong_pen = (base_pen * 8).clamp(2400, 8000); // 4000 for rook, 7200 for queen
+                                    println!("[ROOT DEBUG] Opp king safe Kx on {:?}; applying strong_pen={} for {:?}->{:?}", to, strong_pen, from, to);
+                                    delta += apply_for_side(-strong_pen, side);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     delta
 }
