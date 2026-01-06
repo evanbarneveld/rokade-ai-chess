@@ -78,6 +78,22 @@ fn test_bad_rook_move() {
 
 #[test]
 #[serial]
+fn test_bad_bishop_move() {
+    // in this position the engine generates a bishop move Bxf7+ checking the black king,
+    // but now the bishop can immediately be captured by the black king on e8.
+    let fen = "rnbqkb1r/pppppppp/8/8/2B1n3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 3";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Bxf7+"); //bad move
+}
+
+#[test]
+#[serial]
 fn test_bad_rook_move2() {
     // in this position the engine generates a rook move Re1+
     // but now the rook can immediately be captured

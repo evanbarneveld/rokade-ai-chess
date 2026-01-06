@@ -2,7 +2,7 @@ use std::io;
 use std::io::Write;
 
 #[test]
-fn test_mate_in_N_generic() {
+fn test_mate_in_n_generic() {
     use chess::board::san_move::convert_move_to_san;
     use chess::generator::move_generator::generate_move_as_san;
     use chess::history::history::History;
