@@ -70,7 +70,7 @@ fn test_mates_generic() {
                     || trimmed.starts_with("1 ")
                     || trimmed.starts_with("1...");
                 if !looks_like_solution {
-                    // Title line typically starts with "Black Mates in" or "White Mates in"
+                    // The title line typically starts with "Black Mates in" or "White Mates in"
                     let lower = trimmed.to_ascii_lowercase();
                     if lower.starts_with("black mates in") || lower.starts_with("white mates in") {
                         last_header_title = Some(trimmed.to_string());
@@ -100,7 +100,7 @@ fn test_mates_generic() {
                         lines.next();
                         continue;
                     }
-                    // If it starts with a move number like "1." or "1..." consider it solution
+                    // If it starts with a move number like "1." or "1..." consider it a solution
                     let trimmed = next_line.trim_start();
                     if trimmed.starts_with("1.")
                         || trimmed.starts_with("1 ")
@@ -153,7 +153,7 @@ fn test_mates_generic() {
                 // Engine move expected
                 let expected_engine_san_str = &tokens[move_index];
 
-                // Generate best move; use a depth based on remaining plies (cap at 16) and some time buffer for the first move
+                // Generate the best move; use a depth based on remaining plies (cap at 16) and some time buffer for the first move
                 let depth = 20;
                 let time_ms = 1000;
                 let engine_move_san = generate_move_as_san(
@@ -167,7 +167,7 @@ fn test_mates_generic() {
 
                 io::stdout().flush().unwrap();
 
-                // Normalize expected SAN in current position
+                // Normalize expected SAN in the current position
                 let expected_engine_move_san = {
                     let mut board = gs.board().clone();
                     let active = gs.active_color();
@@ -204,7 +204,7 @@ fn test_mates_generic() {
 
                 }
 
-                // Apply the engine move (according to expected token) to advance the position
+                // Apply the engine move (according to the expected token) to advance the position
                 {
                     let mut board = gs.board().clone();
                     let active = gs.active_color();

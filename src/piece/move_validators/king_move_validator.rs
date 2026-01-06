@@ -11,7 +11,7 @@ pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: 
     let dr = if from.0 > to.0 { from.0 - to.0 } else { to.0 - from.0 };
     let dc = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
     if dr <= 1 && dc <= 1 {
-        //if this move puts the move in check, its not a valid move
+        //if this move puts the move in check, it's not a valid move
         let en_passant_target = game_state.en_passant_target();
         if is_king_in_check_after_move(game_state.mutable_board(), from, to, en_passant_target) {
             return false;

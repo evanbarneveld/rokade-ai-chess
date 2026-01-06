@@ -1,6 +1,6 @@
 use regex::Regex;
 use crate::board::Board;
-use crate::parser::ambigous_san_move_solver::{CompletedSanMove, SanMoveCompleter};
+use crate::parser::ambiguous_san_move_solver::{CompletedSanMove, SanMoveCompleter};
 use crate::piece::pieces::Color;
 use crate::piece::pieces::Piece;
 
@@ -60,7 +60,7 @@ impl MoveParser {
     }
 
     fn convert_and_validate_san_move(&mut self, board: &mut Board, active_color: Color, san_move: &str, en_passant_target:Option<(usize,usize)>) -> Result<CompletedSanMove, String> {
-        let re = Regex::new(r"^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(=[NBRQK])?(\+|#)?$|^(O-O-O)?(\+|#)?$|^(O-O)?(\+|#)?$").unwrap();
+        let re = Regex::new(r"^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(=[NBRQK])?([+#])?$|^(O-O-O)?([+#])?$|^(O-O)?([+#])?$").unwrap();
         let caps: Vec<_> = re.captures_iter(san_move).collect();
 
         //println!("{:?}", caps);

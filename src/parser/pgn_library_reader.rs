@@ -60,16 +60,16 @@ impl PGNLibraryReader {
                 .map_err(|e| format!("Failed to read from PGN library '{}': {}", self.path.display(), e))?;
             if n == 0 {
                 // EOF
-                if saw_any_content {
+                return if saw_any_content {
                     // Return the last accumulated (possibly incomplete if no explicit result),
                     // PGNDocument::from_str will tokenize up to available movetext.
                     let doc = PGNDocument::from_str(&self.game_buf);
                     if doc.is_empty() {
                         return Ok(None);
                     }
-                    return Ok(Some(doc));
+                    Ok(Some(doc))
                 } else {
-                    return Ok(None);
+                    Ok(None)
                 }
             }
 

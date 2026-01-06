@@ -102,7 +102,7 @@ impl PGNDocument {
         self.idx = 0;
     }
 
-    /// Get the next SAN token from the PGN, or None when exhausted.
+    /// Get the next SAN token from the PGN or None when exhausted.
     pub fn next_move(&mut self) -> Option<String> {
         if self.idx >= self.moves.len() { return None; }
         let mv = self.moves[self.idx].clone();

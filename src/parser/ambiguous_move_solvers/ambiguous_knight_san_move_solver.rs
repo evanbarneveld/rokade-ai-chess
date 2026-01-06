@@ -3,7 +3,7 @@ use crate::board::checks::king_in_check::is_king_in_check_after_move;
 use crate::piece::pieces::{Color, PieceType};
 
 /*
-Given a incomplete SAN move and the target position on the board, return the source position, or None if the move is invalid.
+Provided an incomplete SAN chess move and the board's target position, determine and return the originating square, or indicate invalidity with None.
  */
 pub fn solve_ambiguous_knight_san_move(from_col: i8, from_row: i8, to_col: i8, to_row: i8, is_capture:bool, board: &mut Board, active_color:Color) -> Option<(u8, u8)> {
     // Convert destination to indexes and validate bounds

@@ -112,7 +112,7 @@ pub fn run_uci() -> io::Result<()> {
             let start = std::time::Instant::now();
             reset_search_telemetry();
             // Install a temporary info callback so we can emit progress while searching.
-            // The callback prints UCI-compliant info lines with current best root move scores.
+            // The callback prints UCI-compliant info lines with the current best root move scores.
             let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>, hashfull: u16| {
                 let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
                 for (f, t) in pv_moves {

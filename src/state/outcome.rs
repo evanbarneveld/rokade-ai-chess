@@ -135,13 +135,13 @@ pub enum OutcomeType {
         // Any heavy material or pawns means mating material exists
         if pawns > 0 || rooks > 0 || queens > 0 { return false; }
 
-        // King vs King
+        // King vs. King
         if knights == 0 && bishops.is_empty() { return true; }
 
-        // King and single minor vs King
+        // King and single minor vs. King
         if (knights == 1 && bishops.is_empty()) || (knights == 0 && bishops.len() == 1) { return true; }
 
-        // King and bishop vs king and bishop, bishops on same color
+        // King and bishop vs. king and bishop, bishops on same color
         if knights == 0 && !bishops.is_empty() {
             let mut color_opt: Option<bool> = None; // true for light, false for dark
             let mut all_same = true;

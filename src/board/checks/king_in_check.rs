@@ -29,7 +29,7 @@ pub fn is_king_in_check_after_move(board: &mut Board, move_from:(usize, usize), 
             if from_piece.unwrap().get_color() == Color::White {
                 //adjust the board to simulate the en-passant capture
                 //board.set(move_to.0, move_to.1, None);
-                board.set(move_to.0 - 1, move_to.1, None); //remove the black pawn that was capured e.p.
+                board.set(move_to.0 - 1, move_to.1, None); //remove the black pawn that was captured e.p.
             } else {
                 board.set(move_to.0 + 1, move_to.1, None); //remove the white pawn that was captured e.p.
             }

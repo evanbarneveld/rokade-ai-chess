@@ -30,7 +30,7 @@ impl History {
 
     // Adds a move to the history (SAN or other chosen notation)
     pub fn add_move(&mut self, mv: String, board_move:((usize, usize), (usize, usize)), fen: String) {
-        // Truncate FEN to exclude the last two move counters (halfmove clock and fullmove number)
+        // Truncate FEN to exclude the last two move counters (half move clock and full move number)
         // Keep only the first four fields: piece placement, active color, castling, en passant target
         let truncated_fen = fen
             .split_whitespace()

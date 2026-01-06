@@ -89,7 +89,7 @@ fn test_bad_queen_offer() {
     let mut game = Chess::new();
     game.set_starting_fen(fen).expect("bad fen");
     set_deterministic(true);
-    //get best move
+    //get the best move
     let history = game.get_history().clone();
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
     println!("Selected move: {:?}", san_move);

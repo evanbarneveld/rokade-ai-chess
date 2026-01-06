@@ -28,7 +28,7 @@ pub(crate) const ROOT_PARALLELIZATION_ENABLED: bool = true; // TODO not the defa
 const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // TODO not the default enable root parallel only from this depth
 const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
 
-const ORDERBOOK_ENABLED: bool = true; // TODO not the default
+const ORDER_BOOK_ENABLED: bool = true; // TODO not the default
 const STRENGTH_MODE_ENABLED: bool = true; // TODO not the default
 
 // Global toggle to enable/disable Zobrist hashing across the engine.
@@ -109,7 +109,7 @@ pub fn find_best_move(
 
     // Opening book: if we have a book move in early game, play it immediately.
     // Limit to first ~8 full moves to avoid forcing book deep into middlegame.
-    if ORDERBOOK_ENABLED {
+    if ORDER_BOOK_ENABLED {
         if game_state.full_move_number() <= 8 {
             if let Some((bf, bt)) = book_pick(game_state) {
                 return Some((bf, bt, 0, 0));
@@ -961,9 +961,9 @@ fn probe_with_aspiration(
             if tried < 3 { continue; }
         }
         // At this point we have tried a few widened windows but still failed to land inside bounds.
-        // To ensure a stable PV update at this depth, fall back to a full-width search once.
+        // To ensure a stable PV update at this depth, fall back to a full-width search at once.
          {
-            // Reset to full window and a modest aspiration window for subsequent depths
+            // Reset to the full window and a modest aspiration window for subsequent depths
             *window = (*window).max(ASP_WINDOW_INIT_CP);
             let (fa, fb) = (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1);
             let (mv2, best_adj2, best_raw2) = evaluate_root_for_bounds(

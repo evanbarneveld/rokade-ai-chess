@@ -84,7 +84,7 @@ fn rank_char(row: usize) -> char {
     char::from_u32((row as u32) + 1).unwrap()
 }
 
-// Determine if the position after (from->to) is check or mate, and return "", "+" or "#"
+// Determine if the position after (from->to) is checked or mate, and return "", "+" or "#"
 fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize), side: Color) -> String {
     let mut tmp = board.clone();
     let _u = tmp.make_move_simple(from, to);

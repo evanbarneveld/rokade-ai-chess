@@ -16,7 +16,7 @@ const ROOT_CAPTURE_BONUS_DIV: i32 = 10; // add captured piece value / this divis
 
 const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150; // only apply adjustments if side advantage above this
 const ENDGAME_HMC_THRESHOLD: u32 = 80; // start scaling after this half-move clock
-const ENDGAME_SCALE_MAX: i32 = 21; // max scaling steps used in formula below
+const ENDGAME_SCALE_MAX: i32 = 21; // max scaling steps used in the formula below
 const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15; // per-scale bonus if capture or pawn move
 const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8; // per-scale penalty if quiet move
 
@@ -131,9 +131,9 @@ fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32
 }
 
 // / build_pv_for_root constructs the principal variation (PV) line starting from a given root move
-/// by following best moves stored in the transposition table (TT), alternating sides, and validating
+/// by followthe ing best moves stored in the transposition table (TT), alternating sides, and validating
 /// every step’s legality. It returns a list of move pairs (from, to) that represents the best‑known line
-/// from the root according to the TT.
+/// from the root, according to the TT.
 #[inline]
 pub fn build_pv_for_root(
     board: &Board,
@@ -159,7 +159,7 @@ pub fn build_pv_for_root(
         let (bf, bt) = (entry.best_from, entry.best_to);
         let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
         let next = ((nfr, nfc), (ntr, ntc));
-        // Validate legality in current position to avoid garbage PV
+        // Validate legality in the current position to avoid garbage PV
         let gs = GameState::from_board_and_side(tmp.clone(), side);
         let legals_pairs: Vec<((usize, usize), (usize, usize))> = find_all_valid_moves(&gs)
             .iter()
@@ -177,7 +177,7 @@ pub fn build_pv_for_root(
 
 pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usize, usize), (usize, usize))>, filtered: &mut Vec<((usize, usize), (usize, usize))>) {
     // Conservative hard filter at root: discard any quiet move that immediately hangs
-    // on the destination square according to a simple SEE probe. This avoids blatant
+    // on the destination square, according to a simple SEE probe. This avoids blatant
     // one-ply blunders. Also discard clearly losing captures. Keep checks, except
     // suicidal queen checks with very negative SEE.
     for &(from, to) in v.iter() {
@@ -186,7 +186,7 @@ pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usiz
         let captured_opt = _board.get(to.0, to.1);
         let is_capture = captured_opt.is_some();
 
-        // If the move gives check, generally keep it — but still gate suicidal queen checks.
+        // If the move gives a check, generally keep it — but still gate suicidal queen checks.
         let opponent = opposite_color(_active_color);
         if post.is_side_in_check(opponent) {
             if matches!(moved.get_type(), PieceType::Queen) {
@@ -200,7 +200,7 @@ pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usiz
         let see = if is_capture { see_after(&post, _active_color, to, captured_opt) } else { see_dest_estimate(&post, _active_color, to, 0) };
         if see < 0 { continue; }
 
-        // Additional hard filter: if this move leaves our queen en prise with negative SEE, drop it.
+        // Additional hard filter: if this move leaves our queen en-prise with negative SEE, drop it.
         if queen_hanging_after(&post, _active_color) { continue; }
         filtered.push((from, to));
     }
@@ -251,7 +251,7 @@ pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), 
     let (_fr, _fc) = from;
     let (tr, tc) = to;
 
-    // Keep only very small development/centralization nudges not modeled explicitly by eval:
+    // Keep only very small development/centralization nudges aren't modeled explicitly by eval:
     // Knights to c3/f3 (White) or c6/f6 (Black)
     if pt == PieceType::Knight {
         match side {
@@ -305,7 +305,7 @@ pub fn adjust_root_score(
     // Base root bonus
     let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
 
-    // Prepare post position for general use
+    // Prepare post-position for general use
     let (mut post_after, moved_probe) = simulate_move(base_board, from, to);
     let opp = opposite_color(side);
     let gives_check = post_after.is_side_in_check(opp);
@@ -420,7 +420,7 @@ fn threat_resolution_and_evacuation(
                 evac_bonus += cb.max(0);
             }
             if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-                if knight_safe.iter().any(|&sq| sq==to) { evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD - 2000; /* 6000 original */ }
+                if knight_safe.iter().any(|&sq| sq==to) { evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD - 2000; /* Original 6000 */ }
             }
             delta += apply_for_side(evac_bonus, side);
         } else {

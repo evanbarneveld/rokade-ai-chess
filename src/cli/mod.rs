@@ -26,7 +26,7 @@ enum GameMode {
 const DEFAULT_STRENGTH: usize = 1000;
 
 pub const BUILD_NUMBER: &str = match option_env!("BUILD_NUMBER") {
-    Some(v) => v,
+    Some(build_number) => build_number,
     None => "0",
 };
 
@@ -232,7 +232,7 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
     }
     let second = parts.next();
 
-    // helper to parse a usize in 0..=1000
+    // helper to parse an usize in 0..=1000
     let parse_depth = |s: &str| -> Option<usize> {
         match s.parse::<usize>() {
             Ok(v) if v <= 10 => Some(v),
@@ -250,7 +250,7 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
             } else {
                 println!("Invalid strength. Use: depth <0..10> | depth white <0..10> | depth black <0..10>");
             }
-            return true
+            true
         }
         // strength white <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("white") => {
@@ -260,7 +260,7 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
             } else {
                 println!("Invalid Search depth for white. Use: depth white <0..10>");
             }
-            return true
+            true
         }
         // strength black <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("black") => {
@@ -270,12 +270,20 @@ fn handle_search_depth(input: String, white_bot_search_depth: &mut usize, black_
             } else {
                 println!("Invalid Search depth for black. Use: depth black <0..10>");
             }
-            return true
+            true
         }
         _ => {
             println!("Usage: depth <0..10> | depth white <0..10> | depth black <0..10>");
-            return true
+            true
         }
+    }
+}
+
+fn parse_strength(s: &str) -> Option<usize> {
+    // helper to parse a usize in 0..=1000
+    match s.parse::<usize>() {
+        Ok(v) if v <= 1000 => Some(v),
+        _ => None
     }
 }
 
@@ -291,14 +299,6 @@ fn handle_movetime(input: String, white_bot_move_time: &mut usize, black_bot_mov
     }
     let second = parts.next();
 
-    // helper to parse a usize in 0..=1000
-    let parse_strength = |s: &str| -> Option<usize> {
-        match s.parse::<usize>() {
-            Ok(v) if v <= 1000 => Some(v),
-            _ => None
-        }
-    };
-
     match (first, second) {
         // strength <n>  -> set both
         (Some(n), None) => {
@@ -309,7 +309,7 @@ fn handle_movetime(input: String, white_bot_move_time: &mut usize, black_bot_mov
             } else {
                 println!("Invalid movetime. Use: movetime <0..600> | movetime white <0..600> | movetime black <0..600>");
             }
-            return true
+            true
         }
         // strength white <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("white") => {
@@ -319,7 +319,7 @@ fn handle_movetime(input: String, white_bot_move_time: &mut usize, black_bot_mov
             } else {
                 println!("Invalid movetime for white. Use: movetime white <0..600>");
             }
-            return true
+            true
         }
         // strength black <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("black") => {
@@ -329,11 +329,11 @@ fn handle_movetime(input: String, white_bot_move_time: &mut usize, black_bot_mov
             } else {
                 println!("Invalid movetime for black. Use: strength black <0..600>");
             }
-            return true
+            true
         }
         _ => {
             println!("Usage: movetime <0..600> | strength movetime <0..600> | strength movetime <0..600>");
-            return true
+            true
         }
     }
 }
@@ -350,14 +350,6 @@ fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_stre
     }
     let second = parts.next();
 
-    // helper to parse a usize in 0..=1000
-    let parse_strength = |s: &str| -> Option<usize> {
-        match s.parse::<usize>() {
-            Ok(v) if v <= 1000 => Some(v),
-            _ => None
-        }
-    };
-
     match (first, second) {
         // strength <n>  -> set both
         (Some(n), None) => {
@@ -368,7 +360,7 @@ fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_stre
             } else {
                 println!("Invalid strength. Use: strength <0..1000> | strength white <0..1000> | strength black <0..1000>");
             }
-            return true
+            true
         }
         // strength white <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("white") => {
@@ -378,7 +370,7 @@ fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_stre
             } else {
                 println!("Invalid strength for white. Use: strength white <0..1000>");
             }
-            return true
+            true
         }
         // strength black <n>
         (Some(color), Some(n)) if color.eq_ignore_ascii_case("black") => {
@@ -388,11 +380,11 @@ fn handle_strength(input: String, white_bot_strength: &mut usize, black_bot_stre
             } else {
                 println!("Invalid strength for black. Use: strength black <0..1000>");
             }
-            return true
+            true
         }
         _ => {
             println!("Usage: strength <0..1000> | strength white <0..1000> | strength black <0..1000>");
-            return true
+            true
         }
     }
 }

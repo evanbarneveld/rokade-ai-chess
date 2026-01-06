@@ -23,7 +23,7 @@ pub fn alphabeta(
     mut beta: i32,
     ply: i32,
     tt: &mut TranspositionTable,
-    halfmove_clock: u32,
+    half_move_clock: u32,
     rep_stack: &mut Vec<u64>,
 ) -> i32 {
     // Count every node we enter
@@ -49,16 +49,16 @@ pub fn alphabeta(
         }
     }
     // 50-move rule
-    if halfmove_clock >= HUNDRED_HALF_MOVES {
+    if half_move_clock >= HUNDRED_HALF_MOVES {
         return 0;
     }
 
     if depth == 0 {
         // At leaf: switch to quiescence to avoid horizon effects
-        return qsearch(board, to_move, alpha, beta, halfmove_clock, rep_stack);
+        return qsearch(board, to_move, alpha, beta, half_move_clock, rep_stack);
     }
 
-    if let Some(value) = prune_null_moves(board, to_move, depth, beta, ply, tt, halfmove_clock, rep_stack) {
+    if let Some(value) = prune_null_moves(board, to_move, depth, beta, ply, tt, half_move_clock, rep_stack) {
         return value;
     }
 
@@ -93,7 +93,7 @@ pub fn alphabeta(
         .iter()
         .map(|(f, t, _)| (*f, *t))
         .collect();
-    // If TT has a best move, try it first
+    // If TT has the best move, try it first
     if let Some(entry) = tt.probe(key) {
         let bm = decode_move(entry.best_from, entry.best_to);
         if let Some(pos) = moves.iter().position(|m| *m == bm) {
@@ -106,7 +106,7 @@ pub fn alphabeta(
         // Stable-partition: keep index 0 (possibly TT move) in place, sort the tail
         let (head, tail) = moves.split_at_mut(1);
         let board_ref = &*board;
-        let hmc = halfmove_clock;
+        let hmc = half_move_clock;
         // Access history/killer tables
         thread_local! {
             static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
@@ -199,7 +199,7 @@ pub fn alphabeta(
             // reaching the 6th/7th rank (relative to the side) in a near-endgame, extend by +1 ply.
             let mut child_depth = depth.saturating_sub(1);
             // Track halfmove clock: reset on pawn move or capture
-            let mut child_hmc = halfmove_clock + 1;
+            let mut child_hmc = half_move_clock + 1;
             if let Some(p) = moved_piece {
                 if p.get_type() == PieceType::Pawn {
                     child_hmc = 0;
@@ -356,7 +356,7 @@ pub fn alphabeta(
             // Passed-pawn push extension (B5)
             let mut child_depth = depth.saturating_sub(1);
             // Track halfmove clock for child
-            let mut child_hmc = halfmove_clock + 1;
+            let mut child_hmc = half_move_clock + 1;
             if let Some(p) = moved_piece {
                 if p.get_type() == PieceType::Pawn {
                     child_hmc = 0;
