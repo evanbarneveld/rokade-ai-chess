@@ -1,10 +1,10 @@
 
 #[derive(Debug, Clone, Copy)]
 pub struct CastlingRights {
-    white_kingside: bool,
-    white_queenside: bool,
-    black_kingside: bool,
-    black_queenside: bool,
+    pub(crate) white_kingside: bool,
+    pub(crate) white_queenside: bool,
+    pub(crate) black_kingside: bool,
+    pub(crate) black_queenside: bool,
 }
 
 impl CastlingRights {

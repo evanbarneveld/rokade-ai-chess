@@ -1,11 +1,54 @@
-use crate::piece::piece_mover::PieceMover;
 use crate::search::advanced_search::find_all_valid_moves;
+use crate::search::zobrist::compute_zobrist;
 use crate::state::game_state::GameState;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    // Perft transposition table: key = (zobrist-like state hash, depth), value = node count
+    static PERFT_TT: RefCell<HashMap<(u64, u32), u64>> = RefCell::new(HashMap::new());
+}
+
+#[inline]
+fn perft_state_key(gs: &GameState) -> u64 {
+    // Base Zobrist from board + side to move
+    let mut key = compute_zobrist(gs.board(), gs.active_color());
+
+    // Mix in castling rights (4 bits) and en-passant file (0..8; 0 = none, 1..8 = file a..h)
+    let cr = gs.castling_rights();
+    let mut cr_bits: u8 = 0;
+    // Order: KQkq -> bits 0..3
+    // Accessors are exposed on CastlingRights
+    if cr.white_kingside() { cr_bits |= 1 << 0; }
+    if cr.white_queenside() { cr_bits |= 1 << 1; }
+    if cr.black_kingside() { cr_bits |= 1 << 2; }
+    if cr.black_queenside() { cr_bits |= 1 << 3; }
+
+    let ep_file: u64 = if let Some((_, file)) = gs.en_passant_target() { (file as u64) + 1 } else { 0 };
+
+    // Simple mix (SplitMix-inspired constants) to reduce collisions
+    let mix1 = (cr_bits as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mix2 = ep_file.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    key ^ mix1 ^ mix2
+}
 
 #[inline]
 pub fn perft_count(gs: &GameState, depth: u32) -> u64 {
+    // Keep public API immutable; use a single mutable copy at root and recurse with make/unmake
+    let mut work = *gs;
+    perft_count_mut(&mut work, depth)
+}
+
+#[inline]
+fn perft_count_mut(gs: &mut GameState, depth: u32) -> u64 {
     if depth == 0 {
         return 1;
+    }
+
+    // Probe perft TT
+    let k = perft_state_key(gs);
+    if let Some(hit) = PERFT_TT.with(|tt| tt.borrow().get(&(k, depth)).cloned()) {
+        return hit;
     }
 
     let moves = find_all_valid_moves(gs);
@@ -16,38 +59,14 @@ pub fn perft_count(gs: &GameState, depth: u32) -> u64 {
 
     let mut nodes: u64 = 0;
     for (from, to, promo) in moves {
-        let mut child = *gs; // GameState is Copy
-        // capture may be en passant even if target square is empty
-        let mover = child.board().get(from.0, from.1);
-        let is_capture = child.board().get(to.0, to.1).is_some()
-            || (mover.is_some()
-                && mover.unwrap().get_type() == crate::piece::pieces::PieceType::Pawn
-                && child.en_passant_target().is_some()
-                && child.en_passant_target().unwrap() == to);
-        let promote_piece = match promo {
-            Some('q') | Some('Q') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Queen,
-                gs.active_color(),
-            )),
-            Some('r') | Some('R') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Rook,
-                gs.active_color(),
-            )),
-            Some('b') | Some('B') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Bishop,
-                gs.active_color(),
-            )),
-            Some('n') | Some('N') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Knight,
-                gs.active_color(),
-            )),
-            _ => None,
-        };
-        if PieceMover::move_piece(&mut child, from, to, is_capture, promote_piece) {
-            child.switch_player_turn();
-            nodes += perft_count(&child, depth - 1);
-        }
+        let undo = gs.make_move_fast(from, to, promo);
+        nodes += perft_count_mut(gs, depth - 1);
+        gs.unmake_move_fast(undo);
     }
+    // Store in TT
+    PERFT_TT.with(|tt| {
+        tt.borrow_mut().insert((k, depth), nodes);
+    });
     nodes
 }
 
@@ -58,58 +77,31 @@ pub fn perft_divide(gs: &GameState, depth: u32) -> Vec<(String, u64)> {
         return result;
     }
     let moves = find_all_valid_moves(gs);
+    let mut work = *gs;
     for (from, to, promo) in moves {
-        let mut child = *gs;
-        // capture may be en passant even if target square is empty
-        let mover = child.board().get(from.0, from.1);
-        let is_capture = child.board().get(to.0, to.1).is_some()
-            || (mover.is_some()
-                && mover.unwrap().get_type() == crate::piece::pieces::PieceType::Pawn
-                && child.en_passant_target().is_some()
-                && child.en_passant_target().unwrap() == to);
-        let promote_piece = match promo {
-            Some('q') | Some('Q') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Queen,
-                gs.active_color(),
-            )),
-            Some('r') | Some('R') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Rook,
-                gs.active_color(),
-            )),
-            Some('b') | Some('B') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Bishop,
-                gs.active_color(),
-            )),
-            Some('n') | Some('N') => Some(crate::piece::pieces::Piece::new(
-                crate::piece::pieces::PieceType::Knight,
-                gs.active_color(),
-            )),
-            _ => None,
+        let u = work.make_move_fast(from, to, promo);
+        let count = perft_count_mut(&mut work, depth - 1);
+        work.unmake_move_fast(u);
+        // format move as coordinate string
+        let s = if let Some(pc) = promo {
+            format!(
+                "{}{}{}{}{}",
+                (b'a' + from.1 as u8) as char,
+                (b'1' + from.0 as u8) as char,
+                (b'a' + to.1 as u8) as char,
+                (b'1' + to.0 as u8) as char,
+                pc
+            )
+        } else {
+            format!(
+                "{}{}{}{}",
+                (b'a' + from.1 as u8) as char,
+                (b'1' + from.0 as u8) as char,
+                (b'a' + to.1 as u8) as char,
+                (b'1' + to.0 as u8) as char
+            )
         };
-        if PieceMover::move_piece(&mut child, from, to, is_capture, promote_piece) {
-            child.switch_player_turn();
-            let count = perft_count(&child, depth - 1);
-            // format move as coordinate string
-            let s = if let Some(pc) = promo {
-                format!(
-                    "{}{}{}{}{}",
-                    (b'a' + from.1 as u8) as char,
-                    (b'1' + from.0 as u8) as char,
-                    (b'a' + to.1 as u8) as char,
-                    (b'1' + to.0 as u8) as char,
-                    pc
-                )
-            } else {
-                format!(
-                    "{}{}{}{}",
-                    (b'a' + from.1 as u8) as char,
-                    (b'1' + from.0 as u8) as char,
-                    (b'a' + to.1 as u8) as char,
-                    (b'1' + to.0 as u8) as char
-                )
-            };
-            result.push((s, count));
-        }
+        result.push((s, count));
     }
     result
 }

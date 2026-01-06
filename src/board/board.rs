@@ -19,16 +19,16 @@ pub struct Board {
 
 #[derive(Clone, Copy)]
 pub struct UndoMove {
-    from: (usize, usize),
-    to: (usize, usize),
-    moved: Option<Piece>,
-    captured: Option<Piece>,
+    pub(crate) from: (usize, usize),
+    pub(crate) to: (usize, usize),
+    pub(crate) moved: Option<Piece>,
+    pub(crate) captured: Option<Piece>,
     // Save king locations to restore accurately on unmake
-    prev_white_king: (usize, usize),
-    prev_black_king: (usize, usize),
+    pub(crate) prev_white_king: (usize, usize),
+    pub(crate) prev_black_king: (usize, usize),
     // Castling support: if the move was a castle, remember rook relocation
-    castle_rook_from: Option<(usize, usize)>,
-    castle_rook_to: Option<(usize, usize)>,
+    pub(crate) castle_rook_from: Option<(usize, usize)>,
+    pub(crate) castle_rook_to: Option<(usize, usize)>,
 }
 
 impl Board {

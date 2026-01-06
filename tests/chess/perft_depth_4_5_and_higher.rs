@@ -50,6 +50,7 @@ fn perft_position4_depth4() { // last tested at 6-jan-2026
 #[test]
 #[serial]
 fn perft_position4_depth5() { // last tested at 6-jan-2026
+    let time_start = std::time::Instant::now();
     let fen = "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1";
     let gs = reset_from_fen(fen).expect("valid FEN");
     let nodes:i64 = perft_count(&gs, 5) as i64;
@@ -58,6 +59,7 @@ fn perft_position4_depth5() { // last tested at 6-jan-2026
     if nodes - expected != 0 {
         println!("diff = {}", (nodes - expected).abs());
     }
+    println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }
 
