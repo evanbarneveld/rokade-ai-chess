@@ -1,5 +1,5 @@
 use serial_test::serial;
-use chess::piece::perft::{perft_count, perft_divide};
+use chess::piece::perft::{perft_count};
 use chess::state::fen::reader::reset_from_fen;
 use chess::Chess;
 use chess::search::advanced_search::_dump_all_valid_moves;

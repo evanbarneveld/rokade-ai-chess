@@ -57,6 +57,7 @@ fn perft_position3_depth4() { // last tested at 6-jan-2026
 #[test]
 #[serial]
 fn perft_position4_depth4() { // last tested at 6-jan-2026
+    let time_start = std::time::Instant::now();
     let fen = "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1";
     let gs = reset_from_fen(fen).expect("valid FEN");
     let nodes:i64 = perft_count(&gs, 4) as i64;
@@ -65,6 +66,7 @@ fn perft_position4_depth4() { // last tested at 6-jan-2026
     if nodes - expected != 0 {
         println!("diff = {}", (nodes - expected).abs());
     }
+    println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }
 
@@ -88,6 +90,7 @@ fn perft_position4_depth5() { // last tested at 6-jan-2026
 #[test]
 #[serial]
 fn perft_position5_depth4() { // last tested at 6-jan-2026
+    let time_start = std::time::Instant::now();
     let fen = "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8";
     let gs = reset_from_fen(fen).expect("valid FEN");
     let nodes: i64 = perft_count(&gs, 4) as i64;
@@ -97,12 +100,14 @@ fn perft_position5_depth4() { // last tested at 6-jan-2026
         println!("diff = {}", (nodes - expected).abs());
     }
 
+    println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }
 
 #[test]
 #[serial]
 fn perft_position6_depth4() { // last tested at 6-jan-2026
+    let time_start = std::time::Instant::now();
     let fen = "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10";
     let gs = reset_from_fen(fen).expect("valid FEN");
     let nodes:i64 = perft_count(&gs, 4) as i64;
@@ -111,12 +116,14 @@ fn perft_position6_depth4() { // last tested at 6-jan-2026
     if nodes - expected != 0 {
         println!("diff = {}", (nodes - expected).abs());
     }
+    println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }
 
 #[test]
 #[serial]
 fn perft_startpos_depths_4() { // last tested at 6-jan-2026
+    let time_start = std::time::Instant::now();
     let fen = Chess::DEFAULT_CHESS_STARTING_FEN;
     let gs = reset_from_fen(fen).expect("valid startpos FEN");
 
@@ -126,12 +133,14 @@ fn perft_startpos_depths_4() { // last tested at 6-jan-2026
     if nodes - expected != 0 {
         println!("diff = {}", (nodes - expected).abs());
     }
+    println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }
 
 #[test]
 #[serial]
 fn perft_startpos_depths_5() { // last tested at 6-jan-2026
+    let time_start = std::time::Instant::now();
     let fen = Chess::DEFAULT_CHESS_STARTING_FEN;
     let gs = reset_from_fen(fen).expect("valid startpos FEN");
 
@@ -141,12 +150,14 @@ fn perft_startpos_depths_5() { // last tested at 6-jan-2026
     if nodes - expected != 0 {
         println!("diff = {}", (nodes - expected).abs());
     }
+    println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }
 
 #[test]
 #[serial]
-fn perft_startpos_depth_6() {
+fn perft_startpos_depth_6() { // last tested at 6-jan-2026
+    let time_start = std::time::Instant::now();
     let fen = Chess::DEFAULT_CHESS_STARTING_FEN;
     let gs = reset_from_fen(fen).expect("valid startpos FEN");
 
@@ -156,5 +167,6 @@ fn perft_startpos_depth_6() {
     if nodes - expected != 0 {
         println!("diff = {}", (nodes - expected).abs());
     }
+    println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }

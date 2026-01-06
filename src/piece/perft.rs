@@ -13,7 +13,7 @@ thread_local! {
 #[inline]
 fn perft_state_key(gs: &GameState) -> u64 {
     // Base Zobrist from board + side to move
-    let mut key = compute_zobrist(gs.board(), gs.active_color());
+    let key = compute_zobrist(gs.board(), gs.active_color());
 
     // Mix in castling rights (4 bits) and en-passant file (0..8; 0 = none, 1..8 = file a..h)
     let cr = gs.castling_rights();
@@ -55,23 +55,10 @@ fn perft_count_mut(gs: &mut GameState, depth: u32) -> u64 {
     }
 
     // Reuse a local buffer for move generation in this frame
-    // Optional stack-friendly buffer behind feature `perft_smallvec`.
-    #[cfg(feature = "perft_smallvec")]
-    let mut moves_buf: smallvec::SmallVec<[PerftMove; 64]> = smallvec::SmallVec::new();
-    #[cfg(not(feature = "perft_smallvec"))]
     let mut moves_buf: Vec<PerftMove> = Vec::with_capacity(64);
 
-    // Fill buffer using existing generator (which takes Vec); when using SmallVec, fill a temp Vec and extend.
-    #[cfg(feature = "perft_smallvec")]
-    {
-        let mut tmp: Vec<PerftMove> = Vec::with_capacity(64);
-        find_all_valid_moves_into_perft(gs, &mut tmp);
-        moves_buf.extend_from_slice(&tmp);
-    }
-    #[cfg(not(feature = "perft_smallvec"))]
-    {
-        find_all_valid_moves_into_perft(gs, &mut moves_buf);
-    }
+    // Fill buffer using existing generator (which takes Vec)
+    find_all_valid_moves_into_perft(gs, &mut moves_buf);
 
     if depth == 1 {
         return moves_buf.len() as u64;

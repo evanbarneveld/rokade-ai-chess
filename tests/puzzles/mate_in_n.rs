@@ -126,7 +126,7 @@ fn test_mates_generic() {
             total += 1;
 
             let solution = solution_line.unwrap();
-            let mut tokens: Vec<String> = parse_solution_line(&solution)
+            let tokens: Vec<String> = parse_solution_line(&solution)
                 .into_iter()
                 .map(|t| clean_token(&t))
                 .collect();

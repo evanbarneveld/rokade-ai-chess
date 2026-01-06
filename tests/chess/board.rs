@@ -25,7 +25,7 @@ fn initial_e2e4_move() {
 #[serial]
 fn test_pawn_capture() {
     let mut game = Chess::new();
-    game.set_starting_fen("rnbqkbnr/p1pppppp/P7/8/8/1p6/1PPPPPPP/RNBQKBNR w KQkq - 0 4");
+    game.set_starting_fen("rnbqkbnr/p1pppppp/P7/8/8/1p6/1PPPPPPP/RNBQKBNR w KQkq - 0 4").expect("bad fen");
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!( game.move_piece_san("cxb3"));
@@ -37,7 +37,7 @@ fn test_pawn_capture() {
 #[serial]
 fn test_en_passant_pawn_capture() {
     let mut game = Chess::new();
-    game.set_starting_fen("rnbqkbnr/1ppppp1p/8/p3P3/6pP/1P6/P1PP1PP1/RNBQKBNR b KQkq h3 0 4");
+    game.set_starting_fen("rnbqkbnr/1ppppp1p/8/p3P3/6pP/1P6/P1PP1PP1/RNBQKBNR b KQkq h3 0 4").expect("bad fen");
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!( game.move_piece_san("g4xh3"));
@@ -50,7 +50,7 @@ fn test_en_passant_pawn_capture() {
 #[serial]
 fn test_en_passant_capture_black() {
     let mut game = Chess::new();
-    game.set_starting_fen("rn2k1nr/ppp2ppp/8/2bqpb2/2Pp4/1K3P2/PP1PP1PP/RNBQ1BNR b kq c3 0 7");
+    game.set_starting_fen("rn2k1nr/ppp2ppp/8/2bqpb2/2Pp4/1K3P2/PP1PP1PP/RNBQ1BNR b kq c3 0 7").expect("bad fen");
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san("dxc3"));
@@ -62,7 +62,7 @@ fn test_en_passant_capture_black() {
 #[serial]
 fn test_pawn_move_over_piece() {
     let mut game = Chess::new();
-    game.set_starting_fen("rnbqkbn1/ppppppp1/3r4/7p/7P/3R4/PPPPPPP1/RNBQKBN1 w KQkq h6 4 4");
+    game.set_starting_fen("rnbqkbn1/ppppppp1/3r4/7p/7P/3R4/PPPPPPP1/RNBQKBN1 w KQkq h6 4 4").expect("bad fen");
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!( !game.move_piece_san("d2d4"));
@@ -74,7 +74,7 @@ fn test_pawn_move_over_piece() {
 #[serial]
 fn test_castling() {
     let mut game = Chess::new();
-    game.set_starting_fen("r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4");
+    game.set_starting_fen("r1bqkbnr/1ppp1ppp/p1n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4").expect("bad fen");
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san("O-O"));
@@ -87,7 +87,7 @@ fn test_castling() {
 #[serial]
 fn test_castling_black() {
     let mut game = Chess::new();
-    game.set_starting_fen("r3kbnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 b kq - 0 7");
+    game.set_starting_fen("r3kbnr/1pp2ppp/p1n1b3/3pp1q1/P1B1P3/5N1P/1PPP1PP1/RNBQ1RK1 b kq - 0 7").expect("bad fen");
     let history = game.get_history().clone();
     println!("{}", game.board().get_board_display_string(Some(&history)));
     assert!(game.move_piece_san("O-O-O"));
@@ -101,7 +101,7 @@ fn test_ambiguous_move_due_to_pinned_pieces() {
     let fen = "r2qkb1r/ppp2ppp/2n5/1B1npb2/8/2N1PN2/PP1P1PPP/R1BQK2R b KQkq - 5 7";
     let mv = "Ne7";
     let mut game = Chess::new();
-    game.set_starting_fen(fen);
+    game.set_starting_fen(fen).expect("bad fen");
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
@@ -115,7 +115,7 @@ fn test_ambigous_rook_error() {
     let fen = "2r2bk1/ppp3pp/4rq2/8/2BQ4/2P5/PP3PPP/R3R1K1 b - - 0 21";
     let mv = "Re8";
     let mut game = Chess::new();
-    game.set_starting_fen(fen);
+    game.set_starting_fen(fen).expect("bad fen");
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
@@ -131,7 +131,7 @@ fn black_en_passant_error() {
     let fen = "3r4/pp5p/5k2/5ppP/2P2N1K/4r1P1/PP5R/8 w - g6 0 29";
     let mv = "hxg6";
     let mut game = Chess::new();
-    game.set_starting_fen(fen);
+    game.set_starting_fen(fen).expect("bad fen");
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
@@ -147,7 +147,7 @@ fn test_check_mate() {
     let fen = "r4rk1/ppp2ppp/2n5/3pp3/4n2q/7P/PPPPP1BP/RNBQ2KR b - - 4 11";
     let mv = "Qf2";
     let mut game = Chess::new();
-    game.set_starting_fen(fen);
+    game.set_starting_fen(fen).expect("bad fen");
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
@@ -167,7 +167,7 @@ fn test_check_mate2() {
     let fen = "rn2k1nr/ppp2ppp/8/2b1pb2/3q4/1K3P2/PP1PP1PP/RNBQ1BNR b kq - 2 9";
     let mv = "Qb4+";
     let mut game = Chess::new();
-    game.set_starting_fen(fen);
+    game.set_starting_fen(fen).expect("bad fen");
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();
@@ -188,7 +188,7 @@ fn test_check_with_o_o_o() {
     let mv = "O-O-O+";
     //let mv = "e2";
     let mut game = Chess::new();
-    game.set_starting_fen(fen);
+    game.set_starting_fen(fen).expect("bad fen");
     println!("Fen: {}", fen);
     println!("Move: {}", mv);
     let history = game.get_history().clone();

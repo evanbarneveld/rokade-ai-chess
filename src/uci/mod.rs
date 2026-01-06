@@ -4,7 +4,7 @@ use std::fs::OpenOptions;
 use crate::Chess;
 use crate::cli::BUILD_NUMBER;
 use crate::piece::as_move_str;
-use crate::search::advanced_search::{DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH, MAX_SEARCH_DEPTH};
+use crate::search::advanced_search::{DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY, MAX_PLAYING_STRENGTH, MAX_SEARCH_DEPTH};
 use crate::search::{find_best_move_with_mode, SearchMode};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};

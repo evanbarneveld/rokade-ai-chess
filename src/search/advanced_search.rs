@@ -179,7 +179,7 @@ pub fn find_best_move(
     // Reuse persistent TT
     let mut tt = tt_mutex.lock().unwrap();
     let base_hmc = game_state.half_move_clock();
-    let mut last_score: i32 = 0;
+    let mut _last_score: i32 = 0;
     let mut chosen: Option<((usize, usize), (usize, usize), i32, usize)> = None;
     let mut window: i32 = ASP_WINDOW_INIT_CP; // cp
 
@@ -198,7 +198,7 @@ pub fn find_best_move(
                     active_color,
                     &root_moves,
                     depth_now,
-                    last_score,
+                    _last_score,
                     &mut window,
                     &mut tt,
                     base_hmc,
@@ -226,7 +226,7 @@ pub fn find_best_move(
             //eprintln!("[root] depth_now={} (post-asp) best_adj={} best_raw={} mv={:?}->{:?}",
             //          depth_now, best_adj, best_raw, (bf, bt).0, (bf, bt).1);
 
-            last_score = best_raw;
+            _last_score = best_raw;
             // Emit PV/info for this iteration, including TT hashfull permille
             let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
             let hf = tt.hashfull_permille();
@@ -243,7 +243,7 @@ pub fn find_best_move(
                 active_color,
                 &root_moves,
                 depth_now,
-                last_score,
+                _last_score,
                 &mut window,
                 &mut tt,
                 base_hmc,
@@ -266,7 +266,7 @@ pub fn find_best_move(
                 history,
             )
         };
-        last_score = best_raw;
+        _last_score = best_raw;
         let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
         let hf = tt.hashfull_permille();
         emit_info(bf, bt, best_adj, depth_now, pv, hf);

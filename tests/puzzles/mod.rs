@@ -1,1 +1,1 @@
-mod mate_in_N;
+mod mate_in_n;

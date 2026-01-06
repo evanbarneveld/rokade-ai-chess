@@ -347,7 +347,7 @@ fn apply_destination_see_penalties(
     base_board: &Board,
     post_after: &Board,
     side: Color,
-    from: (usize,usize),
+    _from: (usize, usize),
     to: (usize,usize),
     is_capture: bool,
     moved_is_pawn: bool,
@@ -510,7 +510,7 @@ fn king_safety_root_heuristics(base_board: &Board, side: Color, from: (usize,usi
 
 #[inline]
 fn self_hang_or_check_mobility(
-    base_board: &Board,
+    _base_board: &Board,
     post_after: &Board,
     side: Color,
     _from: (usize,usize),

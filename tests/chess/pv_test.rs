@@ -8,7 +8,7 @@ fn depth2_pv_first_move_is_exd5() {
     use chess::Chess;
     let fen = "8/8/4p3/3Q4/8/8/8/2K2k2 b - - 0 1";
     let mut game = Chess::new();
-    game.set_starting_fen(fen);
+    game.set_starting_fen(fen).expect("bad fen");
     set_deterministic(true);
 
     let last_pv: Arc<std::sync::Mutex<Vec<((usize, usize), (usize, usize))>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
