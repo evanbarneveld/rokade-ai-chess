@@ -339,6 +339,24 @@ impl GameState {
         self.en_passant_target = u.prev_en_passant_target;
         self.half_move_clock = u.prev_half_move_clock;
         self.full_move_number = u.prev_full_move_number;
+
+        // Debug-only consistency checks to ensure full restoration
+        #[cfg(debug_assertions)]
+        {
+            // King locations should match the snapshot stored in the board undo
+            let wk = self.board.get_king_location(Color::White);
+            let bk = self.board.get_king_location(Color::Black);
+            debug_assert_eq!(wk, u.board_undo.prev_white_king, "White king location mismatch after unmake");
+            debug_assert_eq!(bk, u.board_undo.prev_black_king, "Black king location mismatch after unmake");
+
+            // Squares actually contain kings of the right colors
+            if let Some(k) = self.board.get(wk.0, wk.1) {
+                debug_assert!(k.get_type() == PieceType::King && k.get_color() == Color::White, "Expected white king on its square after unmake");
+            }
+            if let Some(k) = self.board.get(bk.0, bk.1) {
+                debug_assert!(k.get_type() == PieceType::King && k.get_color() == Color::Black, "Expected black king on its square after unmake");
+            }
+        }
     }
 }
 

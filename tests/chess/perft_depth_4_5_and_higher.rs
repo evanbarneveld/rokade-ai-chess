@@ -1,5 +1,5 @@
 use serial_test::serial;
-use chess::piece::perft::{perft_count};
+use chess::piece::perft::{perft_count, perft_count_parallel};
 use chess::state::fen::reader::reset_from_fen;
 use chess::Chess;
 
@@ -31,6 +31,21 @@ fn perft_position2_depth5() { //last tested at 6-jan-2026 (412 seconds)
     assert_eq!(nodes, expected);
 }
 
+#[test]
+#[serial]
+fn perft_position2_depth5_parallel() { //last tested at 6-jan-2026 (54 seconds parallel)
+    let time_start = std::time::Instant::now();
+    let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    let gs = reset_from_fen(fen).expect("valid FEN");
+    let nodes:i64 = perft_count_parallel(&gs, 5) as i64;
+    let expected: i64 = 193_690_690;
+
+    if nodes - expected != 0 {
+        println!("diff = {}", (nodes - expected).abs());
+    }
+    println!("elapsed time {:?}", time_start.elapsed());
+    assert_eq!(nodes, expected);
+}
 #[test]
 #[serial]
 fn perft_position3_depth4() { // last tested at 6-jan-2026
@@ -101,12 +116,32 @@ fn perft_position6_depth4() { // last tested at 6-jan-2026
 
 #[test]
 #[serial]
-fn perft_startpos_depths_4_and_5() { // last tested at 6-jan-2026
+fn perft_startpos_depths_4() { // last tested at 6-jan-2026
     let fen = Chess::DEFAULT_CHESS_STARTING_FEN;
     let gs = reset_from_fen(fen).expect("valid startpos FEN");
 
-    assert_eq!(perft_count(&gs, 4), 197_281);
-    assert_eq!(perft_count(&gs, 5), 4_865_609);
+    let nodes:i64 = perft_count(&gs, 4) as i64;
+    let expected: i64 = 197_281;
+
+    if nodes - expected != 0 {
+        println!("diff = {}", (nodes - expected).abs());
+    }
+    assert_eq!(nodes, expected);
+}
+
+#[test]
+#[serial]
+fn perft_startpos_depths_5() { // last tested at 6-jan-2026
+    let fen = Chess::DEFAULT_CHESS_STARTING_FEN;
+    let gs = reset_from_fen(fen).expect("valid startpos FEN");
+
+    let nodes:i64 = perft_count_parallel(&gs, 5) as i64;
+    let expected: i64 = 4_865_609;
+
+    if nodes - expected != 0 {
+        println!("diff = {}", (nodes - expected).abs());
+    }
+    assert_eq!(nodes, expected);
 }
 
 #[test]
@@ -115,5 +150,11 @@ fn perft_startpos_depth_6() {
     let fen = Chess::DEFAULT_CHESS_STARTING_FEN;
     let gs = reset_from_fen(fen).expect("valid startpos FEN");
 
-    assert_eq!(perft_count(&gs, 6), 119_060_324);
+    let nodes:i64 = perft_count_parallel(&gs, 6) as i64;
+    let expected: i64 = 119_060_324;
+
+    if nodes - expected != 0 {
+        println!("diff = {}", (nodes - expected).abs());
+    }
+    assert_eq!(nodes, expected);
 }
