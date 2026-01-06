@@ -410,11 +410,13 @@ fn apply_destination_see_penalties(
         // Additional direct guard for checking moves: if the opponent king can immediately
         // capture the checking piece on the destination square and remain safe, apply a
         // very strong penalty regardless of SEE approximation.
-        // This specifically addresses patterns like Rd1+, Re1+, Rxb3+ dropping the rook to Kx.
+        // This specifically addresses patterns like Rd1+, Re1+, Rxb3+ dropping the rook to Kx,
+        // and also Bishop/ Knight checks such as Bxf7+ where Kxf7 is safe.
         // Determine moved piece type first.
         if let Some(moved_pt2) = base_board.get(from.0, from.1).map(|p| p.get_type()) {
-            // Only consider heavy penalty for rook/queen; minors handled by SEE scaling above.
-            if moved_pt2 == PieceType::Rook || moved_pt2 == PieceType::Queen {
+            // Consider heavy penalty for all pieces that commonly blunder on checking sacrifices.
+            // Previously only rook/queen; extend to bishops/knights as well to avoid Bxf7+, Na5+ blunders.
+            if matches!(moved_pt2, PieceType::Rook | PieceType::Queen | PieceType::Bishop | PieceType::Knight) {
                 let opp = opposite_color(side);
                 // Find opponent king square in the post position (after our checking move)
                 let mut king_sq: Option<(usize,usize)> = None;
@@ -443,8 +445,20 @@ fn apply_destination_see_penalties(
                                 let unsafe_for_king = is_square_attacked_by_opponent(&mut tmp_chk, to, opp);
                                 if !unsafe_for_king {
                                     // Apply a strong penalty: at least the piece value plus margin to overcome check bonuses
-                                    let base_pen = match moved_pt2 { PieceType::Queen => 900, PieceType::Rook => 500, _ => 300 };
-                                    let strong_pen = (base_pen * 8).clamp(2400, 8000); // 4000 for rook, 7200 for queen
+                                    let base_pen = match moved_pt2 {
+                                        PieceType::Queen => 900,
+                                        PieceType::Rook => 500,
+                                        PieceType::Bishop | PieceType::Knight => 300,
+                                        _ => 200,
+                                    };
+                                    // Scale a bit stronger for minors to ensure avoidance at low depths
+                                    let scale = match moved_pt2 {
+                                        PieceType::Queen => 8,
+                                        PieceType::Rook => 8,
+                                        PieceType::Bishop | PieceType::Knight => 10,
+                                        _ => 8,
+                                    };
+                                    let strong_pen = (base_pen * scale).clamp(2400, 8000);
                                     println!("[ROOT DEBUG] Opp king safe Kx on {:?}; applying strong_pen={} for {:?}->{:?}", to, strong_pen, from, to);
                                     delta += apply_for_side(-strong_pen, side);
                                 }
