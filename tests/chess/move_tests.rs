@@ -78,7 +78,69 @@ fn test_queen_save2() {
     assert_ne!(san_move, "Qd8+"); //bad move
 }
 
+#[test]
+#[serial]
+fn test_bad_rook_move() {
+    // in this position the engine generates a rook move Rf1d1+
+    // but now the rook can immediately be captured by the white king on d2.
+    let fen = "4r3/pp1n3p/2p2k1p/3p1P2/8/8/PPPK4/R1B2r2 b - - 7 33";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Rd1+"); //bad move
+}
 
+#[test]
+#[serial]
+fn test_bad_rook_move2() {
+    // in this position the engine generates a rook move Re1+
+    // but now the rook can immediately be captured
+    let fen = "4r3/pp1n3p/2p2k1p/3p1P2/8/8/PPP5/R1BK4 b - - 0 34";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Re1+"); //bad move
+}
+
+#[test]
+#[serial]
+fn test_bad_rook_move3() {
+    // in this position the engine generates a rook move Rxb3+
+    // but now the rook can immediately be captured by a2xb3
+    let fen = "8/pp5p/2p2k1p/2n2P2/3p4/KP1r4/P1P5/R1B5 b - - 0 39";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Rxb3+"); //bad move
+}
+
+#[test]
+#[serial]
+fn test_bad_knight_move() {
+    // in this position the engine generates a knight move to check the king
+    // however, the knight can immediately be captured by pawn b4xa5
+    let fen = "8/pp5p/2p4p/5k2/1Pn5/1K1R4/PB6/8 b - - 2 45";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Na5+"); //bad move
+}
 #[test]
 #[serial]
 fn test_bad_queen_offer() {
