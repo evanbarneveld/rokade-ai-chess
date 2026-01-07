@@ -386,9 +386,9 @@ fn apply_destination_see_penalties(
                 _ => ((-see) * 3).clamp(300, 3000),
             };
             // Temporary debug: trace SEE penalty for checking moves
-            if let Some(mp) = moved_pt { if mp == PieceType::Rook {
-                println!("[ROOT DEBUG] Rook checking move {:?}->{:?}: SEE={} pen={} (side={:?})", from, to, see, pen, side);
-            }}
+            //if let Some(mp) = moved_pt { if mp == PieceType::Rook {
+            //    println!("[ROOT DEBUG] Rook checking move {:?}->{:?}: SEE={} pen={} (side={:?})", from, to, see, pen, side);
+            //}}
             // side-aware penalty (penalize mover regardless of color)
             delta += apply_for_side(-pen, side);
         }
@@ -459,7 +459,7 @@ fn apply_destination_see_penalties(
                                         _ => 8,
                                     };
                                     let strong_pen = (base_pen * scale).clamp(2400, 8000);
-                                    println!("[ROOT DEBUG] Opp king safe Kx on {:?}; applying strong_pen={} for {:?}->{:?}", to, strong_pen, from, to);
+                                    //println!("[ROOT DEBUG] Opp king safe Kx on {:?}; applying strong_pen={} for {:?}->{:?}", to, strong_pen, from, to);
                                     delta += apply_for_side(-strong_pen, side);
                                 }
                             }

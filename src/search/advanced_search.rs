@@ -20,7 +20,7 @@ use crate::book::book::book_pick;
 use crate::search::Search;
 use crate::board::san_move::convert_move_to_san;
 
-pub const DEFAULT_SEARCH_DEPTH: usize = 10;
+pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 pub const MAX_SEARCH_DEPTH: usize = 20;
 
 // Root parallelization settings
