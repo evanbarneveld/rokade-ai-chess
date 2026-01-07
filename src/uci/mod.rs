@@ -144,9 +144,9 @@ pub fn run_uci() -> io::Result<()> {
 
                 if time_left > 0 {
                     // Heuristic: allocate ~3% of remaining time, with a floor and a safety cap.
-                    let mut budget = ((time_left as f64) * 0.03) as usize; // 3%
+                    let mut budget = ((time_left as f64) * 0.02) as usize; // 2%
                     if budget < 10 { budget = 10; } // at least 10ms
-                    let max_cap = time_left / 2; // never spend more than half the remaining time on one move
+                    let max_cap = time_left / 3; // never spend more than half the remaining time on one move
                     if max_cap > 0 && budget > max_cap { budget = max_cap; }
 
                     // If in severe time trouble, be extra conservative
