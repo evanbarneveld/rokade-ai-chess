@@ -20,20 +20,18 @@ fn test_games_of_pgn_library() {
 
     const FIRST_TEST:i32 = 1; //starts at #1
 
-    //last check 1 ... 3299 ok
-    const LAST_TEST:i32 = 25; // reasonable default for CI speed
+    const LAST_TEST:i32 = 63; // reasonable default for CI speed
 
     // Games to skip from the PGN library (by game index starting at 1) because they have been checked and are invalid
     let skip_list: Vec<i32> = vec![
-        1145
     ];
 
 
     // Verify that the expected PGN exists; skip test if missing.
-    let pgn_path = PathBuf::from("../../pgn_database").join("LumbrasGigaBase_Online_2025.pgn_database");
+    let pgn_path = PathBuf::from("pgn_database").join("games.pgn");
     if !pgn_path.exists() {
         eprintln!(
-            "Skipping test_games_of_pgn_library: '{}' not found.",
+            "Skipping test games games.pgn: '{}' not found.",
             pgn_path.display()
         );
         return; // skip when PGN is not available locally
