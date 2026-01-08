@@ -16,7 +16,7 @@ The engine logs to 'uci.log' in the current directory.
 
 Highlights
 - Written in Rust, with a modular layout (board, move generation, search, parsing, UCI/CLI, etc.)
-- Optional parallel search via Rayon (enabled by default)
+- Parallel search via Rayon
 - CLI entry point for playing/running locally
 - PGN parsing utilities and test suites
 
@@ -49,19 +49,6 @@ This delegates to `cli::run_cli()` (see `src/main.rs`).
 
 UCI
 There is a `src/uci` module in the project. UCI support is a work in progress; once wired into a binary, you’ll be able to connect the engine to UCI GUIs. For now, the main entry point is the CLI described above.
-
-Features
-- `parallel` (default): enables parallel search via Rayon.
-
-To disable the default parallel feature:
-```
-cargo build --no-default-features
-```
-
-To build explicitly with parallel enabled:
-```
-cargo build --features parallel
-```
 
 Tests
 - Run the full test suite:
