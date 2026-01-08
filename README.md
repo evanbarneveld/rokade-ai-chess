@@ -6,8 +6,7 @@ Expect rough edges, active iteration, and frequent improvements.
 Disclaimer: the code in this project does not reflect what I (evanbarneveld) consider clean code.
 A lot of refactoring (by AI) is required to clean up the code and make it more readable/maintainable.
 
-![](https://github.com/evanbarneveld/rusty-chess/blob/main/rusty-chess.png?raw=true | width=300)
-
+<img src="https://github.com/evanbarneveld/rusty-chess/blob/main/rusty-chess.png?raw=true" alt="Rusty Chess" style="width:50%; height:auto;">
 
 This engine is a single executable and has a command line interface. 
 Start the engine 'rusty-chess' and try the 'help' command for a list of commands.
