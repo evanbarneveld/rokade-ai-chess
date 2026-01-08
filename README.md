@@ -1,6 +1,10 @@
 Rusty-Chess — UCI Chess Engine
 
-This repository contains a chess engine written in Rust. It started as a personal project to learn the Rust language (which was new to me), and a good portion of the code was created with AI assistance. Expect rough edges, active iteration, and frequent improvements.
+This repository contains a chess engine written (mostly) by AI in Rust. 
+Expect rough edges, active iteration, and frequent improvements.
+
+Disclaimer: the code in this project does not reflect what I (evanbarneveld) consider clean code.
+A lot of refactoring (by AI) is required to clean up the code and make it more readable/maintainable.
 
 This engine is a single executable and has a command line interface. 
 Start the engine 'rusty-chess' and try the 'help' command for a list of commands.
