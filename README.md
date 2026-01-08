@@ -65,15 +65,6 @@ Tests
 cargo test -- --nocapture
 ```
 
-- PowerShell script to run all tests in a specific directory (as used locally):
-```
-Get-ChildItem tests\chess -Filter *.rs | ForEach-Object {
-  $name = $_.BaseName
-  $args += @('--test', $name)
-}
-cargo test @args -- --nocapture
-```
-
 Repository Layout (selected)
 - `src/board` — board representation and checks/display helpers
 - `src/generator` — move generation
