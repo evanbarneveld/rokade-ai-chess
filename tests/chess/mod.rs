@@ -1,6 +1,5 @@
 mod move_tests;
 mod pgn;
-mod valid_move_test_using_pgn_library;
 mod pv_test;
 mod perft_depth_1_2_and_3;
 mod eval;
