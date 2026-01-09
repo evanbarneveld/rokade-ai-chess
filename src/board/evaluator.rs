@@ -242,6 +242,39 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                 let color = piece.get_color();
                 let mut val = material_value(pt) + pst_value_tapered(pt, row, col, color, phase);
 
+                // Tiny opening development nudges for minors
+                if phase > 0 {
+                    match (pt, color) {
+                        (PieceType::Knight, Color::White) => {
+                            // Favor Nc3/Nf3 the most; Nd2/Ne2 a bit
+                            let dev_bonus = match (row, col) {
+                                (2, 2) | (2, 5) => 6, // c3, f3
+                                (1, 3) | (1, 4) => 4, // d2, e2
+                                _ => 0,
+                            };
+                            val += (dev_bonus * phase) / 24;
+                        }
+                        (PieceType::Knight, Color::Black) => {
+                            // Mirror: Nc6/Nf6; Nd7/Ne7
+                            let dev_bonus = match (row, col) {
+                                (5, 2) | (5, 5) => 6, // c6, f6
+                                (6, 3) | (6, 4) => 4, // d7, e7
+                                _ => 0,
+                            };
+                            val += (dev_bonus * phase) / 24;
+                        }
+                        (PieceType::Bishop, Color::White) => {
+                            let home = row == 0 && (col == 2 || col == 5);
+                            if !home { val += (8 * phase) / 24; }
+                        }
+                        (PieceType::Bishop, Color::Black) => {
+                            let home = row == 7 && (col == 2 || col == 5);
+                            if !home { val += (8 * phase) / 24; }
+                        }
+                        _ => {}
+                    }
+                }
+
                 // Encourage center pawn development in the opening/early middlegame,
                 // discourage premature rook-pawn pushes (e.g., h2-h4) as first plans.
                 if pt == PieceType::Pawn {
@@ -540,24 +573,6 @@ fn has_enemy_pawn_ahead_same_file(board: &Board, row: usize, col: usize, color: 
 }
 
 #[inline]
-fn friendly_pawn_adjacent_behind(board: &Board, row: usize, col: usize, color: Color) -> bool {
-    // Backward-compatible version (unbounded). Kept for helpers that don't need phase limits.
-    for dc in [-1i32, 1] {
-        let nc_i = col as i32 + dc; if nc_i < 0 || nc_i > 7 { continue; }
-        let nc = nc_i as usize;
-        let mut best_dist: Option<i32> = None;
-        for r in 0..8 {
-            if let Some(p) = board.get(r, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) {
-                let d = match color { Color::White => row as i32 - r as i32, Color::Black => r as i32 - row as i32 };
-                if d >= 0 { if best_dist.map_or(true, |bd| d < bd) { best_dist = Some(d); } }
-            }}
-        }
-        if best_dist.is_some() { return true; }
-    }
-    false
-}
-
-#[inline]
 fn friendly_pawn_adjacent_behind_limited(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> bool {
     // Consider only the nearest pawn on adjacent files within a distance cap depending on phase
     let cap = if phase >= 12 { 2 } else { 4 };
@@ -737,6 +752,9 @@ fn rook_on_enemy_king_file_bonus(board: &Board, color: Color) -> i32 {
 // Middlegame bonus for queen on a semi-open file (encourages useful central/semi-open placement
 // without overcommitting to early queen activity).
 fn queen_on_semi_open_file_bonus(board: &Board, color: Color, counts: &PawnFileCounts) -> i32 {
+    // Taper this to be minimal in pure opening; grows into middlegame
+    let phase = game_phase(board);
+    let mg_scale = (phase.saturating_sub(12)) as i32; // 0 before phase 12
     let mut bonus = 0;
     for r in 0..8 { for c in 0..8 {
         if let Some(p)=board.get(r,c) {
@@ -744,7 +762,7 @@ fn queen_on_semi_open_file_bonus(board: &Board, color: Color, counts: &PawnFileC
                 let wp = counts.white[c];
                 let bp = counts.black[c];
                 let semi = match color { Color::White => wp==0 && bp>0, Color::Black => bp==0 && wp>0 };
-                if semi { bonus += 6; }
+                if semi { bonus += (6 * mg_scale) / 12; }
             }
         }
     }}
@@ -774,7 +792,7 @@ fn early_queen_penalty(board: &Board, color: Color, counts: &PawnFileCounts) -> 
     }
     if undeveloped == 0 { return 0; }
     // Base penalty scales with how undeveloped the position is
-    let base = if undeveloped >= 3 { 18 } else if undeveloped == 2 { 14 } else { 10 };
+    let base = if undeveloped >= 3 { 28 } else if undeveloped == 2 { 22 } else { 16 };
     // Slightly increase if queen has advanced beyond the back rank (always true here),
     // and not shielded by pawns in front (crude heuristic: open a file at a queen file)
     // Find queen square
@@ -784,11 +802,13 @@ fn early_queen_penalty(board: &Board, color: Color, counts: &PawnFileCounts) -> 
             let wp = counts.white[c];
             let bp = counts.black[c];
             let open = wp==0 && bp==0;
-            if open { extra = 2; }
+            if open { extra = 4; }
             break 'outer;
         }}
     }}
-    base + extra
+    // Scale by opening phase (strongest in opening, zero in EG)
+    let phase = game_phase(board);
+    ((base + extra) * phase) / 24
 }
 
 fn find_king(board: &Board, color: Color) -> Option<(usize,usize)> {
@@ -859,8 +879,10 @@ fn king_safety(board: &Board, color: Color) -> i32 {
         if extra_danger > 12 { extra_danger = 12; }
         danger += extra_danger;
 
-        // 3) Castling status: small bonus if king is on typical castled files and rook moved pattern
-        let castled_bonus = if (color==Color::White && kr==0 && (kf==6 || kf==2)) || (color==Color::Black && kr==7 && (kf==6 || kf==2)) { 12 } else { 0 };
+        // 3) Castling status: stronger in opening, fades later
+        let phase = game_phase(board);
+        let castled_raw = if (color==Color::White && kr==0 && (kf==6 || kf==2)) || (color==Color::Black && kr==7 && (kf==6 || kf==2)) { 16 } else { 0 };
+        let castled_bonus = (castled_raw * phase) / 24;
 
         // Combine: safety score is a negative penalty plus bonus for being castled
         return castled_bonus - (pen + danger);
@@ -879,8 +901,9 @@ fn king_activity_endgame(board: &Board, color: Color) -> i32 {
 
 fn development_penalty_on_backrank(board: &Board, color: Color) -> i32 {
     let minors: &[(usize,usize)] = if matches!(color, Color::White) { &[(0,1),(0,6),(0,2),(0,5)] } else { &[(7,1),(7,6),(7,2),(7,5)] };
-    let mut pen = 0; for &(r,c) in minors.iter() { if let Some(p)=board.get(r,c) { match p.get_type() { PieceType::Knight | PieceType::Bishop => pen += 6, _ => {} } } }
-    -pen
+    let mut pen = 0; for &(r,c) in minors.iter() { if let Some(p)=board.get(r,c) { match p.get_type() { PieceType::Knight | PieceType::Bishop => pen += 12, _ => {} } } }
+    let phase = game_phase(board);
+    -((pen * phase) / 24)
 }
 
 // ---- New endgame helpers ----
