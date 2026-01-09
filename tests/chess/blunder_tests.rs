@@ -141,5 +141,5 @@ fn enumerate_legal_moves(game_state: &GameState) -> Vec<((usize, usize), (usize,
 fn best_move_using_depth_search_no_time_limit_for_fen(fen: &str, depth: usize) -> Option<String> {
     let gs = reset_from_fen(fen).expect("valid FEN");
     let history = History::new();
-    generate_move_as_san(SearchMode::Advanced, gs, &history, depth, 0, PLAYING_STRENGTH_MAX)
+    generate_move_as_san(SearchMode::Normal, gs, &history, depth, 0, PLAYING_STRENGTH_MAX)
 }
