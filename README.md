@@ -1,4 +1,4 @@
-Rusty-Chess — UCI Chess Engine
+Rokade-AI Chess — UCI Chess Engine
 
 This repository contains a chess engine written (mostly) by AI in Rust. 
 Expect rough edges, active iteration, and frequent improvements.
