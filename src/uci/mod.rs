@@ -17,6 +17,7 @@ use crate::search::uci_feedback::set_info_callback;
 // - ucinewgame
 // - position [startpos|fen <fen>] [moves <move1> <move2> ...]
 // - go depth N
+// - go wtime <time-in-ms> btime <time-in-ms> [ winc <time-in-ms> binc <time-in-ms>
 // - stop (no-op for instant Search)
 // - quit
 // Notes:
@@ -101,10 +102,12 @@ pub fn run_uci() -> io::Result<()> {
 
             let mut movetime: usize = 0; // default unlimited time per move unless constrained below
 
-            // Parse tokens for movetime and/or wtime/btime (order-independent)
+            // Parse tokens for movetime and/or wtime/btime and increments winc/binc (order-independent)
             let tokens: Vec<&str> = line.split_whitespace().collect();
             let mut wtime: Option<usize> = None;
             let mut btime: Option<usize> = None;
+            let mut winc: Option<usize> = None;
+            let mut binc: Option<usize> = None;
 
             let mut i = 1; // start after 'go'
             while i < tokens.len() {
@@ -129,24 +132,41 @@ pub fn run_uci() -> io::Result<()> {
                             i += 2; continue;
                         }
                     }
+                    "winc" => {
+                        if i + 1 < tokens.len() {
+                            if let Ok(v) = tokens[i + 1].parse::<usize>() { winc = Some(v); }
+                            i += 2; continue;
+                        }
+                    }
+                    "binc" => {
+                        if i + 1 < tokens.len() {
+                            if let Ok(v) = tokens[i + 1].parse::<usize>() { binc = Some(v); }
+                            i += 2; continue;
+                        }
+                    }
                     _ => {}
                 }
                 i += 1;
             }
 
-            // If no explicit movetime was given but wtime/btime was provided, derive a reasonable per-move budget
-            if movetime == 0 && (wtime.is_some() || btime.is_some()) {
-                let time_left = if white_is_active {
-                    wtime.unwrap_or(0)
-                } else {
-                    btime.unwrap_or(0)
-                };
+            // If no explicit movetime was given but wtime/btime or winc/binc was provided, derive a reasonable per-move budget
+            if movetime == 0 && (wtime.is_some() || btime.is_some() || winc.is_some() || binc.is_some()) {
+                let time_left = if white_is_active { wtime.unwrap_or(0) } else { btime.unwrap_or(0) };
+                let inc = if white_is_active { winc.unwrap_or(0) } else { binc.unwrap_or(0) };
+
+                let mut budget: usize = 0;
 
                 if time_left > 0 {
-                    // Heuristic: allocate ~3% of remaining time, with a floor and a safety cap.
-                    let mut budget = ((time_left as f64) * 0.02) as usize; // 2%
+                    // Base on remaining time: ~2%
+                    budget = ((time_left as f64) * 0.02) as usize; // 2%
                     if budget < 10 { budget = 10; } // at least 10ms
-                    let max_cap = time_left / 3; // never spend more than half the remaining time on one move
+                    // Add a portion of the increment if available
+                    if inc > 0 {
+                        let bonus = ((inc as f64) * 0.7) as usize; // use ~70% of increment
+                        budget = budget.saturating_add(bonus);
+                    }
+                    // Safety cap relative to remaining time
+                    let max_cap = time_left / 3; // be conservative with a third of remaining time
                     if max_cap > 0 && budget > max_cap { budget = max_cap; }
 
                     // If in severe time trouble, be extra conservative
@@ -154,9 +174,16 @@ pub fn run_uci() -> io::Result<()> {
                         let tight = (time_left / 20).max(5); // ~5% of remaining, min 5ms
                         budget = budget.min(tight);
                     }
-
-                    movetime = budget;
+                } else if inc > 0 { // no main time, only increment
+                    // When only increment is available, use most of it but not all
+                    budget = ((inc as f64) * 0.9) as usize; // 90% of increment
+                    if budget < 10 { budget = 10; }
+                    // Cap at twice the increment to avoid overthinking
+                    let max_cap = inc.saturating_mul(2);
+                    if budget > max_cap { budget = max_cap; }
                 }
+
+                if budget > 0 { movetime = budget; }
             }
 
             // Measure elapsed time and reset telemetry for info lines
