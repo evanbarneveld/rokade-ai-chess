@@ -227,6 +227,9 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     // Precompute per-file pawn counts once (performance optimization)
     let pawn_counts = pawn_file_counts(board);
 
+    // Build attack maps once and reuse across features (saves recomputation)
+    let (att_w, att_b) = build_attack_maps(board);
+
     // Precompute whether each side still has any pawns (used for rook-on-7th bonus)
     let mut white_pawns = 0i32;
     let mut black_pawns = 0i32;
@@ -271,7 +274,7 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                         val -= (mg * phase + egp * (24 - phase)) / 24;
                     }
                     if is_passed_pawn(board, row, col, color) {
-                        let pp = evaluate_passed_pawn(board, row, col, color, phase, king_w, king_b);
+                        let pp = evaluate_passed_pawn(board, row, col, color, phase, king_w, king_b, &att_w, &att_b);
                         val += pp;
                     }
                 }
@@ -343,7 +346,6 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     }
 
     // Basic attacked/defended (hanging piece) penalties
-    let (att_w, att_b) = build_attack_maps(board);
     for r in 0..8 {
         for c in 0..8 {
             if let Some(p) = board.get(r, c) {
@@ -383,6 +385,11 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     // Here we weight by phase to emphasize middlegame activity.
     score += mob_w * phase / 24;
     score -= mob_b * phase / 24;
+    // Small MG normalization to avoid overemphasizing activity when PST is strong
+    if phase > 12 {
+        let damp = ((mob_w + mob_b) / 20) * (phase - 12) / 12; // tiny, bounded
+        score -= damp;
+    }
 
     // Holes (weak squares) in a central area that pawns cannot challenge
     // Penalize when an opponent controls/occupies them. Emphasize middlegame.
@@ -390,7 +397,7 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     for r in 2..=5 { // central ranks (roughly)
         for c in 2..=5 { // central files c..f
             // White holes at (r,c)
-            if is_hole_square(board, r, c, Color::White) {
+            if is_hole_square_limited(board, r, c, Color::White, phase) {
                 let influenced = att_b[r][c];
                 let occ_minor = matches!(board.get(r,c), Some(p) if p.get_color()==Color::Black && (p.get_type()==PieceType::Knight || p.get_type()==PieceType::Bishop));
                 if influenced || occ_minor {
@@ -399,7 +406,7 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                 }
             }
             // Black holes at the same (r,c) square (from Black’s perspective)
-            if is_hole_square(board, r, c, Color::Black) {
+            if is_hole_square_limited(board, r, c, Color::Black, phase) {
                 let influenced = att_w[r][c];
                 let occ_minor = matches!(board.get(r,c), Some(p) if p.get_color()==Color::White && (p.get_type()==PieceType::Knight || p.get_type()==PieceType::Bishop));
                 if influenced || occ_minor {
@@ -431,12 +438,12 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     for c in 0..8 {
         // White pawn on 5th rank (r==4)
         if let Some(p)=board.get(4,c) { if p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn) {
-            let safe = !square_attacked_by_enemy_pawn(board, 4, c, Color::Black) || friendly_pawn_adjacent_behind(board, 4, c, Color::White);
+            let safe = !square_attacked_by_enemy_pawn(board, 4, c, Color::Black) || friendly_pawn_adjacent_behind_limited(board, 4, c, Color::White, phase);
             if safe { score += SPACE_PAWN5_CP * phase / 24; }
         }}
         // Black pawn on 5th rank from Black’s view (r==3)
         if let Some(p)=board.get(3,c) { if p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn) {
-            let safe = !square_attacked_by_enemy_pawn(board, 3, c, Color::White) || friendly_pawn_adjacent_behind(board, 3, c, Color::Black);
+            let safe = !square_attacked_by_enemy_pawn(board, 3, c, Color::White) || friendly_pawn_adjacent_behind_limited(board, 3, c, Color::Black, phase);
             if safe { score -= SPACE_PAWN5_CP * phase / 24; }
         }}
     }
@@ -534,20 +541,37 @@ fn has_enemy_pawn_ahead_same_file(board: &Board, row: usize, col: usize, color: 
 
 #[inline]
 fn friendly_pawn_adjacent_behind(board: &Board, row: usize, col: usize, color: Color) -> bool {
-    // Any friendly pawn on adjacent files on ranks behind or equal to the pawn (relative to color)
+    // Backward-compatible version (unbounded). Kept for helpers that don't need phase limits.
     for dc in [-1i32, 1] {
         let nc_i = col as i32 + dc; if nc_i < 0 || nc_i > 7 { continue; }
         let nc = nc_i as usize;
+        let mut best_dist: Option<i32> = None;
         for r in 0..8 {
-            if let Some(p) = board.get(r, nc) {
-                if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) {
-                    match color {
-                        Color::White => { if r <= row { return true; } }
-                        Color::Black => { if r >= row { return true; } }
-                    }
-                }
-            }
+            if let Some(p) = board.get(r, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) {
+                let d = match color { Color::White => row as i32 - r as i32, Color::Black => r as i32 - row as i32 };
+                if d >= 0 { if best_dist.map_or(true, |bd| d < bd) { best_dist = Some(d); } }
+            }}
         }
+        if best_dist.is_some() { return true; }
+    }
+    false
+}
+
+#[inline]
+fn friendly_pawn_adjacent_behind_limited(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> bool {
+    // Consider only the nearest pawn on adjacent files within a distance cap depending on phase
+    let cap = if phase >= 12 { 2 } else { 4 };
+    for dc in [-1i32, 1] {
+        let nc_i = col as i32 + dc; if nc_i < 0 || nc_i > 7 { continue; }
+        let nc = nc_i as usize;
+        let mut best_dist: Option<i32> = None;
+        for r in 0..8 {
+            if let Some(p) = board.get(r, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) {
+                let d = match color { Color::White => row as i32 - r as i32, Color::Black => r as i32 - row as i32 };
+                if d >= 0 { if best_dist.map_or(true, |bd| d < bd) { best_dist = Some(d); } }
+            }}
+        }
+        if let Some(d) = best_dist { if d <= cap { return true; } }
     }
     false
 }
@@ -589,7 +613,9 @@ fn is_backward_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool
     let front_blocked_by_enemy = match board.get(fr, col) { Some(p) if p.get_color()!=color => true, _ => false };
     let front_controlled_by_enemy_pawn = square_attacked_by_enemy_pawn(board, fr, col, opponent(color));
     if !(front_blocked_by_enemy || front_controlled_by_enemy_pawn) { return false; }
-    if friendly_pawn_adjacent_behind(board, row, col, color) { return false; }
+    // Use a conservative phase cap (MG≤2, EG≤4). Without phase here, approximate with board phase.
+    let phase = game_phase(board);
+    if friendly_pawn_adjacent_behind_limited(board, row, col, color, phase) { return false; }
     true
 }
 
@@ -772,21 +798,34 @@ fn find_king(board: &Board, color: Color) -> Option<(usize,usize)> {
 
 fn king_safety(board: &Board, color: Color) -> i32 {
     if let Some((kr, kf)) = find_king(board, color) {
-        // 1) Pawn shelter quality around the king (home side forward one rank).
-        let front_rank: i32 = if matches!(color, Color::White) { 1 } else { 6 };
-        let mut shield = 0;
+        // 1) Pawn shelter quality around the king using actual king rank: immediate front rank and the next rank at half weight.
+        let (front1, front2_opt) = match color {
+            Color::White => {
+                let f1 = if kr < 7 { Some(kr + 1) } else { None };
+                let f2 = if kr < 6 { Some(kr + 2) } else { None };
+                (f1, f2)
+            }
+            Color::Black => {
+                let f1 = if kr > 0 { Some(kr - 1) } else { None };
+                let f2 = if kr > 1 { Some(kr - 2) } else { None };
+                (f1, f2)
+            }
+        };
+        let mut shield2x = 0; // double-weight units to allow half weights as integers
         for df in -1..=1 {
             let f = kf as i32 + df; if f<0 || f>7 { continue; }
-            if let Some(p)=board.get(front_rank as usize, f as usize) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { shield += 1; } }
+            if let Some(r1) = front1 { if let Some(p)=board.get(r1, f as usize) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { shield2x += 2; } } }
+            if let Some(r2) = front2_opt { if let Some(p)=board.get(r2, f as usize) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { shield2x += 1; } } }
         }
+        // Convert to buckets roughly comparable with the previous scale
         let mut pen = 0;
-        if shield==0 { pen += 30; } else if shield==1 { pen += 18; } else if shield==2 { pen += 8; }
+        if shield2x <= 1 { pen += 30; } else if shield2x <= 3 { pen += 18; } else if shield2x <= 5 { pen += 8; }
 
         // Half-open king file penalty
         let mut own=0; let mut opp=0; for r in 0..8 { if let Some(p)=board.get(r, kf) { if matches!(p.get_type(), PieceType::Pawn) { if p.get_color()==color { own+=1; } else { opp+=1; } } } }
         if own==0 && opp>0 { pen += 14; }
 
-        // 2) King-ring attacker count (3x3 around king) weighted by a piece type.
+        // 2) King-ring attacker count (3x3 around king)
         let (att_w, att_b) = build_attack_maps(board);
         let enemy = opponent(color);
         let mut danger = 0;
@@ -805,6 +844,20 @@ fn king_safety(board: &Board, color: Color) -> i32 {
             if ownp==0 && oppp==0 { danger += 6; } // open file near king
             else if ownp==0 && oppp>0 { danger += 10; } // half-open against king
         }
+
+        // Add light attacker weighting by nearby enemy heavy/minor pieces (chebyshev <=3), with a modest cap
+        let mut extra_danger = 0;
+        for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+            if p.get_color()==enemy {
+                let d = chebyshev_dist((kr as i32, kf as i32), (r as i32, c as i32));
+                if d <= 3 {
+                    let w = match p.get_type() { PieceType::Knight|PieceType::Bishop|PieceType::Rook => 2, PieceType::Queen => 3, _ => 0 };
+                    extra_danger += w;
+                }
+            }
+        }}}
+        if extra_danger > 12 { extra_danger = 12; }
+        danger += extra_danger;
 
         // 3) Castling status: small bonus if king is on typical castled files and rook moved pattern
         let castled_bonus = if (color==Color::White && kr==0 && (kf==6 || kf==2)) || (color==Color::Black && kr==7 && (kf==6 || kf==2)) { 12 } else { 0 };
@@ -848,6 +901,8 @@ fn evaluate_passed_pawn(
     phase: i32,
     king_w: Option<(usize, usize)>,
     king_b: Option<(usize, usize)>,
+    att_w: &[[bool;8];8],
+    att_b: &[[bool;8];8],
 ) -> i32 {
     let eg = 24 - phase;
 
@@ -887,6 +942,13 @@ fn evaluate_passed_pawn(
                 let dc = (ek_c as i32 - col as i32).abs();
                 let in_front = (color == Color::White && ek_r >= nr) || (color == Color::Black && ek_r <= nr);
                 if dr <= 1 && dc <= 1 && in_front { safe_bonus = 0; }
+            }
+            // Reduce/zero bonus if the push square is attacked by enemy pieces or enemy pawns
+            let enemy = opponent(color);
+            let attacked_general = match enemy { Color::White => att_w[nr][col], Color::Black => att_b[nr][col] };
+            if attacked_general || square_attacked_by_enemy_pawn(board, nr, col, enemy) {
+                // If unsafe, make the bonus very small
+                safe_bonus = safe_bonus.min(2);
             }
             score += (safe_bonus * eg) / 24;
         }
@@ -1142,6 +1204,51 @@ fn is_hole_square(board: &Board, row: usize, col: usize, color: Color) -> bool {
             }
             Color::Black => {
                 for r in (row+1)..8 { if let Some(p)=board.get(r, nc) { if p.get_color()==color && matches!(p.get_type(), PieceType::Pawn) { return false; } } }
+            }
+        }
+    }
+    true
+}
+
+#[inline]
+fn is_hole_square_limited(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> bool {
+    // Not a hole if currently controllable by own pawn
+    if !is_hole_square(board, row, col, color) { return false; }
+    // Distance caps for potential future control by an advancing pawn on adjacent files
+    let cap = if phase >= 12 { 2 } else { 4 };
+    for dc in [-1i32, 1] {
+        let nc_i = col as i32 + dc; if nc_i < 0 || nc_i > 7 { continue; }
+        let nc = nc_i as usize;
+        match color {
+            Color::White => {
+                // nearest white pawn strictly behind the target square on file nc
+                let mut nearest: Option<usize> = None;
+                for r in (0..row).rev() { if let Some(p)=board.get(r,nc) {
+                    if p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn) { nearest = Some(r); break; }
+                }}
+                if let Some(pr) = nearest {
+                    let dist = row as i32 - pr as i32;
+                    if dist <= cap as i32 {
+                        // ensure no own pawn on same file between pr and row that blocks its advance
+                        let mut blocked = false;
+                        for br in (pr+1)..row { if let Some(p)=board.get(br, nc) { if p.get_color()==Color::White && matches!(p.get_type(), PieceType::Pawn) { blocked = true; break; } } }
+                        if !blocked { return false; }
+                    }
+                }
+            }
+            Color::Black => {
+                let mut nearest: Option<usize> = None;
+                for r in (row+1)..8 { if let Some(p)=board.get(r,nc) {
+                    if p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn) { nearest = Some(r); break; }
+                }}
+                if let Some(pr) = nearest {
+                    let dist = pr as i32 - row as i32;
+                    if dist <= cap as i32 {
+                        let mut blocked = false;
+                        for br in (row+1)..pr { if let Some(p)=board.get(br, nc) { if p.get_color()==Color::Black && matches!(p.get_type(), PieceType::Pawn) { blocked = true; break; } } }
+                        if !blocked { return false; }
+                    }
+                }
             }
         }
     }

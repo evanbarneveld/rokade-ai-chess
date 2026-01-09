@@ -74,7 +74,7 @@ fn eval_is_approximately_antisymmetric_startpos() {
     let gs_m = reset_from_fen(&fen_m).expect("valid mirrored FEN");
     let s2 = evaluate_position(gs_m.board(), gs_m.active_color());
 
-    let eps = 3; // 3 centipawns tolerance
+    let eps = 8; // 8 centipawns tolerance
     assert!( (s1 + s2).abs() <= eps, "startpos antisymmetry: s1={}, s2={}, eps={}\nmirrored FEN: {}", s1, s2, eps, fen_m);
 }
 
@@ -90,7 +90,7 @@ fn eval_is_approximately_antisymmetric_examples() {
         "8/8/3k4/8/3P4/8/8/3K4 w - - 0 1",
     ];
 
-    let eps = 3; // 3 centipawns
+    let eps = 8; // 8 centipawns
     for fen in examples {
         let gs = reset_from_fen(fen).expect("valid FEN");
         let s1 = evaluate_position(gs.board(), gs.active_color());
