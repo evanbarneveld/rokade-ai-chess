@@ -31,6 +31,7 @@ pub fn run_uci() -> io::Result<()> {
         .create(true)
         .append(true)
         .open("uci.log")?;
+
     let mut engine = Chess::new();
     let mut running = true;
 
@@ -49,7 +50,7 @@ pub fn run_uci() -> io::Result<()> {
         }
         let line = input.trim();
         // log input
-        log_io(&mut log, "IN ", line);
+        write_to_file_with_flush(&mut log, "IN ", line);
         if line.is_empty() {
             continue;
         }
@@ -76,7 +77,8 @@ pub fn run_uci() -> io::Result<()> {
         }
         if line == "isready" {
             let m = "readyok".to_string();
-            writeln!(stdout, "{}", m)?; log_io(&mut log, "OUT", &m);
+            writeln!(stdout, "{}", m)?;
+            write_to_file_with_flush(&mut log, "OUT", &m);
             stdout.flush()?;
             continue;
         }
@@ -95,6 +97,8 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line.starts_with("go ") || line == "go" {
+            let white_is_active = engine.active_color_is_white();
+
             let mut movetime: usize = 0; // default unlimited time per move unless constrained below
 
             // Parse tokens for movetime and/or wtime/btime (order-independent)
@@ -132,7 +136,7 @@ pub fn run_uci() -> io::Result<()> {
 
             // If no explicit movetime was given but wtime/btime was provided, derive a reasonable per-move budget
             if movetime == 0 && (wtime.is_some() || btime.is_some()) {
-                let time_left = if engine.active_color_is_white() {
+                let time_left = if white_is_active {
                     wtime.unwrap_or(0)
                 } else {
                     btime.unwrap_or(0)
@@ -171,7 +175,10 @@ pub fn run_uci() -> io::Result<()> {
                 let ms = start.elapsed().as_millis().max(1);
                 let nps = (nodes as u128 * 1000u128) / ms;
                 // Print directly to stdout; ignore logging for async updates
-                let _ = writeln!(io::stdout(), "info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, (score_cp as f32 / UCI_INFO_SCORE_DIVISOR) as i32, nodes, nps, hashfull, pv);
+                let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
+                let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, nodes, nps, hashfull, pv);
+                let _ = writeln!(io::stdout(), "{}", log_text);
+                //write_to_file_with_flush(&mut log, "{}", &log_text);
             });
             set_info_callback(Some(info_cb));
 
@@ -185,12 +192,15 @@ pub fn run_uci() -> io::Result<()> {
 
             // If we have extra info from the Search, emit a UCI info line
             if let Some((score_cp, depth_used)) = info_opt {
-                let info = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
-                writeln!(stdout, "{}", info)?; log_io(&mut log, "OUT", &info);
+                let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
+                let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
+                writeln!(stdout, "{}", log_text)?;
+                write_to_file_with_flush(&mut log, "{}", &log_text);
             }
 
             let out = format!("bestmove {}", best_move_str);
-            writeln!(stdout, "{}", out)?; log_io(&mut log, "OUT", &out);
+            writeln!(stdout, "{}", out)?;
+            write_to_file_with_flush(&mut log, "OUT", &out);
             stdout.flush()?;
             continue;
         }
@@ -211,18 +221,18 @@ pub fn run_uci() -> io::Result<()> {
 }
 
 fn send_uci_response(stdout: &mut Stdout, mut log: &mut File) -> Result<(), Error> {
-    let m1 = format!("id name eriks-chess v0.1.0 (build#{})", BUILD_NUMBER).to_string();
+    let m1 = format!("id name Rokade-AI v0.1.0 (build#{})", BUILD_NUMBER).to_string();
     writeln!(stdout, "{}", m1)?;
-    log_io(&mut log, "OUT", &m1);
-    let m2 = "id author erik van barneveld".to_string();
+    write_to_file_with_flush(&mut log, "OUT", &m1);
+    let m2 = "id author Erik van Barneveld".to_string();
     writeln!(stdout, "{}", m2)?;
-    log_io(&mut log, "OUT", &m2);
+    write_to_file_with_flush(&mut log, "OUT", &m2);
     let opt = "option name searchmode type combo default advanced var advanced var simple".to_string();
     writeln!(stdout, "{}", opt)?;
-    log_io(&mut log, "OUT", &opt);
+    write_to_file_with_flush(&mut log, "OUT", &opt);
     let m3 = "uciok".to_string();
     writeln!(stdout, "{}", m3)?;
-    log_io(&mut log, "OUT", &m3);
+    write_to_file_with_flush(&mut log, "OUT", &m3);
     stdout.flush()?;
     Ok(())
 }
@@ -338,7 +348,7 @@ fn parse_depth(s: &str) -> Option<usize> {
     None
 }
 
-fn log_io(log: &mut std::fs::File, direction: &str, text: &str) {
+fn write_to_file_with_flush(log: &mut File, direction: &str, text: &str) {
     let _ = writeln!(log, "[{}] {}", direction, text);
     let _ = log.flush();
 }

@@ -1,9 +1,5 @@
 use std::io;
 use std::io::Write;
-use std::process::exit;
-use std::thread;
-use std::time::Duration;
-use atty::Stream;
 use crate::board::evaluator::evaluate_position;
 use crate::Chess;
 use crate::generator::move_generator::generate_move_as_san;
