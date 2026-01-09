@@ -269,7 +269,9 @@ pub fn find_best_move(
         _last_score = best_raw;
         let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
         let hf = tt.hashfull_permille();
-        emit_info(bf, bt, best_adj, depth_now, pv, hf);
+        // Always report UCI scores from White's perspective
+        let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
+        emit_info(bf, bt, white_persp_score, depth_now, pv, hf);
         chosen = Some((bf, bt, best_adj, depth_now));
     }
 

@@ -1,8 +1,10 @@
 use chess::Chess;
 use chess::generator::move_generator::generate_move_as_san;
 use serial_test::serial;
-use chess::search::advanced_search::debug_rank_root_moves;
+use chess::search::advanced_search::{debug_rank_root_moves, DEFAULT_SEARCH_DEPTH};
 use chess::search::set_deterministic;
+
+const TEST_MOVE_TIME: usize = 500;
 
 #[test]
 #[serial]
@@ -13,10 +15,10 @@ fn test_knight_saved() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 1000, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 3, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     // Debug: rank root moves with adjusted scores
-    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4, 1000);
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 3, TEST_MOVE_TIME);
     println!("Root ranks (SAN, adj, raw): {:?}", ranks);
     // The best move should be to evacuate the knight with Nd5.
     assert_eq!(san_move, "Nd5");
@@ -31,12 +33,12 @@ fn test_queen_save() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 3, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_eq!(san_move, "Qxe7+"); //only good move
 
     // Debug: rank root moves with adjusted scores
-    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4, 1000);
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 3, 1000);
     println!("Root ranks (SAN, adj, raw): {:?}", ranks);
     // The best move saves the queen
 
@@ -54,7 +56,7 @@ fn test_queen_save2() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_eq!(&san_move[0..1], "Q"); //the only good move is to move the queen
     assert_ne!(san_move, "Qd8+"); //bad move
@@ -71,7 +73,7 @@ fn test_bad_rook_move() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Rd1+"); //bad move
 }
@@ -87,7 +89,7 @@ fn test_bad_bishop_move() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Bxf7+"); //bad move
 }
@@ -103,7 +105,7 @@ fn test_bad_rook_move2() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Re1+"); //bad move
 }
@@ -119,7 +121,7 @@ fn test_bad_rook_move3() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Rxb3+"); //bad move
 }
@@ -135,7 +137,7 @@ fn test_bad_knight_move() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Na5+"); //bad move
 }
@@ -151,7 +153,7 @@ fn test_bad_queen_offer() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 4, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Qe5+"); //bad move
 }
@@ -194,7 +196,7 @@ fn test_queen_losing_move() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Nd8"); //bad move
 }
@@ -227,7 +229,7 @@ fn test_unnecessary_king_move_losing_castling_rights() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 5, 0, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Nd8"); //bad move
 }

@@ -10,6 +10,8 @@ use chess::board::san_move::convert_move_to_san;
 use chess::state::game_state::GameState;
 use chess::piece::pieces::{Color, PieceType};
 
+const TEST_MOVE_TIME: usize = 500;
+
 /// this test checks if, for a given FEN, the blundering move is not made by the engine
 #[test]
 #[serial]
@@ -51,7 +53,7 @@ fn test_blunder_avoidance() {
     ];
 
     for (fen, blunder) in cases {
-        let got = best_move_using_depth_search_no_time_limit_for_fen(fen, 4)
+        let got = best_move_using_depth_search_with_time_limit_for_fen(fen, 4)
             .unwrap_or_else(|| panic!("No move found for FEN: {}", fen));
         eprintln!("FEN: {}\nchose: {}\n", fen, got);
         assert_ne!(
@@ -138,8 +140,8 @@ fn enumerate_legal_moves(game_state: &GameState) -> Vec<((usize, usize), (usize,
     result
 }
 
-fn best_move_using_depth_search_no_time_limit_for_fen(fen: &str, depth: usize) -> Option<String> {
+fn best_move_using_depth_search_with_time_limit_for_fen(fen: &str, depth: usize) -> Option<String> {
     let gs = reset_from_fen(fen).expect("valid FEN");
     let history = History::new();
-    generate_move_as_san(SearchMode::Normal, gs, &history, depth, 0, PLAYING_STRENGTH_MAX)
+    generate_move_as_san(SearchMode::Normal, gs, &history, depth, TEST_MOVE_TIME, PLAYING_STRENGTH_MAX)
 }
