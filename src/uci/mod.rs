@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use crate::Chess;
 use crate::cli::BUILD_NUMBER;
 use crate::piece::as_move_str;
-use crate::search::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_PLAYING_STRENGTH, MAX_SEARCH_DEPTH};
+use crate::search::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
 use crate::search::{find_best_move_with_mode, SearchMode};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
@@ -61,17 +61,48 @@ pub fn run_uci() -> io::Result<()> {
         }
 
         if line.to_ascii_lowercase().starts_with("setoption ") {
-            // minimal parser for: setoption name SearchMode value <Advanced|Simple>
+            // Handle: setoption name <SearchMode|Strength> value <...>
             let lower = line.to_ascii_lowercase();
             if lower.contains("name searchmode") {
                 if let Some(idx) = lower.find("value ") {
                     let val = line[(idx+6)..].trim();
                     let mode = match val.to_ascii_lowercase().as_str() {
-                        "advanced" => Some(SearchMode::Advanced),
-                        "simple" => Some(SearchMode::Simple),
+                        "normal" => Some(SearchMode::Normal),
+                        "test (slow)" => Some(SearchMode::Test),
                         _ => None,
                     };
                     if let Some(m) = mode { engine.set_search_mode(m); }
+                }
+            } else if lower.contains("name strength") {
+                if let Some(idx) = lower.find("value ") {
+                    // value is one of: Strength Max, Strength 9..1
+                    let val = line[(idx+6)..].trim();
+                    let val_lower = val.to_ascii_lowercase();
+                    let s = if val_lower == "strength max" {
+                        1000usize
+                    } else if val_lower == "strength 9" {
+                        950usize
+                    } else if val_lower == "strength 8" {
+                        850usize
+                    } else if val_lower == "strength 7" {
+                        750usize
+                    } else if val_lower == "strength 6" {
+                        650usize
+                    } else if val_lower == "strength 5" {
+                        550usize
+                    } else if val_lower == "strength 4" {
+                        450usize
+                    } else if val_lower == "strength 3" {
+                        350usize
+                    } else if val_lower == "strength 2" {
+                        250usize
+                    } else if val_lower == "strength 1" {
+                        150usize
+                    } else {
+                        // Unknown value, ignore
+                        engine.get_playing_strength()
+                    };
+                    engine.set_playing_strength(s);
                 }
             }
             continue;
@@ -273,9 +304,13 @@ fn send_uci_response(stdout: &mut Stdout, mut log: &mut File) -> Result<(), Erro
     let m2 = "id author Erik van Barneveld".to_string();
     writeln!(stdout, "{}", m2)?;
     write_to_file_with_flush(&mut log, "OUT", &m2);
-    let opt = "option name searchmode type combo default advanced var advanced var simple".to_string();
-    writeln!(stdout, "{}", opt)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt);
+    let opt1 = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
+    writeln!(stdout, "{}", opt1)?;
+    write_to_file_with_flush(&mut log, "OUT", &opt1);
+    // Strength levels as combo
+    let opt2 = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
+    writeln!(stdout, "{}", opt2)?;
+    write_to_file_with_flush(&mut log, "OUT", &opt2);
     let m3 = "uciok".to_string();
     writeln!(stdout, "{}", m3)?;
     write_to_file_with_flush(&mut log, "OUT", &m3);
@@ -358,8 +393,8 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time_in_ms: us
 
     let gs_copy = { *engine.get_game_state() };
     let history_clone = { engine.get_history().clone() };
-    // Use maximum playing strength by default; time control will be enforced by Search budget.
-    let playing_strength = MAX_PLAYING_STRENGTH;
+    // Use the configured playing strength; time control will be enforced by Search budget.
+    let playing_strength = engine.get_playing_strength();
 
     /* TODO: find a better way to set the stength: use an UCI option!
     //if move_time is set a value below 1000mS. Then the user clearly wants to use low strength.

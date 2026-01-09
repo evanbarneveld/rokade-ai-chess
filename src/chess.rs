@@ -16,6 +16,7 @@ pub struct Chess<> {
     starting_fen: String,
     history: History,
     search_mode: SearchMode,
+    playing_strength: usize,
 }
 impl Chess {
     pub const DEFAULT_CHESS_STARTING_FEN: &'static str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -30,7 +31,8 @@ impl Chess {
                 },
             move_parser: MoveParser::new(),
             history: History::new(),
-            search_mode: SearchMode::Advanced,
+            search_mode: SearchMode::Normal,
+            playing_strength: 1000,
         }
     }
 
@@ -44,6 +46,16 @@ impl Chess {
 
     pub fn get_search_mode(&self) -> SearchMode {
         self.search_mode
+    }
+
+    pub fn set_playing_strength(&mut self, strength: usize) {
+        // clamp to [1..1000]
+        let s = if strength == 0 { 1 } else { strength.min(1000) };
+        self.playing_strength = s;
+    }
+
+    pub fn get_playing_strength(&self) -> usize {
+        self.playing_strength
     }
 
     pub fn reset(&mut self) -> Result<(), String> {

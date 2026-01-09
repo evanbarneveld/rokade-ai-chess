@@ -48,8 +48,8 @@ pub trait Search {
 // Public toggle to select which search to use at runtime
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SearchMode {
-    Advanced,
-    Simple,
+    Normal,
+    Test,
 }
 
 /// Returns some move if the best move was found or none if no move was available.
@@ -66,13 +66,13 @@ pub fn find_best_move_with_mode(
     playing_strength: usize,
 ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
     match mode {
-        SearchMode::Advanced => advanced_search::AdvancedSearch::find_best_move(
+        SearchMode::Normal => advanced_search::AdvancedSearch::find_best_move(
             game_state,
             history,
             search_depth,
             playing_strength,
         ),
-        SearchMode::Simple => simple_search::SimpleSearch::find_best_move(
+        SearchMode::Test => simple_search::SimpleSearch::find_best_move(
             game_state,
             history,
             search_depth,

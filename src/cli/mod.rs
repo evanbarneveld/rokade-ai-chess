@@ -35,7 +35,7 @@ pub fn run_cli() {
     let mut white_bot_strength: usize = DEFAULT_STRENGTH;
     let mut black_bot_strength: usize = DEFAULT_STRENGTH;
 
-    println!("Welcome to chess (build#{}). Type 'help' for help, enter move, or 'quit' to quit.\n", BUILD_NUMBER);
+    println!("Welcome to Rokade-AI (build#{}). Type 'help' for help, enter move, or 'quit' to quit.\n", BUILD_NUMBER);
 
     let mut game = Chess::new();
 
@@ -85,15 +85,15 @@ pub fn run_cli() {
                 if parts.len() == 2 {
                     let mode_str = parts[1].to_ascii_lowercase();
                     let new_mode = match mode_str.as_str() {
-                        "advanced" => Some(SearchMode::Advanced),
-                        "simple" => Some(SearchMode::Simple),
+                        "normal" => Some(SearchMode::Normal),
+                        "test" => Some(SearchMode::Test),
                         _ => None,
                     };
                     if let Some(m) = new_mode {
                         game.set_search_mode(m);
                         println!("Set search mode to {:?}", m);
                     } else {
-                        println!("Invalid mode. Use: searchmode [advanced|simple]");
+                        println!("Invalid mode. Use: searchmode [normal|test]");
                     }
                     continue;
                 }
