@@ -108,6 +108,7 @@ pub fn run_uci() -> io::Result<()> {
             let mut btime: Option<usize> = None;
             let mut winc: Option<usize> = None;
             let mut binc: Option<usize> = None;
+            let mut movestogo: Option<usize> = None;
 
             let mut i = 1; // start after 'go'
             while i < tokens.len() {
@@ -144,6 +145,12 @@ pub fn run_uci() -> io::Result<()> {
                             i += 2; continue;
                         }
                     }
+                    "movestogo" => {
+                        if i + 1 < tokens.len() {
+                            if let Ok(v) = tokens[i + 1].parse::<usize>() { movestogo = Some(v.max(1)); }
+                            i += 2; continue;
+                        }
+                    }
                     _ => {}
                 }
                 i += 1;
@@ -157,20 +164,32 @@ pub fn run_uci() -> io::Result<()> {
                 let mut budget: usize = 0;
 
                 if time_left > 0 {
-                    // Base on remaining time: ~2%
-                    budget = ((time_left as f64) * 0.02) as usize; // 2%
-                    if budget < 10 { budget = 10; } // at least 10ms
-                    // Add a portion of the increment if available
-                    if inc > 0 {
-                        let bonus = ((inc as f64) * 0.7) as usize; // use ~70% of increment
-                        budget = budget.saturating_add(bonus);
+                    if let Some(mtg) = movestogo {
+                        // If movestogo is provided, allocate roughly evenly across remaining moves.
+                        // Base budget: divide remaining time by moves to go.
+                        budget = (time_left / mtg.max(1)).max(1);
+                        // Add a safe portion of the increment if available.
+                        if inc > 0 {
+                            let bonus = ((inc as f64) * 0.6) as usize; // ~60% of increment
+                            budget = budget.saturating_add(bonus);
+                        }
+                        // Cap so we don't spend too much: at most time_left / max(2, mtg)
+                        let max_cap = time_left / mtg.max(2);
+                        if max_cap > 0 && budget > max_cap { budget = max_cap; }
+                    } else {
+                        // No movestogo: use a dynamic fraction of remaining time and some increment.
+                        budget = ((time_left as f64) * 0.02) as usize; // ~2%
+                        if budget < 10 { budget = 10; } // at least 10ms
+                        if inc > 0 {
+                            let bonus = ((inc as f64) * 0.7) as usize; // ~70% of increment
+                            budget = budget.saturating_add(bonus);
+                        }
+                        let max_cap = time_left / 3; // at most a third of remaining time
+                        if max_cap > 0 && budget > max_cap { budget = max_cap; }
                     }
-                    // Safety cap relative to remaining time
-                    let max_cap = time_left / 3; // be conservative with a third of remaining time
-                    if max_cap > 0 && budget > max_cap { budget = max_cap; }
 
-                    // If in severe time trouble, be extra conservative
-                    if time_left < 1000 { // < 1s left
+                    // If in severe time trouble, be extra conservative regardless of movestogo
+                    if time_left < 1000 { // <1s left
                         let tight = (time_left / 20).max(5); // ~5% of remaining, min 5ms
                         budget = budget.min(tight);
                     }
