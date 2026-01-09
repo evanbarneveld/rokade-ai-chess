@@ -277,6 +277,39 @@ pub fn alphabeta(
                         if hist_good {
                             r = r.saturating_sub(1);
                         }
+                        // Extra reduction in opening for quiet queen moves when undeveloped and king uncastled.
+                        // This discourages early queen sorties unless tactically justified (captures/checks excluded).
+                        if let Some(mp) = moved_piece {
+                            if mp.get_type() == PieceType::Queen {
+                                let phase = board.game_phase_light(); // higher => earlier phase
+                                if phase >= 12 {
+                                    let back_r = if to_move == Color::White { 0usize } else { 7usize };
+                                    let mut undeveloped = 0;
+                                    for fc in 0..8 {
+                                        if let Some(p) = board.get(back_r, fc) {
+                                            if p.get_color() == to_move {
+                                                match p.get_type() {
+                                                    PieceType::Knight | PieceType::Bishop => { undeveloped += 1; },
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Check basic castling status: king on back rank and not on castled files (c or g)
+                                    let king_home_r = back_r;
+                                    let mut king_file: Option<usize> = None;
+                                    for fc in 0..8 {
+                                        if let Some(kp) = board.get(king_home_r, fc) {
+                                            if kp.get_color()==to_move && kp.get_type()==PieceType::King { king_file = Some(fc); break; }
+                                        }
+                                    }
+                                    let uncastled = match king_file { Some(kf) => !(kf==2 || kf==6), None => true };
+                                    if undeveloped >= 3 { r += 2; }
+                                    else if undeveloped >= 2 { r += 1; }
+                                    if uncastled { r += 1; }
+                                }
+                            }
+                        }
                         // Final cap to 3 plies
                         r = r.min(3);
                         reduced_depth = reduced_depth.saturating_sub(r);

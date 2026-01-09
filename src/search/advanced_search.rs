@@ -155,6 +155,30 @@ pub fn find_best_move(
             v
         };
 
+        // Additional opening hard filter at root: drop quiet queen moves that do not give check
+        // (captures and checks preserved). This is opening-only and keeps tactics intact.
+        // Keeps at least one move if it would otherwise drop all.
+        let mut phase_for_scale = 0i32;
+        for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+            phase_for_scale += match p.get_type() { PieceType::Knight|PieceType::Bishop => 1, PieceType::Rook => 2, PieceType::Queen => 4, _ => 0 };
+        }}}
+        phase_for_scale = phase_for_scale.clamp(0,24);
+        if phase_for_scale >= 16 {
+            let mut kept: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(base.len());
+            for &(f, t) in &base {
+                let p = board.get(f.0, f.1);
+                let is_cap = board.get(t.0, t.1).is_some();
+                let mut btmp = board.clone();
+                if let Some(mp) = p { btmp.set(t.0, t.1, Some(mp)); btmp.set(f.0, f.1, None); }
+                let gives_check = if p.is_some() { btmp.is_side_in_check(opposite_color(active_color)) } else { false };
+                let is_quiet_queen = matches!(p, Some(pc) if pc.get_type()==PieceType::Queen) && !is_cap;
+                if !(is_quiet_queen && !gives_check) {
+                    kept.push((f,t));
+                }
+            }
+            if !kept.is_empty() { base = kept; }
+        }
+
         // Heuristic ordering at root: prioritize checking moves, then captures by MVV, then others.
         base.sort_by(|&(f1,t1), &(f2,t2)| {
             use crate::piece::pieces::{piece_value_cp};
@@ -674,9 +698,28 @@ fn evaluate_root_for_bounds(
     };
     let mut best_adjusted = best_score_raw;
 
-    // Order: if TT has a move at root, try to place it first
+    // Order: if TT has a move at root, try to place it first, then apply light opening-aware tie-breakers
     let mut ordered: Vec<((usize, usize), (usize, usize))> = root_moves.iter().copied().collect();
     reorder_with_tt_hint(&mut ordered, tt, board, active_color);
+
+    // Opening-aware tiny reordering: demote quiet queen moves; promote minor development and castling
+    // Keep this extremely small so as not to override tactical ordering.
+    // Apply only at very shallow plies (root) and more in opening phase.
+    let phase_for_scale = {
+        // Phase proxy: count heavy/minors on board similar to evaluator's game_phase; fallback small constant
+        let mut phase = 0i32;
+        for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+            phase += match p.get_type() { PieceType::Knight|PieceType::Bishop => 1, PieceType::Rook => 2, PieceType::Queen => 4, _ => 0 };
+        }}}
+        if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
+    } as i32;
+    if depth_now >= 1 {
+        ordered.sort_by(|&(f1,t1), &(f2,t2)| {
+            let score1 = root_move_order_bias(board, active_color, f1, t1, phase_for_scale);
+            let score2 = root_move_order_bias(board, active_color, f2, t2, phase_for_scale);
+            score2.cmp(&score1) // higher bias first
+        });
+    }
 
     //eprintln!("[root-bounds] depth={} ordered={} a={} b={} parallel?={}",
     //          depth_now, ordered.len(), a, b,
@@ -896,6 +939,56 @@ fn evaluate_root_for_bounds(
     //);
 
     (best_from_to.unwrap(), best_adjusted, best_score_raw)
+}
+
+// Tiny heuristic score for root ordering; positive favors earlier search
+#[inline]
+fn root_move_order_bias(board: &Board, side: Color, from: (usize,usize), to: (usize,usize), phase: i32) -> i32 {
+    // scale 0..24 -> 0..24
+    let scale = phase.clamp(0,24);
+    let mut bias: i32 = 0;
+    // Identify moved piece
+    let piece = match board.get(from.0, from.1) { Some(p) if p.get_color()==side => p, _ => return 0 };
+    let is_capture = board.get(to.0, to.1).is_some();
+
+    // Prefer castling
+    if piece.get_type()==PieceType::King {
+        let dr = if side==Color::White { 0usize } else { 7usize };
+        if from.0==dr && (to.1==6 || to.1==2) { bias += (10 * scale) / 24; }
+    }
+
+    // Prefer minor development from back rank
+    if piece.get_type()==PieceType::Knight || piece.get_type()==PieceType::Bishop {
+        let back = if side==Color::White { 0usize } else { 7usize };
+        if from.0 == back {
+            bias += (8 * scale) / 24; // slightly stronger nudge
+        }
+    }
+
+    // Demote quiet queen moves in opening at root (unless capture)
+    if piece.get_type()==PieceType::Queen && !is_capture {
+        // Light demotion; guards: if move gives check we'll discover tactically later
+        let mut demote = 9; // base demotion strength
+        // Extra demotion if position is underdeveloped (>=2 minors on back rank)
+        let back_r = if side==Color::White { 0usize } else { 7usize };
+        let mut undeveloped = 0;
+        for fc in 0..8 {
+            if let Some(p) = board.get(back_r, fc) {
+                if p.get_color()==side {
+                    if matches!(p.get_type(), PieceType::Knight | PieceType::Bishop) { undeveloped += 1; }
+                }
+            }
+        }
+        if undeveloped >= 3 { demote += 6; } else if undeveloped >= 2 { demote += 3; }
+        // Extra demotion for big queen sorties (long leaps) in the opening
+        let manhattan = (from.0 as i32 - to.0 as i32).abs() + (from.1 as i32 - to.1 as i32).abs();
+        if manhattan >= 3 { demote += 4; }
+        // Extra demotion for advancing deep (enemy side) without capture
+        let deep_adv = match side { Color::White => to.0 >= 3, Color::Black => to.0 <= 4 };
+        if deep_adv { demote += 3; }
+        bias -= (demote * scale) / 24;
+    }
+    bias
 }
 
 #[inline]

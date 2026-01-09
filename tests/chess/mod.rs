@@ -9,3 +9,4 @@ mod board;
 mod perft_depth_4_5_and_higher;
 mod eval_symmetry;
 mod eval_passed_pawns;
+mod opening_preference;

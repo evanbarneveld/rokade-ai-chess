@@ -271,6 +271,26 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
                             let home = row == 7 && (col == 2 || col == 5);
                             if !home { val += (8 * phase) / 24; }
                         }
+                        (PieceType::Queen, _) => {
+                            // Discourage early queen excursions to the rim (a/h-files) in the opening
+                            let on_rim_file = col == 0 || col == 7;
+                            if on_rim_file {
+                                let deep = match color { Color::White => row >= 3, Color::Black => row <= 4 };
+                                if deep {
+                                    val -= (12 * phase) / 24; // up to -12cp in full opening
+                                }
+                            }
+                            // If both knights are still on the back rank, discourage shallow queen development (e.g., Qf3/Qc2) in opening
+                            let (back_r, k1c, k2c) = match color { Color::White => (0usize,1usize,6usize), Color::Black => (7usize,1usize,6usize) };
+                            let both_knights_back = matches!(board.get(back_r,k1c), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Knight))
+                                && matches!(board.get(back_r,k2c), Some(p) if p.get_color()==color && matches!(p.get_type(), PieceType::Knight));
+                            if both_knights_back {
+                                let shallow_dev_rank = match color { Color::White => row <= 2, Color::Black => row >= 5 };
+                                if shallow_dev_rank {
+                                    val -= (14 * phase) / 24; // up to -14cp in full opening
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -752,9 +772,10 @@ fn rook_on_enemy_king_file_bonus(board: &Board, color: Color) -> i32 {
 // Middlegame bonus for queen on a semi-open file (encourages useful central/semi-open placement
 // without overcommitting to early queen activity).
 fn queen_on_semi_open_file_bonus(board: &Board, color: Color, counts: &PawnFileCounts) -> i32 {
-    // Taper this to be minimal in pure opening; grows into middlegame
+    // Should be negligible in the opening and only start to matter later.
+    // Use an inverse phase weight so that it grows toward endgame.
     let phase = game_phase(board);
-    let mg_scale = (phase.saturating_sub(12)) as i32; // 0 before phase 12
+    let later_scale = (24 - phase).clamp(0, 24); // 0 in pure opening, 24 in pure endgame
     let mut bonus = 0;
     for r in 0..8 { for c in 0..8 {
         if let Some(p)=board.get(r,c) {
@@ -762,7 +783,7 @@ fn queen_on_semi_open_file_bonus(board: &Board, color: Color, counts: &PawnFileC
                 let wp = counts.white[c];
                 let bp = counts.black[c];
                 let semi = match color { Color::White => wp==0 && bp>0, Color::Black => bp==0 && wp>0 };
-                if semi { bonus += (6 * mg_scale) / 12; }
+                if semi { bonus += (6 * later_scale) / 24; }
             }
         }
     }}
@@ -791,21 +812,28 @@ fn early_queen_penalty(board: &Board, color: Color, counts: &PawnFileCounts) -> 
         }
     }
     if undeveloped == 0 { return 0; }
-    // Base penalty scales with how undeveloped the position is
-    let base = if undeveloped >= 3 { 28 } else if undeveloped == 2 { 22 } else { 16 };
+    // Base penalty scales with how undeveloped the position is (stronger to curb early queen sorties)
+    let base = if undeveloped >= 3 { 48 } else if undeveloped == 2 { 36 } else { 24 };
     // Slightly increase if queen has advanced beyond the back rank (always true here),
     // and not shielded by pawns in front (crude heuristic: open a file at a queen file)
     // Find queen square
     let mut extra = 0;
+    let mut queen_pos: Option<(usize,usize)> = None;
     'outer: for r in 0..8 { for c in 0..8 {
         if let Some(p)=board.get(r,c) { if p.get_color()==color && matches!(p.get_type(), PieceType::Queen) {
+            queen_pos = Some((r,c));
             let wp = counts.white[c];
             let bp = counts.black[c];
             let open = wp==0 && bp==0;
-            if open { extra = 4; }
+            if open { extra += 8; }
             break 'outer;
         }}
     }}
+    // Additional penalty if queen is advanced deeply into the board early
+    if let Some((qr, _qc)) = queen_pos {
+        let advanced = match color { Color::White => qr >= 3, Color::Black => qr <= 4 };
+        if advanced { extra += 8; }
+    }
     // Scale by opening phase (strongest in opening, zero in EG)
     let phase = game_phase(board);
     ((base + extra) * phase) / 24
@@ -901,7 +929,7 @@ fn king_activity_endgame(board: &Board, color: Color) -> i32 {
 
 fn development_penalty_on_backrank(board: &Board, color: Color) -> i32 {
     let minors: &[(usize,usize)] = if matches!(color, Color::White) { &[(0,1),(0,6),(0,2),(0,5)] } else { &[(7,1),(7,6),(7,2),(7,5)] };
-    let mut pen = 0; for &(r,c) in minors.iter() { if let Some(p)=board.get(r,c) { match p.get_type() { PieceType::Knight | PieceType::Bishop => pen += 12, _ => {} } } }
+    let mut pen = 0; for &(r,c) in minors.iter() { if let Some(p)=board.get(r,c) { match p.get_type() { PieceType::Knight | PieceType::Bishop => pen += 14, _ => {} } } }
     let phase = game_phase(board);
     -((pen * phase) / 24)
 }
