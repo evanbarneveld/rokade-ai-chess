@@ -1,6 +1,6 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Error, Stdout, Write};
 use std::sync::Arc;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use crate::Chess;
 use crate::cli::BUILD_NUMBER;
 use crate::piece::as_move_str;
@@ -34,15 +34,7 @@ pub fn run_uci() -> io::Result<()> {
     let mut engine = Chess::new();
     let mut running = true;
 
-    let m1 = format!("id name eriks-chess v0.1.0 (build#{})", BUILD_NUMBER).to_string();
-    writeln!(stdout, "{}", m1)?; log_io(&mut log, "OUT", &m1);
-    let m2 = "id author erik van barneveld".to_string();
-    writeln!(stdout, "{}", m2)?; log_io(&mut log, "OUT", &m2);
-    let opt = "option name searchmode type combo default advanced var advanced var simple".to_string();
-    writeln!(stdout, "{}", opt)?; log_io(&mut log, "OUT", &opt);
-    let m3 = "uciok".to_string();
-    writeln!(stdout, "{}", m3)?; log_io(&mut log, "OUT", &m3);
-    stdout.flush()?;
+    send_uci_response(&mut stdout, &mut log).expect("Failed to send UCI response");
 
     // ensure starting position
     let _ = engine.reset();
@@ -60,6 +52,10 @@ pub fn run_uci() -> io::Result<()> {
         log_io(&mut log, "IN ", line);
         if line.is_empty() {
             continue;
+        }
+
+        if line.to_ascii_lowercase() == "uci" {
+            send_uci_response(&mut stdout, &mut log).expect("Failed to send UCI response");
         }
 
         if line.to_ascii_lowercase().starts_with("setoption ") {
@@ -211,6 +207,23 @@ pub fn run_uci() -> io::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn send_uci_response(stdout: &mut Stdout, mut log: &mut File) -> Result<(), Error> {
+    let m1 = format!("id name eriks-chess v0.1.0 (build#{})", BUILD_NUMBER).to_string();
+    writeln!(stdout, "{}", m1)?;
+    log_io(&mut log, "OUT", &m1);
+    let m2 = "id author erik van barneveld".to_string();
+    writeln!(stdout, "{}", m2)?;
+    log_io(&mut log, "OUT", &m2);
+    let opt = "option name searchmode type combo default advanced var advanced var simple".to_string();
+    writeln!(stdout, "{}", opt)?;
+    log_io(&mut log, "OUT", &opt);
+    let m3 = "uciok".to_string();
+    writeln!(stdout, "{}", m3)?;
+    log_io(&mut log, "OUT", &m3);
+    stdout.flush()?;
     Ok(())
 }
 

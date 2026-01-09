@@ -39,8 +39,6 @@ pub fn run_cli() {
     let mut white_bot_strength: usize = DEFAULT_STRENGTH;
     let mut black_bot_strength: usize = DEFAULT_STRENGTH;
 
-    wait_and_check_for_uci_request();
-
     println!("Welcome to chess (build#{}). Type 'help' for help, enter move, or 'quit' to quit.\n", BUILD_NUMBER);
 
     let mut game = Chess::new();
@@ -196,27 +194,6 @@ pub fn run_cli() {
             }
         }
 
-    }
-}
-
-fn wait_and_check_for_uci_request() {
-    // Wait N seconds, then check if there's already input on stdin
-    thread::sleep(Duration::from_secs(1));
-    if !atty::is(Stream::Stdin) {
-        let mut line = String::new();
-        match io::stdin().read_line(&mut line) {
-            Ok(n) if n > 0 => {
-                let s = line.trim().to_string();
-                if !s.is_empty() {
-                    let pre_input: Option<String> = Some(s);
-                    if pre_input.as_ref().unwrap().eq_ignore_ascii_case("uci") {
-                        run_uci().unwrap();
-                    }
-                    exit(0)
-                }
-            }
-            _ => {}
-        }
     }
 }
 
