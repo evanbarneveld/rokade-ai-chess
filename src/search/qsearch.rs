@@ -17,7 +17,7 @@ pub fn qsearch(
     board: &mut Board,
     to_move: Color,
     mut alpha: i32,
-    beta: i32,
+    mut beta: i32,
     halfmove_clock: u32,
     rep_stack: &mut Vec<u64>,
 ) -> i32 {
@@ -45,12 +45,20 @@ pub fn qsearch(
         board.is_side_in_check(to_move);
     let stand_pat = evaluate_position(&*board, to_move);
     if !in_check {
-        // Uniform alpha/beta semantics regardless of side-to-move.
-        if stand_pat >= beta {
-            return stand_pat;
-        }
-        if stand_pat > alpha {
-            alpha = stand_pat;
+        if to_move == Color::White {
+            if stand_pat >= beta {
+                return stand_pat;
+            }
+            if stand_pat > alpha {
+                alpha = stand_pat;
+            }
+        } else {
+            if stand_pat <= alpha {
+                return stand_pat;
+            }
+            if stand_pat < beta {
+                beta = stand_pat;
+            }
         }
     }
 
@@ -155,18 +163,25 @@ pub fn qsearch(
         }
     }
 
-    // Delta pruning: if not in check and clearly below alpha, prune.
-    // Start with a conservative constant margin; tune empirically.
-    if !in_check && stand_pat + DELTA_MARGIN <= alpha {
-        return stand_pat;
+    // Delta pruning
+    if !in_check {
+        if to_move == Color::White {
+            if stand_pat + DELTA_MARGIN <= alpha {
+                return stand_pat;
+            }
+        } else {
+            if stand_pat - DELTA_MARGIN >= beta {
+                return stand_pat;
+            }
+        }
     }
 
     if moves.is_empty() {
         return stand_pat;
     }
 
-    // Order captures by MVV-LVA to improve cutoffs (only matters for captures branch)
-    if !in_check && MVV_LVA_ENABLED {
+    // Order moves by MVV-LVA to improve cutoffs
+    if MVV_LVA_ENABLED {
         let b = &*board;
         moves.sort_by_key(|&(from, to)| -b.move_score_mvv_lva(from, to));
     }

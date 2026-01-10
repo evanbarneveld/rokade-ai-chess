@@ -60,7 +60,7 @@ fn test_blunder_avoidance() {
     ];
 
     let mut current_test_ = 0;
-    if (test_count == 0) { test_count = cases.len(); }
+    if test_count == 0 { test_count = cases.len(); }
 
     for (fen, blunder) in cases {
         let got = best_move_using_depth_search_with_time_limit_for_fen(fen, 4)
