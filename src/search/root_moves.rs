@@ -27,18 +27,18 @@ const REP_STACK_CAPACITY: usize = 128; // repetition detection stack capacity hi
 const CHECK_TIEBREAK_BASE: i32 = 400;
 const KING_CAPTURE_ROOT_PENALTY: i32 = 600;
 const SELF_HANG_AGGREGATE_CAP_EXTRA: i32 = 4000; // queen extra room atop 2*SEE_MAX
-const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 8000;
-const KNIGHT_NON_EVAC_DEMOTION: i32 = 12000;
-const KNIGHT_SAFE_EVAC_REWARD: i32 = 7000;
-const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 8000;
-const KNIGHT_CENTER_EXTRA_D5: i32 = 800;
-const KNIGHT_CENTER_STEP: i32 = 40;
-const CHECK_MOBILITY_BONUS_0: i32 = 4000;
-const CHECK_MOBILITY_BONUS_1_2: i32 = 3000;
-const CHECK_MOBILITY_BONUS_3_5: i32 = 2000;
-const CHECK_MOBILITY_BONUS_6_8: i32 = 1200;
-const CHECK_MOBILITY_BONUS_9_12: i32 = 600;
-const CHECK_MOBILITY_BONUS_OTHER: i32 = 200;
+const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 400;
+const KNIGHT_NON_EVAC_DEMOTION: i32 = 600;
+const KNIGHT_SAFE_EVAC_REWARD: i32 = 350;
+const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 400;
+const KNIGHT_CENTER_EXTRA_D5: i32 = 40;
+const KNIGHT_CENTER_STEP: i32 = 4;
+const CHECK_MOBILITY_BONUS_0: i32 = 500;
+const CHECK_MOBILITY_BONUS_1_2: i32 = 250;
+const CHECK_MOBILITY_BONUS_3_5: i32 = 100;
+const CHECK_MOBILITY_BONUS_6_8: i32 = 50;
+const CHECK_MOBILITY_BONUS_9_12: i32 = 25;
+const CHECK_MOBILITY_BONUS_OTHER: i32 = 10;
 
 // ---- Small helpers to reduce duplication (all #[inline]) ----
 #[inline]
@@ -520,7 +520,7 @@ fn threat_resolution_and_evacuation(
                 evac_bonus += cb.max(0);
             }
             if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-                if knight_safe.iter().any(|&sq| sq==to) { evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD - 2000; /* Original 6000 */ }
+                if knight_safe.iter().any(|&sq| sq==to) { evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD; }
             }
             delta += apply_for_side(evac_bonus, side);
         } else {
@@ -566,7 +566,7 @@ fn knight_evacuations_priority(
     if attacked_knights.is_empty() { return 0; }
     let mut delta = 0;
     if !attacked_knights.contains(&from) {
-        delta -= apply_for_side(10000, side);
+        delta -= apply_for_side(500, side);
     } else if let Some(p)=base_board.get(from.0, from.1) { if p.get_type()==PieceType::Knight {
         let (fr,fc) = from; let (tr,tc)=to;
         let (sim, _) = simulate_move(base_board, (fr,fc), (tr,tc));
@@ -577,12 +577,12 @@ fn knight_evacuations_priority(
             let mut evac = KNIGHT_SAFE_EVAC_REWARD;
             for &(cr,cc) in &[(3,3),(3,4),(4,3),(4,4)] {
                 let dr = if tr>cr {tr-cr}else{cr-tr}; let dc = if tc>cc {tc-cc}else{cc-tc};
-                let dist=(dr+dc) as i32; evac += (200 - KNIGHT_CENTER_STEP*dist).max(0);
+                let dist=(dr+dc) as i32; evac += (20 - KNIGHT_CENTER_STEP*dist).max(0);
             }
             if (tr,tc)==(3,3) { evac += KNIGHT_CENTER_EXTRA_D5; }
             delta += apply_for_side(evac, side);
         } else {
-            delta -= apply_for_side(3000, side);
+            delta -= apply_for_side(150, side);
         }
     }}
     delta
@@ -613,19 +613,23 @@ fn self_hang_or_check_mobility(
     _base_board: &Board,
     post_after: &Board,
     side: Color,
-    _from: (usize,usize),
-    _to: (usize,usize),
+    _from: (usize, usize),
+    _to: (usize, usize),
     gives_check: bool,
     opp: Color,
 ) -> i32 {
-    if !gives_check {
-        let mut total_penalty: i32 = 0;
-        // Scan our pieces; if any square is attacked and SEE < 0 for us, penalize
-        for r in 0..8 { for c in 0..8 {
+    let mut total_penalty: i32 = 0;
+    // Scan our pieces; if any square is attacked and SEE < 0 for us, penalize
+    for r in 0..8 {
+        for c in 0..8 {
             if let Some(p) = post_after.get(r, c) {
-                if p.get_color() != side { continue; }
+                if p.get_color() != side {
+                    continue;
+                }
                 let mut post_for_query = post_after.clone();
-                if !is_square_attacked_by_opponent(&mut post_for_query,(r, c), side) { continue; }
+                if !is_square_attacked_by_opponent(&mut post_for_query, (r, c), side) {
+                    continue;
+                }
                 let see = see_dest_estimate(post_after, side, (r, c), 0);
                 if see < 0 {
                     let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
@@ -636,15 +640,22 @@ fn self_hang_or_check_mobility(
                     }
                 }
             }
-        }}
-        let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2 + SELF_HANG_AGGREGATE_CAP_EXTRA;
-        if total_penalty > 0 { -total_penalty.min(agg_cap) } else { 0 }
-    } else {
-        let mut delta = 0;
-        delta += apply_for_side(CHECK_TIEBREAK_BASE, side);
-        delta += apply_for_side(check_mobility_bonus_for_side(post_after, opp), side);
-        delta
+        }
     }
+    let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2 + SELF_HANG_AGGREGATE_CAP_EXTRA;
+    let hang_pen = if total_penalty > 0 {
+        -total_penalty.min(agg_cap)
+    } else {
+        0
+    };
+
+    let mut check_bonus = 0;
+    if gives_check {
+        check_bonus += CHECK_TIEBREAK_BASE;
+        check_bonus += check_mobility_bonus_for_side(post_after, opp);
+    }
+
+    apply_for_side(hang_pen + check_bonus, side)
 }
 
 #[inline]

@@ -19,7 +19,14 @@ fn test_blunder_avoidance() {
     // Ensure deterministic behavior for this test run
     set_deterministic(true);
     // Each case: (FEN, known blunder in coordinate SAN form like "g7g6")
+
+    let mut test_count = 0; // 0 means all tests
+
     let cases = [
+        (
+            "rnbq1br1/1pppp1kp/p5pn/4PpN1/2BP4/2N5/PPP2PPP/R1BQK2R w KQ - 0 10",
+            "Ne6+",
+       ),
        (
             "r1b1k2B/ppp4p/5p2/3pp3/8/8/PP1NPPPP/R3KB1R b q - 0 13",
             "Bc8h3",
@@ -52,6 +59,9 @@ fn test_blunder_avoidance() {
         ),
     ];
 
+    let mut current_test_ = 0;
+    if test_count == 0 { test_count = cases.len(); }
+
     for (fen, blunder) in cases {
         let got = best_move_using_depth_search_with_time_limit_for_fen(fen, 4)
             .unwrap_or_else(|| panic!("No move found for FEN: {}", fen));
@@ -61,6 +71,8 @@ fn test_blunder_avoidance() {
             "Engine chose a known blunder at depth 4: {} for FEN {}",
             blunder, fen
         );
+        current_test_ += 1;
+        if current_test_ >= test_count { break; }
     }
 }
 

@@ -19,6 +19,7 @@ mod simple_search;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static DETERMINISTIC: AtomicBool = AtomicBool::new(false);
+static PARALLEL_SEARCH: AtomicBool = AtomicBool::new(true);
 
 /// Enable or disable deterministic behavior across the engine.
 /// When enabled, all random choices and evaluation noise are suppressed,
@@ -31,6 +32,19 @@ pub fn set_deterministic(on: bool) {
 #[inline]
 pub fn is_deterministic() -> bool {
     DETERMINISTIC.load(Ordering::Relaxed)
+}
+
+pub fn get_deterministic() -> bool {
+    is_deterministic()
+}
+
+pub fn set_parallel_search(on: bool) {
+    PARALLEL_SEARCH.store(on, Ordering::Relaxed);
+}
+
+#[inline]
+pub fn is_parallel_search() -> bool {
+    PARALLEL_SEARCH.load(Ordering::Relaxed)
 }
 
 // Trait interface for Search implementations

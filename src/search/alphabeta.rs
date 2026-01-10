@@ -58,7 +58,7 @@ pub fn alphabeta(
         return qsearch(board, to_move, alpha, beta, half_move_clock, rep_stack);
     }
 
-    if let Some(value) = prune_null_moves(board, to_move, depth, beta, ply, tt, half_move_clock, rep_stack) {
+    if let Some(value) = prune_null_moves(board, to_move, depth, alpha, beta, ply, tt, half_move_clock, rep_stack) {
         return value;
     }
 

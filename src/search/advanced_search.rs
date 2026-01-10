@@ -17,14 +17,13 @@ use crate::state::game_state::GameState;
 use rayon::prelude::*;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 use crate::book::book::book_pick;
-use crate::search::Search;
+use crate::search::{is_parallel_search, Search};
 use crate::board::san_move::convert_move_to_san;
 
 pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 pub const MAX_SEARCH_DEPTH: usize = 20;
 
 // Root parallelization settings
-pub(crate) const ROOT_PARALLELIZATION_ENABLED: bool = true; // TODO not the default
 const ROOT_PARALLEL_MIN_DEPTH: usize = 6; // TODO not the default enable root parallel only from this depth
 const ROOT_PARALLEL_MIN_MOVES: usize = 4; // and when at least this many root moves exist
 
@@ -725,7 +724,7 @@ fn evaluate_root_for_bounds(
     //          depth_now, ordered.len(), a, b,
     //         (depth_now >= ROOT_PARALLEL_MIN_DEPTH && ordered.len() >= ROOT_PARALLEL_MIN_MOVES));
 
-    let enable_parallel = ROOT_PARALLELIZATION_ENABLED
+    let enable_parallel = is_parallel_search()
         && depth_now >= ROOT_PARALLEL_MIN_DEPTH
         && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
     if enable_parallel {

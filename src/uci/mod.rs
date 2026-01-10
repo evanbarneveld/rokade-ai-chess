@@ -1,11 +1,15 @@
 use std::io::{self, BufRead, Error, Stdout, Write};
 use std::sync::Arc;
 use std::fs::{File, OpenOptions};
+use std::process::exit;
 use crate::Chess;
 use crate::cli::BUILD_NUMBER;
 use crate::piece::as_move_str;
 use crate::search::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
-use crate::search::{find_best_move_with_mode, SearchMode};
+use crate::search::{
+    find_best_move_with_mode, get_deterministic, is_parallel_search, set_deterministic,
+    set_parallel_search, SearchMode,
+};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 use crate::search::uci_feedback::set_info_callback;
@@ -19,6 +23,7 @@ use crate::search::uci_feedback::set_info_callback;
 // - go depth N
 // - go wtime <time-in-ms> btime <time-in-ms> [ winc <time-in-ms> binc <time-in-ms>
 // - stop (no-op for instant Search)
+// - cli (switch back to CLI mode)
 // - quit
 // Notes:
 // - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
@@ -34,7 +39,6 @@ pub fn run_uci() -> io::Result<()> {
         .open("uci.log")?;
 
     let mut engine = Chess::new();
-    let mut running = true;
 
     send_uci_response(&mut stdout, &mut log).expect("Failed to send UCI response");
 
@@ -103,6 +107,24 @@ pub fn run_uci() -> io::Result<()> {
                         engine.get_playing_strength()
                     };
                     engine.set_playing_strength(s);
+                }
+            } else if lower.contains("name deterministic") {
+                if let Some(idx) = lower.find("value ") {
+                    let val = line[(idx+6)..].trim().to_ascii_lowercase();
+                    if val == "true" {
+                        set_deterministic(true);
+                    } else if val == "false" {
+                        set_deterministic(false);
+                    }
+                }
+            } else if lower.contains("name parallel search") {
+                if let Some(idx) = lower.find("value ") {
+                    let val = line[(idx+6)..].trim().to_ascii_lowercase();
+                    if val == "true" {
+                        set_parallel_search(true);
+                    } else if val == "false" {
+                        set_parallel_search(false);
+                    }
                 }
             }
             continue;
@@ -282,14 +304,14 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line == "stop" {
-            // no Search thread yet
+            set_time_budget_ms(1);
             continue;
         }
         if line == "quit" {
-            running = false;
+            exit(1);
         }
 
-        if !running {
+        if line == "cli" {
             break;
         }
     }
@@ -298,19 +320,32 @@ pub fn run_uci() -> io::Result<()> {
 }
 
 fn send_uci_response(stdout: &mut Stdout, mut log: &mut File) -> Result<(), Error> {
+    writeln!(stdout)?;
     let m1 = format!("id name Rokade-AI v0.1.0 (build#{})", BUILD_NUMBER).to_string();
     writeln!(stdout, "{}", m1)?;
     write_to_file_with_flush(&mut log, "OUT", &m1);
+
     let m2 = "id author Erik van Barneveld".to_string();
     writeln!(stdout, "{}", m2)?;
     write_to_file_with_flush(&mut log, "OUT", &m2);
-    let opt1 = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
-    writeln!(stdout, "{}", opt1)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt1);
+
     // Strength levels as combo
-    let opt2 = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
-    writeln!(stdout, "{}", opt2)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt2);
+    let opt_strenghth = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
+    writeln!(stdout, "{}", opt_strenghth)?;
+    write_to_file_with_flush(&mut log, "OUT", &opt_strenghth);
+
+    let opt_parallel = format!("option name parallel search type check default {}", is_parallel_search());
+    writeln!(stdout, "{}", opt_parallel)?;
+    write_to_file_with_flush(&mut log, "OUT", &opt_parallel);
+
+    let opt_deterministic = format!("option name Deterministic type check default {}", get_deterministic());
+    writeln!(stdout, "{}", opt_deterministic)?;
+    write_to_file_with_flush(&mut log, "OUT", &opt_deterministic);
+
+    let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
+    writeln!(stdout, "{}", opt_searchmode)?;
+    write_to_file_with_flush(&mut log, "OUT", &opt_searchmode);
+
     let m3 = "uciok".to_string();
     writeln!(stdout, "{}", m3)?;
     write_to_file_with_flush(&mut log, "OUT", &m3);
