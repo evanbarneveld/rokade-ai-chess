@@ -94,6 +94,23 @@ fn test_bad_bishop_move() {
     assert_ne!(san_move, "Bxf7+"); //bad move
 }
 
+
+#[test]
+#[serial]
+fn test_bad_knight_check_move() {
+    // in this position the engine generates a knight move Ne6+ for white
+    // but now the knight can immediately be captured by black dxe6
+    let fen = "rnbq1br1/1pppp1kp/p5pn/4PpN1/2BP4/2N5/PPP2PPP/R1BQK2R w KQ - 0 10";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Ne6+"); //bad move
+}
+
 #[test]
 #[serial]
 fn test_bad_rook_move2() {

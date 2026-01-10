@@ -33,6 +33,10 @@ pub fn is_deterministic() -> bool {
     DETERMINISTIC.load(Ordering::Relaxed)
 }
 
+pub fn get_deterministic() -> bool {
+    is_deterministic()
+}
+
 // Trait interface for Search implementations
 // Note: The method is an associated function (no &self) to match the existing API.
 // Implementors can forward to their internal logic.

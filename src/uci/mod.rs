@@ -5,7 +5,7 @@ use crate::Chess;
 use crate::cli::BUILD_NUMBER;
 use crate::piece::as_move_str;
 use crate::search::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
-use crate::search::{find_best_move_with_mode, SearchMode};
+use crate::search::{find_best_move_with_mode, SearchMode, set_deterministic, get_deterministic};
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 use crate::search::uci_feedback::set_info_callback;
@@ -103,6 +103,15 @@ pub fn run_uci() -> io::Result<()> {
                         engine.get_playing_strength()
                     };
                     engine.set_playing_strength(s);
+                }
+            } else if lower.contains("name deterministic") {
+                if let Some(idx) = lower.find("value ") {
+                    let val = line[(idx+6)..].trim().to_ascii_lowercase();
+                    if val == "true" {
+                        set_deterministic(true);
+                    } else if val == "false" {
+                        set_deterministic(false);
+                    }
                 }
             }
             continue;
@@ -311,6 +320,9 @@ fn send_uci_response(stdout: &mut Stdout, mut log: &mut File) -> Result<(), Erro
     let opt2 = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
     writeln!(stdout, "{}", opt2)?;
     write_to_file_with_flush(&mut log, "OUT", &opt2);
+    let opt3 = format!("option name Deterministic type check default {}", get_deterministic());
+    writeln!(stdout, "{}", opt3)?;
+    write_to_file_with_flush(&mut log, "OUT", &opt3);
     let m3 = "uciok".to_string();
     writeln!(stdout, "{}", m3)?;
     write_to_file_with_flush(&mut log, "OUT", &m3);
