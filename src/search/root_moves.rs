@@ -27,12 +27,12 @@ const REP_STACK_CAPACITY: usize = 128; // repetition detection stack capacity hi
 const CHECK_TIEBREAK_BASE: i32 = 400;
 const KING_CAPTURE_ROOT_PENALTY: i32 = 600;
 const SELF_HANG_AGGREGATE_CAP_EXTRA: i32 = 4000; // queen extra room atop 2*SEE_MAX
-const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 8000;
-const KNIGHT_NON_EVAC_DEMOTION: i32 = 12000;
-const KNIGHT_SAFE_EVAC_REWARD: i32 = 7000;
-const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 8000;
-const KNIGHT_CENTER_EXTRA_D5: i32 = 800;
-const KNIGHT_CENTER_STEP: i32 = 40;
+const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 400;
+const KNIGHT_NON_EVAC_DEMOTION: i32 = 600;
+const KNIGHT_SAFE_EVAC_REWARD: i32 = 350;
+const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 400;
+const KNIGHT_CENTER_EXTRA_D5: i32 = 40;
+const KNIGHT_CENTER_STEP: i32 = 4;
 const CHECK_MOBILITY_BONUS_0: i32 = 500;
 const CHECK_MOBILITY_BONUS_1_2: i32 = 250;
 const CHECK_MOBILITY_BONUS_3_5: i32 = 100;
@@ -520,7 +520,7 @@ fn threat_resolution_and_evacuation(
                 evac_bonus += cb.max(0);
             }
             if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-                if knight_safe.iter().any(|&sq| sq==to) { evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD - 2000; /* Original 6000 */ }
+                if knight_safe.iter().any(|&sq| sq==to) { evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD; }
             }
             delta += apply_for_side(evac_bonus, side);
         } else {
@@ -566,7 +566,7 @@ fn knight_evacuations_priority(
     if attacked_knights.is_empty() { return 0; }
     let mut delta = 0;
     if !attacked_knights.contains(&from) {
-        delta -= apply_for_side(10000, side);
+        delta -= apply_for_side(500, side);
     } else if let Some(p)=base_board.get(from.0, from.1) { if p.get_type()==PieceType::Knight {
         let (fr,fc) = from; let (tr,tc)=to;
         let (sim, _) = simulate_move(base_board, (fr,fc), (tr,tc));
@@ -577,12 +577,12 @@ fn knight_evacuations_priority(
             let mut evac = KNIGHT_SAFE_EVAC_REWARD;
             for &(cr,cc) in &[(3,3),(3,4),(4,3),(4,4)] {
                 let dr = if tr>cr {tr-cr}else{cr-tr}; let dc = if tc>cc {tc-cc}else{cc-tc};
-                let dist=(dr+dc) as i32; evac += (200 - KNIGHT_CENTER_STEP*dist).max(0);
+                let dist=(dr+dc) as i32; evac += (20 - KNIGHT_CENTER_STEP*dist).max(0);
             }
             if (tr,tc)==(3,3) { evac += KNIGHT_CENTER_EXTRA_D5; }
             delta += apply_for_side(evac, side);
         } else {
-            delta -= apply_for_side(3000, side);
+            delta -= apply_for_side(150, side);
         }
     }}
     delta
