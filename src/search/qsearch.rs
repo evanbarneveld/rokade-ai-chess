@@ -1,7 +1,7 @@
 use crate::board::Board;
 use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{piece_value_cp, Color, PieceType};
-use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED};
+use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED, SEARCH_ABORTED};
 use crate::state::game_state::GameState;
 use crate::search::see::see_dest_estimate;
 use crate::search::time_control::time_is_up;
@@ -25,9 +25,9 @@ pub fn qsearch(
     if !QUIESCENCE_ENABLED {
         return evaluate_position(&*board, to_move);
     }
-    // Time cutoff in quiescence as well: return a quick static eval
+    // Time cutoff: return SEARCH_ABORTED to signal interruption
     if time_is_up() {
-        return evaluate_position(&*board, to_move);
+        return SEARCH_ABORTED;
     }
     // Draw checks in quiescence as well (only if Zobrist hashing is enabled)
     if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {

@@ -1,11 +1,10 @@
 use std::sync::{Mutex, OnceLock};
 use crate::board::Board;
-use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{Color, PieceType};
 use crate::search::heuristics::SearchHeuristics;
 use crate::search::prune_null_moves::prune_null_moves;
 use crate::search::qsearch::qsearch;
-use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE};
+use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, SEARCH_ABORTED};
 use crate::state::game_state::GameState;
 use crate::search::telemetry::bump_node;
 use crate::search::time_control::time_is_up;
@@ -29,10 +28,9 @@ pub fn alphabeta(
     // Count every node we enter
     bump_node();
 
-    // Time cutoff: on timeout, return a static evaluation of the current node.
-    // This ensures callers can still use best-so-far information gathered so far.
+    // Time cutoff: return SEARCH_ABORTED to signal interruption
     if time_is_up() {
-        return evaluate_position(&*board, to_move);
+        return SEARCH_ABORTED;
     }
 
     // print board
