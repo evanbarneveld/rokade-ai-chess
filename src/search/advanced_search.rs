@@ -16,6 +16,8 @@ use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 use rayon::prelude::*;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
+
+pub const SEARCH_ABORTED: i32 = MAX_EVAL_VALUE + 50000;
 use crate::book::book::book_pick;
 use crate::search::{is_parallel_search, Search};
 use crate::board::san_move::convert_move_to_san;
@@ -246,8 +248,9 @@ pub fn find_best_move(
                 )
             };
 
-            //eprintln!("[root] depth_now={} (post-asp) best_adj={} best_raw={} mv={:?}->{:?}",
-            //          depth_now, best_adj, best_raw, (bf, bt).0, (bf, bt).1);
+            if best_raw == SEARCH_ABORTED {
+                break;
+            }
 
             _last_score = best_raw;
             // Emit PV/info for this iteration, including TT hashfull permille
@@ -744,6 +747,10 @@ fn evaluate_root_for_bounds(
                 base_hmc,
             );
 
+            if score_raw == SEARCH_ABORTED {
+                return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+            }
+
             let adjusted = adjusted_root_eval_for_move(
                 board,
                 active_color,
@@ -783,6 +790,10 @@ fn evaluate_root_for_bounds(
                     &mut local_tt,
                     base_hmc_loc,
                 );
+
+                if score_raw == SEARCH_ABORTED {
+                    return (from, to, SEARCH_ABORTED, SEARCH_ABORTED);
+                }
 
                 // Root adjustments (skip repetition-history check to keep parallel code simple)
                 let adjusted = adjusted_root_eval_for_move(
@@ -828,6 +839,9 @@ fn evaluate_root_for_bounds(
 
         // Update best with parallel results if better
         let (pf, pt, padj, praw) = results;
+        if praw == SEARCH_ABORTED {
+            return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+        }
         // Ignore identity placeholder
         if !(pf == (0, 0) && pt == (0, 0)) {
             let better = if active_color == Color::White {
@@ -865,6 +879,10 @@ fn evaluate_root_for_bounds(
                 tt,
                 base_hmc,
             );
+
+            if score_raw == SEARCH_ABORTED {
+                return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+            }
 
             //eprintln!(
             //    "[root-serial] mv={:?}->{:?} raw={} (alpha={}, beta={})",
@@ -1029,6 +1047,10 @@ fn probe_with_aspiration(
             history,
         );
 
+        if best_score_raw == SEARCH_ABORTED {
+            return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+        }
+
         //eprintln!("[asp] result depth={} try={} raw={} adj={} mv={:?}->{:?}",
         //          depth_now, tried, best_score_raw, best_adjusted, mv.0, mv.1);
 
@@ -1073,6 +1095,9 @@ fn probe_with_aspiration(
                 game_state,
                 history,
             );
+            if best_raw2 == SEARCH_ABORTED {
+                return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+            }
             return (mv2, best_adj2, best_raw2);
         }
     }
