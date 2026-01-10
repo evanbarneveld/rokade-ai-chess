@@ -72,7 +72,7 @@ pub fn run_cli() {
 
             if some_input.eq_ignore_ascii_case("uci") {
                 run_uci().unwrap();
-                break;
+                continue;
             }
 
             // set search mode
@@ -481,6 +481,7 @@ fn print_help() {
     println!("searchmode               - get search mode (advanced or simple)");
     println!("searchmode advanced      - set search mode to advanced");
     println!("searchmode simple        - set search mode to simple");
+    println!("uci                      - switch to UCI mode");
 }
 
 fn handle_game_mode_commands(mode: &mut GameMode, some_input: &String) -> bool {
