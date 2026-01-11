@@ -1,4 +1,5 @@
-use std::io::{self, BufRead, Error, Stdout, Write};
+use std::io::{self, BufRead, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -25,11 +26,9 @@ use crate::search::uci_feedback::set_info_callback;
 // - position [startpos|fen <fen>] [moves <move1> <move2> ...]
 // - go depth N
 // - go wtime <time-in-ms> btime <time-in-ms> [ winc <time-in-ms> binc <time-in-ms>
-// - stop (no-op for instant Search)
+// - stop (stop current search)
 // - cli (switch back to CLI mode)
 // - quit
-// Notes:
-// - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
 
 const UCI_INFO_SCORE_DIVISOR: f32 = 8.0f32;
 
@@ -48,8 +47,9 @@ pub fn run_uci() -> io::Result<()> {
     let _ = LOG.set(Mutex::new(log_file));
 
     let engine = Arc::new(Mutex::new(Chess::new()));
+    let searching = Arc::new(AtomicBool::new(false));
 
-    send_uci_response(&mut stdout).expect("Failed to send UCI response");
+    send_uci_response();
 
     // ensure starting position
     let _ = engine.lock().unwrap().reset();
@@ -64,13 +64,13 @@ pub fn run_uci() -> io::Result<()> {
         }
         let line = input.trim();
         // log input
-        write_to_file_with_flush("IN ", line);
+        log_with_flush("IN ", line);
         if line.is_empty() {
             continue;
         }
 
         if line.to_ascii_lowercase() == "uci" {
-            send_uci_response(&mut stdout).expect("Failed to send UCI response");
+            send_uci_response();
         }
 
         if line.to_ascii_lowercase().starts_with("setoption ") {
@@ -140,8 +140,7 @@ pub fn run_uci() -> io::Result<()> {
         }
         if line == "isready" {
             let m = "readyok".to_string();
-            writeln!(stdout, "{}", m)?;
-            write_to_file_with_flush("OUT", &m);
+            write_to_stdout_and_log_with_flush("OUT", &m);
             stdout.flush()?;
             continue;
         }
@@ -166,6 +165,12 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line.starts_with("go ") || line == "go" {
+            if searching.load(Ordering::SeqCst) {
+                write_to_stdout_and_log_with_flush("OUT", "info string already searching\n");
+                continue;
+            }
+            searching.store(true, Ordering::SeqCst);
+
             let white_is_active = engine.lock().unwrap().active_color_is_white();
 
             let mut movetime: usize = 0; // default unlimited time per move unless constrained below
@@ -274,6 +279,7 @@ pub fn run_uci() -> io::Result<()> {
             }
 
             let engine_inner = Arc::clone(&engine);
+            let searching_inner = Arc::clone(&searching);
             let line_copy = line.to_string();
             thread::spawn(move || {
                 // Measure elapsed time and reset telemetry for info lines
@@ -295,8 +301,7 @@ pub fn run_uci() -> io::Result<()> {
                     // Print directly to stdout; ignore logging for async updates
                     let score_cp_from_white_perspective = if white_is_active_inner { score_cp } else { -score_cp };
                     let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, nodes, nps, hashfull, pv);
-                    let _ = writeln!(io::stdout(), "{}", log_text);
-                    write_to_file_with_flush("OUT", &log_text);
+                    write_to_stdout_and_log_with_flush("OUT", &log_text);
                 });
                 set_info_callback(Some(info_cb));
 
@@ -315,14 +320,12 @@ pub fn run_uci() -> io::Result<()> {
                 if let Some((score_cp, depth_used)) = info_opt {
                     let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
                     let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
-                    let _ = writeln!(io::stdout(), "{}", log_text);
-                    write_to_file_with_flush("OUT", &log_text);
+                    write_to_stdout_and_log_with_flush("OUT", &log_text);
                 }
 
                 let out = format!("bestmove {}", best_move_str);
-                let _ = writeln!(io::stdout(), "{}", out);
-                write_to_file_with_flush("OUT", &out);
-                let _ = io::stdout().flush();
+                write_to_stdout_and_log_with_flush("OUT", &out);
+                searching_inner.store(false, Ordering::SeqCst);
             });
             continue;
         }
@@ -342,38 +345,28 @@ pub fn run_uci() -> io::Result<()> {
     Ok(())
 }
 
-fn send_uci_response(stdout: &mut Stdout) -> Result<(), Error> {
-    writeln!(stdout)?;
+fn send_uci_response() {
     let m1 = format!("id name Rokade-AI v0.1.0 (build#{})", BUILD_NUMBER).to_string();
-    writeln!(stdout, "{}", m1)?;
-    write_to_file_with_flush("OUT", &m1);
+    write_to_stdout_and_log_with_flush("OUT", &m1);
 
     let m2 = "id author Erik van Barneveld".to_string();
-    writeln!(stdout, "{}", m2)?;
-    write_to_file_with_flush("OUT", &m2);
+    write_to_stdout_and_log_with_flush("OUT", &m2);
 
     // Strength levels as combo
     let opt_strenghth = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
-    writeln!(stdout, "{}", opt_strenghth)?;
-    write_to_file_with_flush("OUT", &opt_strenghth);
+    write_to_stdout_and_log_with_flush("OUT", &opt_strenghth);
 
     let opt_parallel = format!("option name parallel search type check default {}", is_parallel_search());
-    writeln!(stdout, "{}", opt_parallel)?;
-    write_to_file_with_flush("OUT", &opt_parallel);
+    write_to_stdout_and_log_with_flush("OUT", &opt_parallel);
 
     let opt_deterministic = format!("option name Deterministic type check default {}", get_deterministic());
-    writeln!(stdout, "{}", opt_deterministic)?;
-    write_to_file_with_flush("OUT", &opt_deterministic);
+    write_to_stdout_and_log_with_flush("OUT", &opt_deterministic);
 
     let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
-    writeln!(stdout, "{}", opt_searchmode)?;
-    write_to_file_with_flush("OUT", &opt_searchmode);
+    write_to_stdout_and_log_with_flush("OUT", &opt_searchmode);
 
     let m3 = "uciok".to_string();
-    writeln!(stdout, "{}", m3)?;
-    write_to_file_with_flush("OUT", &m3);
-    stdout.flush()?;
-    Ok(())
+    write_to_stdout_and_log_with_flush("OUT", &m3)
 }
 
 fn handle_position(engine: &mut Chess, args: &str) {
@@ -500,7 +493,13 @@ fn get_log_filename() -> String {
     }
 }
 
-fn write_to_file_with_flush(direction: &str, text: &str) {
+fn write_to_stdout_and_log_with_flush(direction: &str, text: &str) {
+    writeln!(io::stdout(), "{}", text).expect("should have written to stdout");
+    io::stdout().flush().expect("should have flushed stdout");
+    log_with_flush(direction, text);
+}
+
+fn log_with_flush(direction: &str, text: &str) {
     let now = Local::now().format("%Y-%m-%d %H:%M:%S");
     if let Some(mutex) = LOG.get() {
         if let Ok(mut log) = mutex.lock() {
