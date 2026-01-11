@@ -14,7 +14,7 @@ Start the engine 'rusty-chess' and try the 'help' command for a list of commands
 (When used as an UCI engine by a chess GUI, the GUI will send the 'uci' command to the engine)
 
 This engine works with Arena, Cute Chess, En-Croissant, Hiarcs Chess, and other UCI-compatible Chess GUIs.
-The engine logs to 'uci.log' in the current directory.
+The engine logs to 'rokade-ai-chess.#####.log' in the current directory.
 
 Highlights
 - Written in Rust, with a modular layout (board, move generation, search, parsing, UCI/CLI, etc.)

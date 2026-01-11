@@ -9,8 +9,10 @@ fn main() {
     let mut counter_path = PathBuf::from(manifest_dir);
     counter_path.push(".build_number");
 
-    // Ensure subsequent builds rerun this script when the file changes
-    println!("cargo:rerun-if-changed={}", counter_path.display());
+    // Ensure subsequent builds rerun this script only when source files change
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=Cargo.toml");
 
     // Read current counter (if present)
     let mut current: u64 = 0;

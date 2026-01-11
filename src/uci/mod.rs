@@ -1,9 +1,13 @@
-use std::io::{self, BufRead, Error, Stdout, Write};
-use std::sync::Arc;
+use std::io::{self, BufRead, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::process::exit;
+use std::thread;
+use chrono::Local;
 use crate::Chess;
-use crate::cli::BUILD_NUMBER;
+use crate::cli::{BUILD_NUMBER, VERSION};
 use crate::piece::as_move_str;
 use crate::search::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
 use crate::search::{
@@ -22,28 +26,33 @@ use crate::search::uci_feedback::set_info_callback;
 // - position [startpos|fen <fen>] [moves <move1> <move2> ...]
 // - go depth N
 // - go wtime <time-in-ms> btime <time-in-ms> [ winc <time-in-ms> binc <time-in-ms>
-// - stop (no-op for instant Search)
+// - stop (stop current search)
 // - cli (switch back to CLI mode)
 // - quit
-// Notes:
-// - Promotions are assumed to be to a queen. Other promotion pieces are ignored for now.=
 
 const UCI_INFO_SCORE_DIVISOR: f32 = 8.0f32;
+
+static LOG: OnceLock<Mutex<File>> = OnceLock::new();
 
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    let mut log = OpenOptions::new()
+
+    let log_filename = get_log_filename();
+    let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("uci.log")?;
+        .open(log_filename)?;
 
-    let mut engine = Chess::new();
+    let _ = LOG.set(Mutex::new(log_file));
 
-    send_uci_response(&mut stdout, &mut log).expect("Failed to send UCI response");
+    let engine = Arc::new(Mutex::new(Chess::new()));
+    let searching = Arc::new(AtomicBool::new(false));
+
+    send_uci_response();
 
     // ensure starting position
-    let _ = engine.reset();
+    let _ = engine.lock().unwrap().reset();
 
     let mut input = String::new();
 
@@ -55,13 +64,13 @@ pub fn run_uci() -> io::Result<()> {
         }
         let line = input.trim();
         // log input
-        write_to_file_with_flush(&mut log, "IN ", line);
+        log_with_flush("IN ", line);
         if line.is_empty() {
             continue;
         }
 
         if line.to_ascii_lowercase() == "uci" {
-            send_uci_response(&mut stdout, &mut log).expect("Failed to send UCI response");
+            send_uci_response();
         }
 
         if line.to_ascii_lowercase().starts_with("setoption ") {
@@ -69,18 +78,18 @@ pub fn run_uci() -> io::Result<()> {
             let lower = line.to_ascii_lowercase();
             if lower.contains("name searchmode") {
                 if let Some(idx) = lower.find("value ") {
-                    let val = line[(idx+6)..].trim();
+                    let val = line[(idx + 6)..].trim();
                     let mode = match val.to_ascii_lowercase().as_str() {
                         "normal" => Some(SearchMode::Normal),
                         "test (slow)" => Some(SearchMode::Test),
                         _ => None,
                     };
-                    if let Some(m) = mode { engine.set_search_mode(m); }
+                    if let Some(m) = mode { engine.lock().unwrap().set_search_mode(m); }
                 }
             } else if lower.contains("name strength") {
                 if let Some(idx) = lower.find("value ") {
                     // value is one of: Strength Max, Strength 9..1
-                    let val = line[(idx+6)..].trim();
+                    let val = line[(idx + 6)..].trim();
                     let val_lower = val.to_ascii_lowercase();
                     let s = if val_lower == "strength max" {
                         1000usize
@@ -104,13 +113,13 @@ pub fn run_uci() -> io::Result<()> {
                         150usize
                     } else {
                         // Unknown value, ignore
-                        engine.get_playing_strength()
+                        engine.lock().unwrap().get_playing_strength()
                     };
-                    engine.set_playing_strength(s);
+                    engine.lock().unwrap().set_playing_strength(s);
                 }
             } else if lower.contains("name deterministic") {
                 if let Some(idx) = lower.find("value ") {
-                    let val = line[(idx+6)..].trim().to_ascii_lowercase();
+                    let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
                         set_deterministic(true);
                     } else if val == "false" {
@@ -119,7 +128,7 @@ pub fn run_uci() -> io::Result<()> {
                 }
             } else if lower.contains("name parallel search") {
                 if let Some(idx) = lower.find("value ") {
-                    let val = line[(idx+6)..].trim().to_ascii_lowercase();
+                    let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
                         set_parallel_search(true);
                     } else if val == "false" {
@@ -131,27 +140,38 @@ pub fn run_uci() -> io::Result<()> {
         }
         if line == "isready" {
             let m = "readyok".to_string();
-            writeln!(stdout, "{}", m)?;
-            write_to_file_with_flush(&mut log, "OUT", &m);
+            write_to_stdout_and_log_with_flush("OUT", &m);
             stdout.flush()?;
             continue;
         }
         if line == "ucinewgame" {
-            let _ = engine.reset();
+            let _ = engine.lock().unwrap().reset();
             continue;
         }
-        if line.starts_with("debug_board") {
+        if line.eq_ignore_ascii_case("board") {
             //display board
-            let history = engine.get_history().clone();
-            println!("{}", engine.board().get_board_display_string(Some(&history)));
-            let _ = writeln!(stdout, "{}", engine.to_fen());
+            let mut eng = engine.lock().unwrap();
+            let history = eng.get_history().clone();
+            println!("{}", eng.board().get_board_display_string(Some(&history)));
+            continue;
+
+        }
+        if line.eq_ignore_ascii_case("fen") {
+            let _ = writeln!(stdout, "{}", engine.lock().unwrap().to_fen());
+            continue;
         }
         if line.starts_with("position ") {
-            handle_position(&mut engine, line.strip_prefix("position ").unwrap());
+            handle_position(&mut engine.lock().unwrap(), line.strip_prefix("position ").unwrap());
             continue;
         }
         if line.starts_with("go ") || line == "go" {
-            let white_is_active = engine.active_color_is_white();
+            if searching.load(Ordering::SeqCst) {
+                write_to_stdout_and_log_with_flush("OUT", "info string already searching\n");
+                continue;
+            }
+            searching.store(true, Ordering::SeqCst);
+
+            let white_is_active = engine.lock().unwrap().active_color_is_white();
 
             let mut movetime: usize = 0; // default unlimited time per move unless constrained below
 
@@ -258,49 +278,55 @@ pub fn run_uci() -> io::Result<()> {
                 if budget > 0 { movetime = budget; }
             }
 
-            // Measure elapsed time and reset telemetry for info lines
-            let start = std::time::Instant::now();
-            reset_search_telemetry();
-            // Install a temporary info callback so we can emit progress while searching.
-            // The callback prints UCI-compliant info lines with the current best root move scores.
-            let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>, hashfull: u16| {
-                let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
-                for (f, t) in pv_moves {
-                    pv_parts.push(as_move_str(f, t));
-                }
-                let pv = pv_parts.join(" ");
-                // Compute current nodes and nps
+            let engine_inner = Arc::clone(&engine);
+            let searching_inner = Arc::clone(&searching);
+            let line_copy = line.to_string();
+            thread::spawn(move || {
+                // Measure elapsed time and reset telemetry for info lines
+                let start = std::time::Instant::now();
+                reset_search_telemetry();
+                // Install a temporary info callback so we can emit progress while searching.
+                // The callback prints UCI-compliant info lines with the current best root move scores.
+                let white_is_active_inner = white_is_active;
+                let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>, hashfull: u16| {
+                    let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
+                    for (f, t) in pv_moves {
+                        pv_parts.push(as_move_str(f, t));
+                    }
+                    let pv = pv_parts.join(" ");
+                    // Compute current nodes and nps
+                    let nodes = get_nodes();
+                    let ms = start.elapsed().as_millis().max(1);
+                    let nps = (nodes as u128 * 1000u128) / ms;
+                    // Print directly to stdout; ignore logging for async updates
+                    let score_cp_from_white_perspective = if white_is_active_inner { score_cp } else { -score_cp };
+                    let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, nodes, nps, hashfull, pv);
+                    write_to_stdout_and_log_with_flush("OUT", &log_text);
+                });
+                set_info_callback(Some(info_cb));
+
+                // Apply a time budget for this Search
+                let (best_move_str, info_opt) = {
+                    let mut engine_locked = engine_inner.lock().unwrap();
+                    go_bestmove_with_info(&mut engine_locked, &line_copy, movetime)
+                };
+                // Clear the callback after Search completes
+                set_info_callback(None);
+                let elapsed_ms = start.elapsed().as_millis();
                 let nodes = get_nodes();
-                let ms = start.elapsed().as_millis().max(1);
-                let nps = (nodes as u128 * 1000u128) / ms;
-                // Print directly to stdout; ignore logging for async updates
-                let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
-                let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, nodes, nps, hashfull, pv);
-                let _ = writeln!(io::stdout(), "{}", log_text);
-                //write_to_file_with_flush(&mut log, "{}", &log_text);
+                let nps = if elapsed_ms == 0 { 0 } else { ((nodes as u128 * 1000u128) / elapsed_ms) as u128 };
+
+                // If we have extra info from the Search, emit a UCI info line
+                if let Some((score_cp, depth_used)) = info_opt {
+                    let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
+                    let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
+                    write_to_stdout_and_log_with_flush("OUT", &log_text);
+                }
+
+                let out = format!("bestmove {}", best_move_str);
+                write_to_stdout_and_log_with_flush("OUT", &out);
+                searching_inner.store(false, Ordering::SeqCst);
             });
-            set_info_callback(Some(info_cb));
-
-            // Apply a time budget for this Search
-            let (best_move_str, info_opt) = go_bestmove_with_info(&mut engine, line, movetime);
-            // Clear the callback after Search completes
-            set_info_callback(None);
-            let elapsed_ms = start.elapsed().as_millis();
-            let nodes = get_nodes();
-            let nps = if elapsed_ms == 0 { 0 } else { ((nodes as u128 * 1000u128) / elapsed_ms) as u128 };
-
-            // If we have extra info from the Search, emit a UCI info line
-            if let Some((score_cp, depth_used)) = info_opt {
-                let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
-                let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
-                writeln!(stdout, "{}", log_text)?;
-                write_to_file_with_flush(&mut log, "{}", &log_text);
-            }
-
-            let out = format!("bestmove {}", best_move_str);
-            writeln!(stdout, "{}", out)?;
-            write_to_file_with_flush(&mut log, "OUT", &out);
-            stdout.flush()?;
             continue;
         }
         if line == "stop" {
@@ -308,7 +334,7 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line == "quit" {
-            exit(1);
+            exit(0);
         }
 
         if line == "cli" {
@@ -319,38 +345,28 @@ pub fn run_uci() -> io::Result<()> {
     Ok(())
 }
 
-fn send_uci_response(stdout: &mut Stdout, mut log: &mut File) -> Result<(), Error> {
-    writeln!(stdout)?;
-    let m1 = format!("id name Rokade-AI v0.1.0 (build#{})", BUILD_NUMBER).to_string();
-    writeln!(stdout, "{}", m1)?;
-    write_to_file_with_flush(&mut log, "OUT", &m1);
+fn send_uci_response() {
+    let m1 = format!("id name Rokade-AI v{} (build#{})", VERSION, BUILD_NUMBER).to_string();
+    write_to_stdout_and_log_with_flush("OUT", &m1);
 
     let m2 = "id author Erik van Barneveld".to_string();
-    writeln!(stdout, "{}", m2)?;
-    write_to_file_with_flush(&mut log, "OUT", &m2);
+    write_to_stdout_and_log_with_flush("OUT", &m2);
 
     // Strength levels as combo
     let opt_strenghth = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
-    writeln!(stdout, "{}", opt_strenghth)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_strenghth);
+    write_to_stdout_and_log_with_flush("OUT", &opt_strenghth);
 
     let opt_parallel = format!("option name parallel search type check default {}", is_parallel_search());
-    writeln!(stdout, "{}", opt_parallel)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_parallel);
+    write_to_stdout_and_log_with_flush("OUT", &opt_parallel);
 
     let opt_deterministic = format!("option name Deterministic type check default {}", get_deterministic());
-    writeln!(stdout, "{}", opt_deterministic)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_deterministic);
+    write_to_stdout_and_log_with_flush("OUT", &opt_deterministic);
 
     let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
-    writeln!(stdout, "{}", opt_searchmode)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_searchmode);
+    write_to_stdout_and_log_with_flush("OUT", &opt_searchmode);
 
     let m3 = "uciok".to_string();
-    writeln!(stdout, "{}", m3)?;
-    write_to_file_with_flush(&mut log, "OUT", &m3);
-    stdout.flush()?;
-    Ok(())
+    write_to_stdout_and_log_with_flush("OUT", &m3)
 }
 
 fn handle_position(engine: &mut Chess, args: &str) {
@@ -464,7 +480,31 @@ fn parse_depth(s: &str) -> Option<usize> {
     None
 }
 
-fn write_to_file_with_flush(log: &mut File, direction: &str, text: &str) {
-    let _ = writeln!(log, "[{}] {}", direction, text);
-    let _ = log.flush();
+fn get_log_filename() -> String {
+    let base_name = "rokade-ai-chess";
+
+    let mut i = 1;
+    loop {
+        let candidate = format!("{}.{}.log", base_name, i);
+        if !Path::new(&candidate).exists() {
+            return candidate;
+        }
+        i += 1;
+    }
+}
+
+fn write_to_stdout_and_log_with_flush(direction: &str, text: &str) {
+    writeln!(io::stdout(), "{}", text).expect("should have written to stdout");
+    io::stdout().flush().expect("should have flushed stdout");
+    log_with_flush(direction, text);
+}
+
+fn log_with_flush(direction: &str, text: &str) {
+    let now = Local::now().format("%Y-%m-%d %H:%M:%S");
+    if let Some(mutex) = LOG.get() {
+        if let Ok(mut log) = mutex.lock() {
+            let _ = writeln!(log, "[{}] [{:5}] [{}] {}", now, std::process::id(), direction, text);
+            let _ = log.flush();
+        }
+    }
 }

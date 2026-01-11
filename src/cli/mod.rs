@@ -26,6 +26,8 @@ pub const BUILD_NUMBER: &str = match option_env!("BUILD_NUMBER") {
     None => "0",
 };
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub fn run_cli() {
     let mut mode = GameMode::PlayerVsPlayer;
     let mut white_bot_movetime: usize = 5;
@@ -35,7 +37,7 @@ pub fn run_cli() {
     let mut white_bot_strength: usize = DEFAULT_STRENGTH;
     let mut black_bot_strength: usize = DEFAULT_STRENGTH;
 
-    println!("Welcome to Rokade-AI (build#{}). Type 'help' for help, enter move, or 'quit' to quit.\n", BUILD_NUMBER);
+    println!("Welcome to Rokade-AI v{} (build#{}). Type 'help' for help, enter move, or 'quit' to quit.\n", VERSION, BUILD_NUMBER);
 
     let mut game = Chess::new();
 
