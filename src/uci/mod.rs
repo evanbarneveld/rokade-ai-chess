@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Error, Stdout, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::fs::{File, OpenOptions};
 use std::process::exit;
 use chrono::Local;
@@ -31,18 +31,22 @@ use crate::search::uci_feedback::set_info_callback;
 
 const UCI_INFO_SCORE_DIVISOR: f32 = 8.0f32;
 
+static LOG: OnceLock<Mutex<File>> = OnceLock::new();
+
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
-    let mut log = OpenOptions::new()
+    let log_file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(format!("rokade-ai-chess.{}.log", std::process::id()))?;
 
+    let _ = LOG.set(Mutex::new(log_file));
+
     let mut engine = Chess::new();
 
-    send_uci_response(&mut stdout, &mut log).expect("Failed to send UCI response");
+    send_uci_response(&mut stdout).expect("Failed to send UCI response");
 
     // ensure starting position
     let _ = engine.reset();
@@ -57,13 +61,13 @@ pub fn run_uci() -> io::Result<()> {
         }
         let line = input.trim();
         // log input
-        write_to_file_with_flush(&mut log, "IN ", line);
+        write_to_file_with_flush("IN ", line);
         if line.is_empty() {
             continue;
         }
 
         if line.to_ascii_lowercase() == "uci" {
-            send_uci_response(&mut stdout, &mut log).expect("Failed to send UCI response");
+            send_uci_response(&mut stdout).expect("Failed to send UCI response");
         }
 
         if line.to_ascii_lowercase().starts_with("setoption ") {
@@ -71,7 +75,7 @@ pub fn run_uci() -> io::Result<()> {
             let lower = line.to_ascii_lowercase();
             if lower.contains("name searchmode") {
                 if let Some(idx) = lower.find("value ") {
-                    let val = line[(idx+6)..].trim();
+                    let val = line[(idx + 6)..].trim();
                     let mode = match val.to_ascii_lowercase().as_str() {
                         "normal" => Some(SearchMode::Normal),
                         "test (slow)" => Some(SearchMode::Test),
@@ -82,7 +86,7 @@ pub fn run_uci() -> io::Result<()> {
             } else if lower.contains("name strength") {
                 if let Some(idx) = lower.find("value ") {
                     // value is one of: Strength Max, Strength 9..1
-                    let val = line[(idx+6)..].trim();
+                    let val = line[(idx + 6)..].trim();
                     let val_lower = val.to_ascii_lowercase();
                     let s = if val_lower == "strength max" {
                         1000usize
@@ -112,7 +116,7 @@ pub fn run_uci() -> io::Result<()> {
                 }
             } else if lower.contains("name deterministic") {
                 if let Some(idx) = lower.find("value ") {
-                    let val = line[(idx+6)..].trim().to_ascii_lowercase();
+                    let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
                         set_deterministic(true);
                     } else if val == "false" {
@@ -121,7 +125,7 @@ pub fn run_uci() -> io::Result<()> {
                 }
             } else if lower.contains("name parallel search") {
                 if let Some(idx) = lower.find("value ") {
-                    let val = line[(idx+6)..].trim().to_ascii_lowercase();
+                    let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
                         set_parallel_search(true);
                     } else if val == "false" {
@@ -134,7 +138,7 @@ pub fn run_uci() -> io::Result<()> {
         if line == "isready" {
             let m = "readyok".to_string();
             writeln!(stdout, "{}", m)?;
-            write_to_file_with_flush(&mut log, "OUT", &m);
+            write_to_file_with_flush("OUT", &m);
             stdout.flush()?;
             continue;
         }
@@ -142,11 +146,16 @@ pub fn run_uci() -> io::Result<()> {
             let _ = engine.reset();
             continue;
         }
-        if line.starts_with("debug_board") {
+        if line.eq_ignore_ascii_case("board") {
             //display board
             let history = engine.get_history().clone();
             println!("{}", engine.board().get_board_display_string(Some(&history)));
+            continue;
+
+        }
+        if line.eq_ignore_ascii_case("fen") {
             let _ = writeln!(stdout, "{}", engine.to_fen());
+            continue;
         }
         if line.starts_with("position ") {
             handle_position(&mut engine, line.strip_prefix("position ").unwrap());
@@ -279,7 +288,7 @@ pub fn run_uci() -> io::Result<()> {
                 let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
                 let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, nodes, nps, hashfull, pv);
                 let _ = writeln!(io::stdout(), "{}", log_text);
-                //write_to_file_with_flush(&mut log, "{}", &log_text);
+                write_to_file_with_flush("OUT", &log_text);
             });
             set_info_callback(Some(info_cb));
 
@@ -296,12 +305,12 @@ pub fn run_uci() -> io::Result<()> {
                 let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
                 let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
                 writeln!(stdout, "{}", log_text)?;
-                write_to_file_with_flush(&mut log, "OUT", &log_text);
+                write_to_file_with_flush("OUT", &log_text);
             }
 
             let out = format!("bestmove {}", best_move_str);
             writeln!(stdout, "{}", out)?;
-            write_to_file_with_flush(&mut log, "OUT", &out);
+            write_to_file_with_flush("OUT", &out);
             stdout.flush()?;
             continue;
         }
@@ -321,36 +330,36 @@ pub fn run_uci() -> io::Result<()> {
     Ok(())
 }
 
-fn send_uci_response(stdout: &mut Stdout, mut log: &mut File) -> Result<(), Error> {
+fn send_uci_response(stdout: &mut Stdout) -> Result<(), Error> {
     writeln!(stdout)?;
     let m1 = format!("id name Rokade-AI v0.1.0 (build#{})", BUILD_NUMBER).to_string();
     writeln!(stdout, "{}", m1)?;
-    write_to_file_with_flush(&mut log, "OUT", &m1);
+    write_to_file_with_flush("OUT", &m1);
 
     let m2 = "id author Erik van Barneveld".to_string();
     writeln!(stdout, "{}", m2)?;
-    write_to_file_with_flush(&mut log, "OUT", &m2);
+    write_to_file_with_flush("OUT", &m2);
 
     // Strength levels as combo
     let opt_strenghth = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
     writeln!(stdout, "{}", opt_strenghth)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_strenghth);
+    write_to_file_with_flush("OUT", &opt_strenghth);
 
     let opt_parallel = format!("option name parallel search type check default {}", is_parallel_search());
     writeln!(stdout, "{}", opt_parallel)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_parallel);
+    write_to_file_with_flush("OUT", &opt_parallel);
 
     let opt_deterministic = format!("option name Deterministic type check default {}", get_deterministic());
     writeln!(stdout, "{}", opt_deterministic)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_deterministic);
+    write_to_file_with_flush("OUT", &opt_deterministic);
 
     let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
     writeln!(stdout, "{}", opt_searchmode)?;
-    write_to_file_with_flush(&mut log, "OUT", &opt_searchmode);
+    write_to_file_with_flush("OUT", &opt_searchmode);
 
     let m3 = "uciok".to_string();
     writeln!(stdout, "{}", m3)?;
-    write_to_file_with_flush(&mut log, "OUT", &m3);
+    write_to_file_with_flush("OUT", &m3);
     stdout.flush()?;
     Ok(())
 }
@@ -466,8 +475,12 @@ fn parse_depth(s: &str) -> Option<usize> {
     None
 }
 
-fn write_to_file_with_flush(log: &mut File, direction: &str, text: &str) {
+fn write_to_file_with_flush(direction: &str, text: &str) {
     let now = Local::now().format("%Y-%m-%d %H:%M:%S");
-    let _ = writeln!(log, "[{}] [{}] {}", now, direction, text);
-    let _ = log.flush();
+    if let Some(mutex) = LOG.get() {
+        if let Ok(mut log) = mutex.lock() {
+            let _ = writeln!(log, "[{}] [{}] {}", now, direction, text);
+            let _ = log.flush();
+        }
+    }
 }
