@@ -7,7 +7,7 @@ use std::process::exit;
 use std::thread;
 use chrono::Local;
 use crate::Chess;
-use crate::cli::BUILD_NUMBER;
+use crate::cli::{BUILD_NUMBER, VERSION};
 use crate::piece::as_move_str;
 use crate::search::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
 use crate::search::{
@@ -334,7 +334,7 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line == "quit" {
-            exit(1);
+            exit(0);
         }
 
         if line == "cli" {
@@ -346,7 +346,7 @@ pub fn run_uci() -> io::Result<()> {
 }
 
 fn send_uci_response() {
-    let m1 = format!("id name Rokade-AI v0.1.0 (build#{})", BUILD_NUMBER).to_string();
+    let m1 = format!("id name Rokade-AI v{} (build#{})", VERSION, BUILD_NUMBER).to_string();
     write_to_stdout_and_log_with_flush("OUT", &m1);
 
     let m2 = "id author Erik van Barneveld".to_string();
