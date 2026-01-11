@@ -1,6 +1,7 @@
 use std::io::{self, BufRead, Error, Stdout, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::process::exit;
 use chrono::Local;
 use crate::Chess;
@@ -37,10 +38,11 @@ pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
+    let log_filename = get_log_filename();
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(format!("rokade-ai-chess.{}.log", std::process::id()))?;
+        .open(log_filename)?;
 
     let _ = LOG.set(Mutex::new(log_file));
 
@@ -475,11 +477,24 @@ fn parse_depth(s: &str) -> Option<usize> {
     None
 }
 
+fn get_log_filename() -> String {
+    let base_name = "rokade-ai-chess";
+
+    let mut i = 1;
+    loop {
+        let candidate = format!("{}.{}.log", base_name, i);
+        if !Path::new(&candidate).exists() {
+            return candidate;
+        }
+        i += 1;
+    }
+}
+
 fn write_to_file_with_flush(direction: &str, text: &str) {
     let now = Local::now().format("%Y-%m-%d %H:%M:%S");
     if let Some(mutex) = LOG.get() {
         if let Ok(mut log) = mutex.lock() {
-            let _ = writeln!(log, "[{}] [{}] {}", now, direction, text);
+            let _ = writeln!(log, "[{}] [{:5}] [{}] {}", now, std::process::id(), direction, text);
             let _ = log.flush();
         }
     }
