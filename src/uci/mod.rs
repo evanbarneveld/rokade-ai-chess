@@ -2,6 +2,7 @@ use std::io::{self, BufRead, Error, Stdout, Write};
 use std::sync::Arc;
 use std::fs::{File, OpenOptions};
 use std::process::exit;
+use chrono::Local;
 use crate::Chess;
 use crate::cli::BUILD_NUMBER;
 use crate::piece::as_move_str;
@@ -33,10 +34,11 @@ const UCI_INFO_SCORE_DIVISOR: f32 = 8.0f32;
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+
     let mut log = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("uci.log")?;
+        .open(format!("rokade-ai-chess.{}.log", std::process::id()))?;
 
     let mut engine = Chess::new();
 
@@ -294,7 +296,7 @@ pub fn run_uci() -> io::Result<()> {
                 let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
                 let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
                 writeln!(stdout, "{}", log_text)?;
-                write_to_file_with_flush(&mut log, "{}", &log_text);
+                write_to_file_with_flush(&mut log, "OUT", &log_text);
             }
 
             let out = format!("bestmove {}", best_move_str);
@@ -465,6 +467,7 @@ fn parse_depth(s: &str) -> Option<usize> {
 }
 
 fn write_to_file_with_flush(log: &mut File, direction: &str, text: &str) {
-    let _ = writeln!(log, "[{}] {}", direction, text);
+    let now = Local::now().format("%Y-%m-%d %H:%M:%S");
+    let _ = writeln!(log, "[{}] [{}] {}", now, direction, text);
     let _ = log.flush();
 }
