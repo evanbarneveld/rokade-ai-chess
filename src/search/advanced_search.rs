@@ -3,7 +3,7 @@ use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
 use crate::search::locking::get_tt_mutex;
-use crate::search::playing_strength::{select_move_based_using_strength, PLAYING_STRENGTH_MAX};
+use crate::search::playing_strength::{select_move_based_using_strength_promo, PLAYING_STRENGTH_MAX};
 use crate::search::root_moves::{
     adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves,
 };
@@ -68,7 +68,7 @@ impl Search for AdvancedSearch {
         history: &History,
         search_depth: usize,
         playing_strength: usize,
-    ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
+    ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
         find_best_move(
             game_state,
             history,
@@ -87,7 +87,7 @@ pub fn find_best_move(
     history: &History,
     search_depth: usize,
     playing_strength: usize,
-) -> Option<((usize, usize), (usize, usize), i32, usize)> {
+) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     init_rayon_pool_if_needed();
 
     // Persistent Transposition Table across searches: initialize once and reuse.
@@ -111,7 +111,7 @@ pub fn find_best_move(
     if ORDER_BOOK_ENABLED {
         if game_state.full_move_number() <= 8 {
             if let Some((bf, bt)) = book_pick(game_state) {
-                return Some((bf, bt, 0, 0));
+                return Some((bf, bt, None, 0, 0));
             }
         }
     }
@@ -129,27 +129,15 @@ pub fn find_best_move(
 
     let effective_depth = search_depth;
 
-    // Root-level hard 3-fold avoidance: filter out any root move that would create
-    // a third occurrence of the same position (per truncated FEN used in History).
-    // If filtering removes all moves (e.g., only repetition saves a loss), fall back to all moves.
-    // Map generated triples to pairs for existing root pipeline (duplicates preserved)
-    let moves: Vec<((usize, usize), (usize, usize))> = gen_moves
-        .iter()
-        .map(|(f, t, _)| (*f, *t))
-        .collect();
+    let root_moves: Vec<((usize, usize), (usize, usize), Option<char>)> = {
+        let mut v = Vec::with_capacity(gen_moves.len());
 
-    let root_moves: Vec<((usize, usize), (usize, usize))> = {
-        let mut v = Vec::with_capacity(moves.len());
+        get_root_moves(game_state, history, board, active_color, &gen_moves, &mut v);
 
-        get_root_moves(game_state, history, board, active_color, &moves, &mut v);
-
-        // We use all legal moves as root moves.
-        // Hard filters (like SEE-based pruning) are disabled at root to avoid
-        // missing critical saving moves like draws by repetition.
         let mut base = v;
 
         // Heuristic ordering at root: prioritize checking moves, then captures by MVV, then others.
-        base.sort_by(|&(f1,t1), &(f2,t2)| {
+        base.sort_by(|&(f1,t1,p1_promo), &(f2,t2,p2_promo)| {
             use crate::piece::pieces::{piece_value_cp};
             let mut b1 = board.clone();
             let mut b2 = board.clone();
@@ -157,12 +145,29 @@ pub fn find_best_move(
             let p2 = board.get(f2.0, f2.1);
             let cap1 = board.get(t1.0, t1.1);
             let cap2 = board.get(t2.0, t2.1);
-            if let Some(mp) = p1 { b1.set(t1.0, t1.1, Some(mp)); b1.set(f1.0, f1.1, None); }
-            if let Some(mp) = p2 { b2.set(t2.0, t2.1, Some(mp)); b2.set(f2.0, f2.1, None); }
+            if let Some(mut mp1) = p1 {
+                if mp1.get_type() == PieceType::Pawn && p1_promo.is_some() {
+                    mp1 = Piece::new(PieceType::Queen, mp1.get_color());
+                }
+                b1.set(t1.0, t1.1, Some(mp1));
+                b1.set(f1.0, f1.1, None);
+            }
+            if let Some(mut mp2) = p2 {
+                if mp2.get_type() == PieceType::Pawn && p2_promo.is_some() {
+                    mp2 = Piece::new(PieceType::Queen, mp2.get_color());
+                }
+                b2.set(t2.0, t2.1, Some(mp2));
+                b2.set(f2.0, f2.1, None);
+            }
             let check1 = if p1.is_some() { b1.is_side_in_check(opposite_color(active_color)) } else { false };
             let check2 = if p2.is_some() { b2.is_side_in_check(opposite_color(active_color)) } else { false };
-            let key1 = (check1 as i32) * 10000 + cap1.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
-            let key2 = (check2 as i32) * 10000 + cap2.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
+            
+            let mut key1 = (check1 as i32) * 10000 + cap1.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
+            let mut key2 = (check2 as i32) * 10000 + cap2.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
+            
+            if p1_promo.is_some() { key1 += 900; }
+            if p2_promo.is_some() { key2 += 900; }
+
             key2.cmp(&key1) // descending
         });
         base
@@ -173,7 +178,7 @@ pub fn find_best_move(
     let mut tt = tt_mutex.lock().unwrap();
     let base_hmc = game_state.half_move_clock();
     let mut _last_score: i32 = 0;
-    let mut chosen: Option<((usize, usize), (usize, usize), i32, usize)> = None;
+    let mut chosen: Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> = None;
     let mut window: i32 = ASP_WINDOW_INIT_CP; // cp
 
     //eprintln!("[root] starting ID; eff_depth={} root_moves={} window={}",
@@ -185,7 +190,7 @@ pub fn find_best_move(
             //eprintln!("[root] depth_now={} (pre-asp) last_score={} window={}", depth_now, last_score, window);
 
             tt.next_age();
-            let ((bf, bt), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
+            let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
                 probe_with_aspiration(
                     &board,
                     active_color,
@@ -200,7 +205,6 @@ pub fn find_best_move(
                     history,
                 )
             } else {
-                // Full-width single probe without aspiration
                 evaluate_root_for_bounds(
                     &board,
                     active_color,
@@ -222,16 +226,17 @@ pub fn find_best_move(
 
             _last_score = best_raw;
             // Emit PV/info for this iteration, including TT hashfull permille
-            let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
             let hf = tt.hashfull_permille();
-            emit_info(bf, bt, best_adj, depth_now, pv, hf);
-            chosen = Some((bf, bt, best_adj, depth_now));
+            let pv = build_pv_for_root(board, active_color, bf, bt, bpromo, &tt, depth_now);
+            let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
+            emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
+            chosen = Some((bf, bt, bpromo, best_adj, depth_now));
         }
     } else {
         // Single-depth Search without iterative deepening
         let depth_now = effective_depth;
         tt.next_age();
-        let ((bf, bt), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
+        let ((bf, bt, bpromo), best_adj, _best_raw) = if ASPIRATION_WINDOWS_ENABLED {
             probe_with_aspiration(
                 &board,
                 active_color,
@@ -260,27 +265,27 @@ pub fn find_best_move(
                 history,
             )
         };
-        _last_score = best_raw;
-        let pv = build_pv_for_root(board, active_color, bf, bt, &tt, depth_now);
         let hf = tt.hashfull_permille();
+        let pv = build_pv_for_root(board, active_color, bf, bt, bpromo, &tt, depth_now);
         // Always report UCI scores from White's perspective
         let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
-        emit_info(bf, bt, white_persp_score, depth_now, pv, hf);
-        chosen = Some((bf, bt, best_adj, depth_now));
+        emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
+        chosen = Some((bf, bt, bpromo, best_adj, depth_now));
     }
 
-    // Final selection based on playing_strength from the last iteration
-    if let Some((bf, bt, sc, used_depth)) = chosen {
+            // Final selection based on playing_strength from the last iteration
+    if let Some((_bf, _bt, _bpromo, sc, used_depth)) = chosen {
         if STRENGTH_MODE_ENABLED && playing_strength < MAX_PLAYING_STRENGTH {
             // Re-evaluate top K moves for stochastic selection at final depth
-            let mut scored: Vec<((usize, usize), (usize, usize), i32)> = Vec::new();
-            for &(from, to) in &root_moves {
+            let mut scored_with_promo: Vec<((usize, usize), (usize, usize), Option<char>, i32)> = Vec::new();
+            for &(from, to, promo) in &root_moves {
                 let (sr, is_capture, moved_is_pawn) = evaluate_after_root_move(
                     &board,
                     active_color,
                     from,
                     to,
-                    effective_depth,
+                    promo,
+                    used_depth,
                     MIN_EVAL_VALUE + 1,
                     MAX_EVAL_VALUE - 1,
                     &mut tt,
@@ -298,30 +303,30 @@ pub fn find_best_move(
                     moved_is_pawn,
                     ps,
                 );
-                scored.push((from, to, adj));
+                scored_with_promo.push((from, to, promo, adj));
             }
 
-            sort_moves_on_score_asc(&mut scored);
+            // We need a sorting function for the new tuple type
+            scored_with_promo.sort_by_key(|m| m.3);
             if active_color == Color::White {
-                scored.reverse();
+                scored_with_promo.reverse();
             }
 
-            if let Some((from, to)) = select_move_based_using_strength(&scored, playing_strength) {
-                let sc = scored
+            if let Some((from, to, promo_opt)) = select_move_based_using_strength_promo(&scored_with_promo, playing_strength) {
+                let sc_final = scored_with_promo
                     .iter()
-                    .find(|e| e.0 == from && e.1 == to)
-                    .map(|e| e.2)
+                    .find(|e| e.0 == from && e.1 == to && e.2 == promo_opt)
+                    .map(|e| e.3)
                     .unwrap_or(sc);
-                Some((from, to, sc, used_depth))
-            } else {
-                Some((bf, bt, sc, used_depth))
+                chosen = Some((from, to, promo_opt, sc_final, used_depth));
             }
-        } else {
-            Some((bf, bt, sc, used_depth))
         }
-    } else {
-        None
     }
+
+    if let Some((bf, bt, _bpromo, sc, used_depth)) = chosen {
+        return Some((bf, bt, _bpromo, sc, used_depth));
+    }
+    None
 }
 
 /// Debug helper: rank root moves for the current position, returning (SAN, adjusted_score, raw_score)
@@ -336,23 +341,25 @@ pub fn debug_rank_root_moves(
     let active_color = game_state.active_color();
     let base_hmc = game_state.half_move_clock();
     let gen_moves = find_all_valid_moves(game_state);
-    let moves: Vec<((usize, usize), (usize, usize))> = gen_moves.iter().map(|(f,t,_)| (*f,*t)).collect();
-
-    let mut v = Vec::with_capacity(moves.len());
-    get_root_moves(game_state, history, board, active_color, &moves, &mut v);
-    // Disabling hard root filter to ensure all legal moves are considered,
-    // especially those that lead to draws by repetition which might otherwise be filtered.
+    let mut v = Vec::with_capacity(gen_moves.len());
+    get_root_moves(game_state, history, board, active_color, &gen_moves, &mut v);
     let root = v;
 
     // No TT needed for a one-shot evaluation per move here
     let mut tt = get_tt_mutex().lock().unwrap();
+    let ps = if playing_strength == 0 {
+        1
+    } else {
+        playing_strength.min(PLAYING_STRENGTH_MAX)
+    } as i32;
     let mut out: Vec<(String,i32,i32)> = Vec::with_capacity(root.len());
-    for (from, to) in root {
+    for (from, to, promo) in root {
         let (raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
             board,
             active_color,
             from,
             to,
+            promo,
             depth.max(1),
             MIN_EVAL_VALUE + 1,
             MAX_EVAL_VALUE - 1,
@@ -369,7 +376,7 @@ pub fn debug_rank_root_moves(
             raw,
             is_capture,
             moved_is_pawn,
-            playing_strength as i32,
+            ps,
         );
         adj = apply_repetition_avoidance_bias(
             adj,
@@ -379,9 +386,10 @@ pub fn debug_rank_root_moves(
             active_color,
             from,
             to,
+            promo,
             raw,
         );
-        let san = convert_move_to_san(*game_state, Some((from,to))).unwrap_or_else(|| {
+        let san = convert_move_to_san(*game_state, Some((from, to, promo))).unwrap_or_else(|| {
             format!("{}{}", crate::piece::as_square_str(from), crate::piece::as_square_str(to))
         });
         out.push((san, adj, raw));
@@ -576,8 +584,8 @@ pub fn _dump_all_valid_moves(
     }
     if to_san {
         let mut parts: Vec<String> = Vec::with_capacity(moves.len());
-        for (from, to, _promo) in moves {
-            if let Some(s) = convert_move_to_san(*game_state, Some((from, to))) {
+        for (from, to, promo) in moves {
+            if let Some(s) = convert_move_to_san(*game_state, Some((from, to, promo))) {
                 parts.push(s);
             } else {
                 // fallback to coord if SAN conversion fails
@@ -587,7 +595,7 @@ pub fn _dump_all_valid_moves(
                     (b'1' + from.0 as u8) as char,
                     (b'a' + to.1 as u8) as char,
                     (b'1' + to.0 as u8) as char,
-                    _promo.unwrap_or('\0')
+                    promo.unwrap_or('\0')
                 );
                 parts.push(s.trim_end_matches('\0').to_string());
             }
@@ -621,23 +629,16 @@ pub fn _dump_all_valid_moves(
     }
 }
 
-// Sorts the move table by score in ascending order, in-place.
-fn sort_moves_on_score_asc(
-    move_table: &mut Vec<((usize, usize), (usize, usize), i32)>,
-) {
-    move_table.sort_by_key(|m| m.2);
-}
-
 #[inline]
 fn reorder_with_tt_hint(
-    ordered: &mut Vec<((usize, usize), (usize, usize))>,
+    ordered: &mut Vec<((usize, usize), (usize, usize), Option<char>)>,
     tt: &TranspositionTable,
     board: &Board,
     side: Color,
 ) {
     if let Some(entry) = tt.probe(compute_zobrist(board, side)) {
         let bm = decode_move(entry.best_from, entry.best_to);
-        if let Some(pos) = ordered.iter().position(|m| *m == bm) {
+        if let Some(pos) = ordered.iter().position(|&(f, t, _)| (f, t) == bm) {
             let first = ordered.remove(pos);
             ordered.insert(0, first);
         }
@@ -662,7 +663,7 @@ fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32) -
 fn evaluate_root_for_bounds(
     board: &Board,
     active_color: Color,
-    root_moves: &Vec<((usize, usize), (usize, usize))>,
+    root_moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
     depth_now: usize,
     a: i32,
     b: i32,
@@ -671,8 +672,8 @@ fn evaluate_root_for_bounds(
     ps: i32,
     game_state: &GameState,
     history: &History,
-) -> (((usize, usize), (usize, usize)), i32, i32) {
-    let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
+) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
+    let mut best_from_to_promo: Option<((usize, usize), (usize, usize), Option<char>)> = None;
     let mut best_score_raw = if active_color == Color::White {
         MIN_EVAL_VALUE
     } else {
@@ -681,7 +682,7 @@ fn evaluate_root_for_bounds(
     let mut best_adjusted = best_score_raw;
 
     // Order: if TT has a move at root, try to place it first, then apply light opening-aware tie-breakers
-    let mut ordered: Vec<((usize, usize), (usize, usize))> = root_moves.iter().copied().collect();
+    let mut ordered: Vec<((usize, usize), (usize, usize), Option<char>)> = root_moves.iter().copied().collect();
     reorder_with_tt_hint(&mut ordered, tt, board, active_color);
 
     // Opening-aware tiny reordering: demote quiet queen moves; promote minor development and castling
@@ -696,7 +697,7 @@ fn evaluate_root_for_bounds(
         if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
     } as i32;
     if depth_now >= 1 {
-        ordered.sort_by(|&(f1,t1), &(f2,t2)| {
+        ordered.sort_by(|&(f1,t1, _), &(f2,t2, _)| {
             let score1 = root_move_order_bias(board, active_color, f1, t1, phase_for_scale);
             let score2 = root_move_order_bias(board, active_color, f2, t2, phase_for_scale);
             score2.cmp(&score1) // higher bias first
@@ -713,13 +714,14 @@ fn evaluate_root_for_bounds(
     if enable_parallel {
         //eprintln!("Parallel root Search enabled");
         // 1) Search the first (best-ordered) move serially to establish PV and bounds
-        let &(pv_from, pv_to) = ordered.first().unwrap();
+        let &(pv_from, pv_to, pv_promo) = ordered.first().unwrap();
         {
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
                 board,
                 active_color,
                 pv_from,
                 pv_to,
+                pv_promo,
                 depth_now,
                 a,
                 b,
@@ -729,7 +731,7 @@ fn evaluate_root_for_bounds(
             );
 
             if score_raw == SEARCH_ABORTED {
-                return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+                return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
             }
 
             let adjusted = adjusted_root_eval_for_move(
@@ -744,7 +746,7 @@ fn evaluate_root_for_bounds(
                 ps,
             );
 
-            best_from_to = Some((pv_from, pv_to));
+            best_from_to_promo = Some((pv_from, pv_to, pv_promo));
             best_adjusted = adjusted;
             best_score_raw = score_raw;
         }
@@ -757,7 +759,7 @@ fn evaluate_root_for_bounds(
         let side = active_color;
         let results = ordered[1..]
             .par_iter()
-            .map(|&(from, to)| {
+            .map(|&(from, to, promo)| {
                 // local TT per task
                 let mut local_tt = TranspositionTable::new_with_default_size();
                 let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
@@ -765,6 +767,7 @@ fn evaluate_root_for_bounds(
                     side,
                     from,
                     to,
+                    promo,
                     depth_now,
                     a_loc,
                     b_loc,
@@ -774,7 +777,7 @@ fn evaluate_root_for_bounds(
                 );
 
                 if score_raw == SEARCH_ABORTED {
-                    return (from, to, SEARCH_ABORTED, SEARCH_ABORTED);
+                    return (from, to, promo, SEARCH_ABORTED, SEARCH_ABORTED);
                 }
 
                 // Root adjustments
@@ -798,9 +801,10 @@ fn evaluate_root_for_bounds(
                     side,
                     from,
                     to,
+                    promo,
                     score_raw,
                 );
-                (from, to, adjusted, score_raw)
+                (from, to, promo, adjusted, score_raw)
             })
             .reduce(
                 || {
@@ -808,6 +812,7 @@ fn evaluate_root_for_bounds(
                     (
                         (0usize, 0usize),
                         (0usize, 0usize),
+                        None,
                         if side == Color::White {
                             MIN_EVAL_VALUE
                         } else {
@@ -821,19 +826,25 @@ fn evaluate_root_for_bounds(
                     )
                 },
                 |acc, x| {
+                    if x.4 == SEARCH_ABORTED {
+                        return x;
+                    }
+                    if acc.4 == SEARCH_ABORTED {
+                        return acc;
+                    }
                     let better = if side == Color::White {
-                        x.2 > acc.2
+                        x.3 > acc.3
                     } else {
-                        x.2 < acc.2
+                        x.3 < acc.3
                     };
                     if better { x } else { acc }
                 },
             );
 
         // Update best with parallel results if better
-        let (pf, pt, padj, praw) = results;
+        let (pf, pt, ppromo, padj, praw) = results;
         if praw == SEARCH_ABORTED {
-            return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+            return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
         }
         // Ignore identity placeholder
         if !(pf == (0, 0) && pt == (0, 0)) {
@@ -843,7 +854,7 @@ fn evaluate_root_for_bounds(
                 padj < best_adjusted
             };
             if better {
-                best_from_to = Some((pf, pt));
+                best_from_to_promo = Some((pf, pt, ppromo));
                 best_adjusted = padj;
                 best_score_raw = praw;
             }
@@ -857,7 +868,7 @@ fn evaluate_root_for_bounds(
         //    a,
         //    b
         //);
-        for &(from, to) in &ordered {
+        for &(from, to, promo) in &ordered {
 
             //eprintln!("[root-serial] try mv={:?}->{:?}", from, to);
 
@@ -866,6 +877,7 @@ fn evaluate_root_for_bounds(
                 active_color,
                 from,
                 to,
+                promo,
                 depth_now,
                 a,
                 b,
@@ -875,7 +887,7 @@ fn evaluate_root_for_bounds(
             );
 
             if score_raw == SEARCH_ABORTED {
-                return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+                return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
             }
 
             //eprintln!(
@@ -908,6 +920,7 @@ fn evaluate_root_for_bounds(
                 active_color,
                 from,
                 to,
+                promo,
                 score_raw,
             );
 
@@ -925,8 +938,8 @@ fn evaluate_root_for_bounds(
             //    best_score_raw
             //);
 
-            if better || best_from_to.is_none() {
-                best_from_to = Some((from, to));
+            if better || best_from_to_promo.is_none() {
+                best_from_to_promo = Some((from, to, promo));
                 best_adjusted = adjusted;
                 best_score_raw = score_raw;
             }
@@ -950,7 +963,7 @@ fn evaluate_root_for_bounds(
     //    best_adjusted
     //);
 
-    (best_from_to.unwrap(), best_adjusted, best_score_raw)
+    (best_from_to_promo.unwrap(), best_adjusted, best_score_raw)
 }
 
 // Tiny heuristic score for root ordering; positive favors earlier search
@@ -1008,7 +1021,7 @@ fn root_move_order_bias(board: &Board, side: Color, from: (usize,usize), to: (us
 fn probe_with_aspiration(
     board: &Board,
     active_color: Color,
-    root_moves: &Vec<((usize, usize), (usize, usize))>,
+    root_moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
     depth_now: usize,
     last_score: i32,
     window: &mut i32,
@@ -1017,7 +1030,7 @@ fn probe_with_aspiration(
     ps: i32,
     game_state: &GameState,
     history: &History,
-) -> (((usize, usize), (usize, usize)), i32, i32) {
+) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
     let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
 
     //eprintln!("[asp] depth={} init a={} b={} last={}", depth_now, a, b, last_score);
@@ -1028,7 +1041,7 @@ fn probe_with_aspiration(
 
         //eprintln!("[asp] depth={} try={} a={} b={}", depth_now, tried, a, b);
 
-        let (_mv, _best_adjusted, best_score_raw) = evaluate_root_for_bounds(
+        let (_mv, _best_adj, best_raw) = evaluate_root_for_bounds(
             board,
             active_color,
             root_moves,
@@ -1042,29 +1055,29 @@ fn probe_with_aspiration(
             history,
         );
 
-        if best_score_raw == SEARCH_ABORTED {
-            return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+        if best_raw == SEARCH_ABORTED {
+            return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
         }
 
         //eprintln!("[asp] result depth={} try={} raw={} adj={} mv={:?}->{:?}",
         //          depth_now, tried, best_score_raw, best_adjusted, mv.0, mv.1);
 
         // Check aspiration result
-        if best_score_raw <= a {
+        if best_raw <= a {
             // fail-low: widen down
 
             //eprintln!("[asp] FAIL-LOW depth={} try={} raw={} <= a={}; expand window {}->{}",
-            //          depth_now, tried, best_score_raw, a, *window, (*window * 2).min(ASP_WINDOW_MAX_CP));
+            //          depth_now, tried, best_raw, a, *window, (*window * 2).min(ASP_WINDOW_MAX_CP));
 
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
             a = bounds.0;
             if tried < 3 { continue; }
-        } else if best_score_raw >= b {
+        } else if best_raw >= b {
             // fail-high: widen up
 
             //eprintln!("[asp] FAIL-HIGH depth={} try={} raw={} >= b={}; expand window {}->{}",
-            //          depth_now, tried, best_score_raw, b, *window, (*window * 2).min(ASP_WINDOW_MAX_CP));
+            //          depth_now, tried, best_raw, b, *window, (*window * 2).min(ASP_WINDOW_MAX_CP));
 
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
@@ -1091,7 +1104,7 @@ fn probe_with_aspiration(
                 history,
             );
             if best_raw2 == SEARCH_ABORTED {
-                return (((0, 0), (0, 0)), SEARCH_ABORTED, SEARCH_ABORTED);
+                return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
             }
             return (mv2, best_adj2, best_raw2);
         }
@@ -1107,6 +1120,7 @@ fn apply_repetition_avoidance_bias(
     active_color: Color,
     from: (usize, usize),
     to: (usize, usize),
+    promo: Option<char>,
     score_raw: i32,
 ) -> i32 {
     let is_capture = board.get(to.0, to.1).is_some();
@@ -1117,7 +1131,15 @@ fn apply_repetition_avoidance_bias(
             if (active_color == Color::White && to.0 == 7)
                 || (active_color == Color::Black && to.0 == 0)
             {
-                promote = Some(Piece::new(PieceType::Queen, active_color));
+                // For repetition check, use the promotion char if available
+                // Fallback to Queen if not specified (though it should be for promotion moves)
+                let pt = match promo {
+                    Some('r') => PieceType::Rook,
+                    Some('b') => PieceType::Bishop,
+                    Some('n') => PieceType::Knight,
+                    _ => PieceType::Queen,
+                };
+                promote = Some(Piece::new(pt, active_color));
             }
         }
     }

@@ -65,16 +65,15 @@ pub fn qsearch(
     // Generate moves. If not in check, restrict to captures (quiescence).
     // NOTE: For speed we currently generate all and filter; consider adding
     // a dedicated capture generator to avoid the extra work.
-    let gs = GameState::from_board_and_side((*board).clone(), to_move);
-    let mut moves: Vec<((usize, usize), (usize, usize))> = find_all_valid_moves(&gs)
-        .iter()
-        .map(|(f, t, _)| (*f, *t))
-        .collect();
+    let mut moves: Vec<((usize, usize), (usize, usize), Option<char>)> = {
+        let gs = GameState::from_board_and_side((*board).clone(), to_move);
+        find_all_valid_moves(&gs)
+    };
     if !in_check {
         if QSEE_PRUNING_ENABLED {
             // Keep captures only; additionally filter out clearly losing captures using SEE
-            moves.retain(|&(from, to)| {
-                if board.get(to.0, to.1).is_none() {
+            moves.retain(|&(from, to, promo)| {
+                if board.get(to.0, to.1).is_none() && promo.is_none() {
                     return false;
                 }
                 // SEE pre-check: build post-move board and evaluate destination safety
@@ -85,14 +84,27 @@ pub fn qsearch(
                 };
                 let captured = board.get(to.0, to.1);
                 post.set(from.0, from.1, None);
-                post.set(to.0, to.1, Some(moved));
+                
+                let mut p_piece = moved;
+                if let Some(pc) = promo {
+                    let pt = match pc {
+                        'q' => PieceType::Queen,
+                        'r' => PieceType::Rook,
+                        'b' => PieceType::Bishop,
+                        'n' => PieceType::Knight,
+                        _ => p_piece.get_type(),
+                    };
+                    p_piece = crate::piece::pieces::Piece::new(pt, p_piece.get_color());
+                }
+                post.set(to.0, to.1, Some(p_piece));
+                
                 let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
                 let see = see_dest_estimate(&post, to_move, to, cap_val);
                 see >= -50 // allow slightly negative to avoid over-pruning, but skip clearly losing captures
             });
         } else {
-            // Keep captures only, no SEE-based filtering
-            moves.retain(|&(_from, to)| board.get(to.0, to.1).is_some());
+            // Keep captures or promotions only, no SEE-based filtering
+            moves.retain(|&(_from, to, promo)| board.get(to.0, to.1).is_some() || promo.is_some());
         }
     }
 
@@ -142,7 +154,7 @@ pub fn qsearch(
                         // simulate and verify safety and legality
                         let from = (r, c);
                         let to = to_sq;
-                        let u = board.make_move_simple(from, to);
+                        let u = board.make_move_simple(from, to, None);
                         // move must not leave own king in check
                         let illegal = board.is_side_in_check(to_move);
                         // target square should not be immediately attacked by opponent
@@ -152,7 +164,7 @@ pub fn qsearch(
                         if illegal || attacked {
                             continue;
                         }
-                        moves.push((from, to));
+                        moves.push((from, to, None));
                         added += 1;
                         if added >= MAX_QUIET_PUSHES {
                             break 'outer;
@@ -183,7 +195,19 @@ pub fn qsearch(
     // Order moves by MVV-LVA to improve cutoffs
     if MVV_LVA_ENABLED {
         let b = &*board;
-        moves.sort_by_key(|&(from, to)| -b.move_score_mvv_lva(from, to));
+        moves.sort_by_key(|&(from, to, promo)| {
+            let mut score = b.move_score_mvv_lva(from, to);
+            if let Some(p) = promo {
+                score += match p {
+                    'q' => 900,
+                    'r' => 500,
+                    'b' => 330,
+                    'n' => 320,
+                    _ => 0,
+                };
+            }
+            -score
+        });
     }
 
     // Simple capture SEE-like filter: skip obviously losing captures when not in check.
@@ -193,25 +217,25 @@ pub fn qsearch(
     let mut bnd = beta;
     if to_move == Color::White {
         let mut best = MIN_EVAL_VALUE;
-        for (from, to) in moves.into_iter() {
+        for (from, to, promo) in moves.into_iter() {
             if !in_check && QSEE_PRUNING_ENABLED {
                 if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
                     let att_v = piece_value_cp(att.get_type());
                     let vic_v = piece_value_cp(vic.get_type());
                     // Skip "bad" captures where attacker is significantly more valuable than victim
-                    if vic_v + 50 < att_v {
+                    if vic_v + 50 < att_v && promo.is_none() {
                         continue;
                     }
                     // Futility in qsearch (White to move): if even taking the victim cannot raise alpha, skip
-                    if stand_pat + vic_v + FUT_MARGIN <= a {
+                    if stand_pat + vic_v + FUT_MARGIN <= a && promo.is_none() {
                         continue;
                     }
                 }
             }
             let was_capture = board.get(to.0, to.1).is_some();
-            let u = board.make_move_simple(from, to);
+            let u = board.make_move_simple(from, to, promo);
             let mut child_hmc = halfmove_clock + 1;
-            if was_capture {
+            if was_capture || promo.is_some() {
                 child_hmc = 0;
             }
             let score = qsearch(board, Color::Black, a, bnd, child_hmc, rep_stack);
@@ -229,24 +253,24 @@ pub fn qsearch(
         best
     } else {
         let mut best = MAX_EVAL_VALUE;
-        for (from, to) in moves.into_iter() {
+        for (from, to, promo) in moves.into_iter() {
             if !in_check && QSEE_PRUNING_ENABLED {
                 if let (Some(att), Some(vic)) = (board.get(from.0, from.1), board.get(to.0, to.1)) {
                     let att_v = piece_value_cp(att.get_type());
                     let vic_v = piece_value_cp(vic.get_type());
-                    if vic_v + 50 < att_v {
+                    if vic_v + 50 < att_v && promo.is_none() {
                         continue;
                     }
                     // Futility in qsearch (Black to move): if even taking the victim cannot drop below beta, skip
-                    if stand_pat - vic_v - FUT_MARGIN >= bnd {
+                    if stand_pat - vic_v - FUT_MARGIN >= bnd && promo.is_none() {
                         continue;
                     }
                 }
             }
             let was_capture = board.get(to.0, to.1).is_some();
-            let u = board.make_move_simple(from, to);
+            let u = board.make_move_simple(from, to, promo);
             let mut child_hmc = halfmove_clock + 1;
-            if was_capture {
+            if was_capture || promo.is_some() {
                 child_hmc = 0;
             }
             let score = qsearch(board, Color::White, a, bnd, child_hmc, rep_stack);

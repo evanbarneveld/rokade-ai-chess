@@ -87,14 +87,11 @@ pub fn alphabeta(
     }
 
     let gs = GameState::from_board_and_side((*board).clone(), to_move);
-    let mut moves: Vec<((usize, usize), (usize, usize))> = find_all_valid_moves(&gs)
-        .iter()
-        .map(|(f, t, _)| (*f, *t))
-        .collect();
+    let mut moves: Vec<((usize, usize), (usize, usize), Option<char>)> = find_all_valid_moves(&gs);
     // If TT has the best move, try it first
     if let Some(entry) = tt.probe(key) {
         let bm = decode_move(entry.best_from, entry.best_to);
-        if let Some(pos) = moves.iter().position(|m| *m == bm) {
+        if let Some(pos) = moves.iter().position(|(f, t, _)| (*f, *t) == bm) {
             let first = moves.remove(pos);
             moves.insert(0, first);
         }
@@ -109,11 +106,23 @@ pub fn alphabeta(
         thread_local! {
             static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
         }
-        tail.sort_by_key(|&(from, to)| {
+        tail.sort_by_key(|&(from, to, promo)| {
             // Base MVV-LVA score (optional)
             let mut key = if crate::search::advanced_search::MVV_LVA_ENABLED {
                 board_ref.move_score_mvv_lva(from, to)
             } else { 0 };
+            
+            // Promotion bonus
+            if let Some(p) = promo {
+                key += match p {
+                    'q' => 900,
+                    'r' => 500,
+                    'b' => 330,
+                    'n' => 320,
+                    _ => 0,
+                };
+            }
+
             let moved_is_pawn = board_ref
                 .get(from.0, from.1)
                 .map(|p| p.get_type() == PieceType::Pawn)
@@ -188,11 +197,11 @@ pub fn alphabeta(
         let mut is_first_move = true; // PVS: first move searched with full window
         let mut move_index: i32 = 0; // LMR: track move order
         // Removed piece-specific precomputations (e.g., queen danger). Evaluator is strong enough now.
-        for (from, to) in moves.into_iter() {
+        for (from, to, promo) in moves.into_iter() {
             // Detect a moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
             let target_piece = board.get(to.0, to.1);
-            let u = board.make_move_simple(from, to);
+            let u = board.make_move_simple(from, to, promo);
             // Passed-pawn push extension (B5): If a pawn move results in a passed pawn
             // reaching the 6th/7th rank (relative to the side) in a near-endgame, extend by +1 ply.
             let mut child_depth = depth.saturating_sub(1);
@@ -379,11 +388,11 @@ pub fn alphabeta(
         let mut is_first_move = true; // PVS for minimizing side too
         let mut move_index: i32 = 0; // LMR index
         // Removed piece-specific precomputations.
-        for (from, to) in moves.into_iter() {
+        for (from, to, promo) in moves.into_iter() {
             // Detect moved piece before making the move
             let moved_piece = board.get(from.0, from.1);
             let target_piece = board.get(to.0, to.1);
-            let u = board.make_move_simple(from, to);
+            let u = board.make_move_simple(from, to, promo);
             // Passed-pawn push extension (B5)
             let mut child_depth = depth.saturating_sub(1);
             // Track halfmove clock for child

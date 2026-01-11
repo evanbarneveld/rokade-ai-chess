@@ -16,7 +16,7 @@ impl Search for SimpleSearch {
         _history: &History,
         search_depth: usize,
         _playing_strength: usize,
-    ) -> Option<((usize, usize), (usize, usize), i32, usize)> {
+    ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
 
         let depth_limit: usize = search_depth;
 
@@ -29,7 +29,7 @@ impl Search for SimpleSearch {
         let root_side = game_state.active_color();
 
         // Evaluate each move with a simple depth-limited minimax
-        let mut best: Option<((usize, usize), (usize, usize), i32)> = None;
+        let mut best: Option<((usize, usize), (usize, usize), Option<char>, i32)> = None;
         for (from, to, promo) in moves {
             let mut gs = *game_state;
 
@@ -56,13 +56,13 @@ impl Search for SimpleSearch {
             let score = minimax(gs, depth_limit - 1, root_side);
 
             match best {
-                None => best = Some((from, to, score)),
-                Some((_bf, _bt, sc)) if score > sc => best = Some((from, to, score)),
+                None => best = Some((from, to, promo, score)),
+                Some((_bf, _bt, _bp, sc)) if score > sc => best = Some((from, to, promo, score)),
                 _ => {}
             }
         }
 
-        best.map(|(bf, bt, sc)| (bf, bt, sc, depth_limit))
+        best.map(|(bf, bt, bp, sc)| (bf, bt, bp, sc, depth_limit))
     }
 }
 

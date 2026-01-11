@@ -56,7 +56,7 @@ pub trait Search {
         history: &crate::history::history::History,
         search_depth: usize,
         playing_strength: usize,
-    ) -> Option<((usize, usize), (usize, usize), i32, usize)>;
+    ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)>;
 }
 
 // Public toggle to select which search to use at runtime
@@ -78,7 +78,7 @@ pub fn find_best_move_with_mode(
     history: &crate::history::history::History,
     search_depth: usize,
     playing_strength: usize,
-) -> Option<((usize, usize), (usize, usize), i32, usize)> {
+) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     match mode {
         SearchMode::Normal => advanced_search::AdvancedSearch::find_best_move(
             game_state,

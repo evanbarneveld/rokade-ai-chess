@@ -11,3 +11,4 @@ mod eval_symmetry;
 mod eval_passed_pawns;
 mod opening_preference;
 mod repetition_tests;
+mod promotion_tests;

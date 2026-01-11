@@ -6,9 +6,9 @@ use crate::state::game_state::GameState;
 
 pub fn convert_move_to_san(
     game_state: GameState,
-    generated_move: Option<((usize, usize), (usize, usize))>,
+    generated_move: Option<((usize, usize), (usize, usize), Option<char>)>,
 ) -> Option<String> {
-    let (from, to) = generated_move?;
+    let (from, to, promo) = generated_move?;
     let board = game_state.board();
 
     let moving_piece: Piece = board.get(from.0, from.1)?;
@@ -23,7 +23,7 @@ pub fn convert_move_to_san(
             // King side vs queen side
             let san = if to.1 == from.1 + 2 { "O-O" } else { "O-O-O" };
             // Determine +/#
-            let check_suffix = check_or_mate_suffix(board, from, to, side);
+            let check_suffix = check_or_mate_suffix(board, from, to, promo, side);
             return Some(format!("{}{}", san, check_suffix));
         }
     }
@@ -49,14 +49,18 @@ pub fn convert_move_to_san(
             san.push('x');
         }
         san.push_str(&as_square_str(to));
-        // Promotion: default to =Q if pawn reaches last rank
-        if (side == Color::White && to.0 == 7) || (side == Color::Black && to.0 == 0) {
+        // Promotion
+        if let Some(pc) = promo {
+            san.push('=');
+            san.push(pc.to_ascii_uppercase());
+        } else if (side == Color::White && to.0 == 7) || (side == Color::Black && to.0 == 0) {
+            // fallback for missing promo info
             san.push_str("=Q");
         }
     }
 
     // 4) Append + or #
-    let suffix = check_or_mate_suffix(board, from, to, side);
+    let suffix = check_or_mate_suffix(board, from, to, promo, side);
     san.push_str(&suffix);
     Some(san)
 }
@@ -85,9 +89,9 @@ fn rank_char(row: usize) -> char {
 }
 
 // Determine if the position after (from->to) is checked or mate, and return "", "+" or "#"
-fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize), side: Color) -> String {
+fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize), promo: Option<char>, side: Color) -> String {
     let mut tmp = board.clone();
-    let _u = tmp.make_move_simple(from, to);
+    let _u = tmp.make_move_simple(from, to, promo);
     let opp = opposite_color(side);
     let in_check = tmp.is_side_in_check(opp);
     if !in_check {
