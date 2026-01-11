@@ -117,15 +117,16 @@ pub fn build_pv_for_root(
     root_side: Color,
     from: (usize, usize),
     to: (usize, usize),
+    root_promo: Option<char>,
     tt: &TranspositionTable,
     max_len: usize,
-) -> Vec<((usize, usize), (usize, usize))> {
-    let mut pv: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(max_len.max(1));
-    pv.push((from, to));
+) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
+    let mut pv: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::with_capacity(max_len.max(1));
+    pv.push((from, to, root_promo));
 
     // Work on a temporary board following the PV using TT best moves
     let mut tmp = board.clone();
-    let _undo = tmp.make_move_simple(from, to);
+    let _undo = tmp.make_move_simple(from, to, root_promo);
     let mut side = opposite_color(root_side);
 
     for _ in 1..max_len {
@@ -135,26 +136,26 @@ pub fn build_pv_for_root(
         };
         let (bf, bt) = (entry.best_from, entry.best_to);
         let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
-        let next = ((nfr, nfc), (ntr, ntc));
-        // Validate legality in the current position to avoid garbage PV
+        
+        // Find the move in legal moves to get the promotion char if any
         let gs = GameState::from_board_and_side(tmp.clone(), side);
-        let legals_pairs: Vec<((usize, usize), (usize, usize))> = find_all_valid_moves(&gs)
-            .iter()
-            .map(|(f, t, _)| (*f, *t))
-            .collect();
-        if !legals_pairs.contains(&next) {
+        let legals = find_all_valid_moves(&gs);
+        let found_move = legals.iter().find(|(f, t, _)| (*f, *t) == ((nfr, nfc), (ntr, ntc)));
+        
+        if let Some(&(f, t, p)) = found_move {
+            pv.push((f, t, p));
+            let _u = tmp.make_move_simple(f, t, p);
+            side = opposite_color(side);
+        } else {
             break;
         }
-        pv.push(next);
-        let _u = tmp.make_move_simple((nfr, nfc), (ntr, ntc));
-        side = opposite_color(side);
     }
     pv
 }
 
-pub fn get_root_moves(_game_state: &GameState, _history: &History, _board: &Board, _active_color: Color, moves: &Vec<((usize, usize), (usize, usize))>, v: &mut Vec<((usize, usize), (usize, usize))>) {
-    for &(from, to) in moves {
-        v.push((from, to));
+pub fn get_root_moves(_game_state: &GameState, _history: &History, _board: &Board, _active_color: Color, moves: &Vec<((usize, usize), (usize, usize), Option<char>)>, v: &mut Vec<((usize, usize), (usize, usize), Option<char>)>) {
+    for &(from, to, promo) in moves {
+        v.push((from, to, promo));
     }
 }
 
@@ -608,6 +609,7 @@ pub fn evaluate_after_root_move(
     side: Color,
     from: (usize, usize),
     to: (usize, usize),
+    promo: Option<char>,
     depth_now: usize,
     a: i32,
     b: i32,
@@ -616,7 +618,7 @@ pub fn evaluate_after_root_move(
     history: &History,
 ) -> (i32, bool, bool) {
     let mut tmp = base_board.clone();
-    let u = tmp.make_move_simple(from, to);
+    let u = tmp.make_move_simple(from, to, promo);
     let moved_is_pawn = base_board
         .get(from.0, from.1)
         .map(|p| p.get_type() == PieceType::Pawn)

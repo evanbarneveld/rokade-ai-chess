@@ -30,8 +30,8 @@ fn debug_list_moves_mate_in_2_position() {
     assert!(found_pair, "Expected to find move pair d5->f6 in generated moves list");
 
     let mut found_nfx = false;
-    for (from, to, _promo) in moves {
-        if let Some(san) = convert_move_to_san(*game.get_game_state(), Some((from, to))) {
+    for (from, to, promo) in moves {
+        if let Some(san) = convert_move_to_san(*game.get_game_state(), Some((from, to, promo))) {
             if san == "Nf6+" { found_nfx = true; break; }
         }
     }

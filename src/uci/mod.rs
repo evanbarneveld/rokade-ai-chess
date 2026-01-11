@@ -288,10 +288,14 @@ pub fn run_uci() -> io::Result<()> {
                 // Install a temporary info callback so we can emit progress while searching.
                 // The callback prints UCI-compliant info lines with the current best root move scores.
                 let white_is_active_inner = white_is_active;
-                let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize)), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize))>, hashfull: u16| {
+                let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize), Option<char>), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize), Option<char>)>, hashfull: u16| {
                     let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
-                    for (f, t) in pv_moves {
-                        pv_parts.push(as_move_str(f, t));
+                    for (f, t, p) in pv_moves {
+                        let mut m_str = as_move_str(f, t);
+                        if let Some(c) = p {
+                            m_str.push(c);
+                        }
+                        pv_parts.push(m_str);
                     }
                     let pv = pv_parts.join(" ");
                     // Compute current nodes and nps
@@ -462,8 +466,11 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time_in_ms: us
     let best = find_best_move_with_mode(engine.get_search_mode(), &gs_copy, &history_clone, depth, playing_strength);
     clear_time_budget();
 
-    if let Some(((fr, fc), (tr, tc), score_cp, depth_used)) = best {
-        let mv = as_move_str((fr, fc), (tr, tc));
+    if let Some(((fr, fc), (tr, tc), promo, score_cp, depth_used)) = best {
+        let mut mv = as_move_str((fr, fc), (tr, tc));
+        if let Some(c) = promo {
+            mv.push(c);
+        }
         return (mv, Some((score_cp, depth_used)));
     }
     (String::from("0000"), None)

@@ -23,10 +23,8 @@ pub struct UndoMove {
     pub(crate) to: (usize, usize),
     pub(crate) moved: Option<Piece>,
     pub(crate) captured: Option<Piece>,
-    // Save king locations to restore accurately on unmake
     pub(crate) prev_white_king: (usize, usize),
     pub(crate) prev_black_king: (usize, usize),
-    // Castling support: if the move was a castle, remember rook relocation
     pub(crate) castle_rook_from: Option<(usize, usize)>,
     pub(crate) castle_rook_to: Option<(usize, usize)>,
 }
@@ -184,7 +182,7 @@ impl Board {
 
 
     #[inline]
-    pub(crate) fn make_move_simple(&mut self, from: (usize, usize), to: (usize, usize)) -> UndoMove {
+    pub(crate) fn make_move_simple(&mut self, from: (usize, usize), to: (usize, usize), promo: Option<char>) -> UndoMove {
         let moved = self.get(from.0, from.1);
         let captured = self.get(to.0, to.1);
         // snapshot king locations before move
@@ -231,14 +229,29 @@ impl Board {
         }
 
         // Move the king (or any piece) to destination
-        self.set(to.0, to.1, moved);
-        self.set(from.0, from.1, None);
-        // update king location cache if a king moved
-        if let Some(p) = moved {
+        if let Some(mut p) = moved {
+            if p.get_type() == PieceType::Pawn {
+                if let Some(pc) = promo {
+                    let pt = match pc {
+                        'q' => PieceType::Queen,
+                        'r' => PieceType::Rook,
+                        'b' => PieceType::Bishop,
+                        'n' => PieceType::Knight,
+                        _ => p.get_type(),
+                    };
+                    p = Piece::new(pt, p.get_color());
+                } else if (p.get_color() == Color::White && to.0 == 7) || (p.get_color() == Color::Black && to.0 == 0) {
+                    // Auto-promote to queen if no promo char provided but reached backrank
+                    p = Piece::new(PieceType::Queen, p.get_color());
+                }
+            }
+            self.set(to.0, to.1, Some(p));
+            self.set(from.0, from.1, None);
             if p.get_type() == PieceType::King {
                 self.set_king_location(p.get_color(), to);
             }
         }
+
         UndoMove {
             from,
             to,

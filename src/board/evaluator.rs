@@ -439,9 +439,12 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     score += mob_w * phase / 24;
     score -= mob_b * phase / 24;
     // Small MG normalization to avoid overemphasizing activity when PST is strong
+    // Symmetric normalization: damp both sides proportionately
     if phase > 12 {
-        let damp = ((mob_w + mob_b) / 20) * (phase - 12) / 12; // tiny, bounded
-        score -= damp;
+        let damp_w = (mob_w / 20) * (phase - 12) / 12;
+        let damp_b = (mob_b / 20) * (phase - 12) / 12;
+        score -= damp_w;
+        score += damp_b;
     }
 
     // Holes (weak squares) in a central area that pawns cannot challenge
@@ -835,8 +838,7 @@ fn early_queen_penalty(board: &Board, color: Color, counts: &PawnFileCounts) -> 
         if advanced { extra += 8; }
     }
     // Scale by opening phase (strongest in opening, zero in EG)
-    let phase = game_phase(board);
-    ((base + extra) * phase) / 24
+    base + extra
 }
 
 fn find_king(board: &Board, color: Color) -> Option<(usize,usize)> {

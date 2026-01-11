@@ -216,7 +216,7 @@ impl GameState {
         }
 
         // Apply the board move (handles king+rook relocation for castling and normal captures on destination)
-        let board_undo = self.board.make_move_simple(from, to);
+        let board_undo = self.board.make_move_simple(from, to, promo);
 
         // If this was an en passant capture, clear the captured pawn square
         if let (Some(sq), Some(_pc)) = (ep_captured_sq, ep_captured_piece) {

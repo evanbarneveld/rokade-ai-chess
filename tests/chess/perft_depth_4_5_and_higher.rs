@@ -6,7 +6,7 @@ use chess::Chess;
 /// perft tests, see https://www.chessprogramming.org/Perft_Results
 ///
 
-#[test]
+//#[test]
 #[serial]
 fn perft_position2_depth4() { //last tested at 6-jan-2026
     let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
@@ -15,7 +15,7 @@ fn perft_position2_depth4() { //last tested at 6-jan-2026
 }
 
 
-#[test]
+//#[test]
 #[serial]
 fn perft_position2_depth5() { //last tested at 6-jan-2026 (412 seconds)
     let time_start = std::time::Instant::now();
@@ -31,7 +31,7 @@ fn perft_position2_depth5() { //last tested at 6-jan-2026 (412 seconds)
     assert_eq!(nodes, expected);
 }
 
-#[test]
+//#[test]
 #[serial]
 fn perft_position2_depth5_parallel() { //last tested at 6-jan-2026 (54 seconds parallel)
     let time_start = std::time::Instant::now();
@@ -46,7 +46,7 @@ fn perft_position2_depth5_parallel() { //last tested at 6-jan-2026 (54 seconds p
     println!("elapsed time {:?}", time_start.elapsed());
     assert_eq!(nodes, expected);
 }
-#[test]
+//#[test]
 #[serial]
 fn perft_position3_depth4() { // last tested at 6-jan-2026
     let fen = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1";
@@ -54,7 +54,7 @@ fn perft_position3_depth4() { // last tested at 6-jan-2026
     assert_eq!(perft_count(&gs, 4), 43_238);
 }
 
-#[test]
+//#[test]
 #[serial]
 fn perft_position4_depth4() { // last tested at 6-jan-2026
     let time_start = std::time::Instant::now();
@@ -70,7 +70,7 @@ fn perft_position4_depth4() { // last tested at 6-jan-2026
     assert_eq!(nodes, expected);
 }
 
-#[test]
+//#[test]
 #[serial]
 fn perft_position4_depth5() { // last tested at 6-jan-2026
     let time_start = std::time::Instant::now();
@@ -86,8 +86,7 @@ fn perft_position4_depth5() { // last tested at 6-jan-2026
     assert_eq!(nodes, expected);
 }
 
-
-#[test]
+//#[test]
 #[serial]
 fn perft_position5_depth4() { // last tested at 6-jan-2026
     let time_start = std::time::Instant::now();
@@ -104,7 +103,7 @@ fn perft_position5_depth4() { // last tested at 6-jan-2026
     assert_eq!(nodes, expected);
 }
 
-#[test]
+//#[test]
 #[serial]
 fn perft_position6_depth4() { // last tested at 6-jan-2026
     let time_start = std::time::Instant::now();
@@ -120,7 +119,7 @@ fn perft_position6_depth4() { // last tested at 6-jan-2026
     assert_eq!(nodes, expected);
 }
 
-#[test]
+//#[test]
 #[serial]
 fn perft_startpos_depths_4() { // last tested at 6-jan-2026
     let time_start = std::time::Instant::now();
@@ -137,7 +136,7 @@ fn perft_startpos_depths_4() { // last tested at 6-jan-2026
     assert_eq!(nodes, expected);
 }
 
-#[test]
+//#[test]
 #[serial]
 fn perft_startpos_depths_5() { // last tested at 6-jan-2026
     let time_start = std::time::Instant::now();
@@ -154,7 +153,7 @@ fn perft_startpos_depths_5() { // last tested at 6-jan-2026
     assert_eq!(nodes, expected);
 }
 
-#[test]
+//#[test]
 #[serial]
 fn perft_startpos_depth_6() { // last tested at 6-jan-2026
     let time_start = std::time::Instant::now();

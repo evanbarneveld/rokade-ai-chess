@@ -87,8 +87,8 @@ fn debug_moves_after_e7e5() {
     // Enumerate Black legal moves and locate e7e5 by SAN string (local generator using public APIs)
     let black_moves = enumerate_legal_moves(&gs);
     let mut e7e5_from_to: Option<((usize, usize), (usize, usize))> = None;
-    for (from, to, _promo) in &black_moves {
-        if let Some(s) = convert_move_to_san(gs, Some((*from, *to))) {
+    for (from, to, promo) in &black_moves {
+        if let Some(s) = convert_move_to_san(gs, Some((*from, *to, *promo))) {
             //println!("SAN: {}", s);
             if s == "e5" {
                 e7e5_from_to = Some((*from, *to));
@@ -107,8 +107,8 @@ fn debug_moves_after_e7e5() {
     let white_moves = enumerate_legal_moves(&gs);
     let mut sans: Vec<String> = Vec::new();
     let mut has_dxe5 = false;
-    for (from, to, _promo) in &white_moves {
-        if let Some(s) = convert_move_to_san(gs, Some((*from, *to))) {
+    for (from, to, promo) in &white_moves {
+        if let Some(s) = convert_move_to_san(gs, Some((*from, *to, *promo))) {
             if s.contains('x') { // capture formatting uses 'x'
                 sans.push(s.clone());
             }
@@ -140,11 +140,17 @@ fn enumerate_legal_moves(game_state: &GameState) -> Vec<((usize, usize), (usize,
                 if !game_state.move_from_and_to_validation_check(from, to, active_color, is_capture, is_pawn_move, game_state.en_passant_target()) { continue; }
                 // Legality via applying move on a copy using PieceMover
                 let mut gs2 = *game_state;
-                let promo = if is_pawn_move && ((active_color == Color::White && tr == 7) || (active_color == Color::Black && tr == 0)) {
-                    Some(chess::piece::pieces::Piece::new(PieceType::Queen, active_color))
-                } else { None };
-                if PieceMover::move_piece(&mut gs2, from, to, is_capture, promo) {
-                    result.push((from, to, None));
+                let is_pawn_promotion = is_pawn_move && ((active_color == Color::White && tr == 7) || (active_color == Color::Black && tr == 0));
+                if is_pawn_promotion {
+                    // Just try Queen promotion for test enumeration
+                    let promo_piece = Some(chess::piece::pieces::Piece::new(PieceType::Queen, active_color));
+                    if PieceMover::move_piece(&mut gs2, from, to, is_capture, promo_piece) {
+                        result.push((from, to, Some('q')));
+                    }
+                } else {
+                    if PieceMover::move_piece(&mut gs2, from, to, is_capture, None) {
+                        result.push((from, to, None));
+                    }
                 }
             }}
         }

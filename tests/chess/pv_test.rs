@@ -11,7 +11,7 @@ fn depth2_pv_first_move_is_exd5() {
     game.set_starting_fen(fen).expect("bad fen");
     set_deterministic(true);
 
-    let last_pv: Arc<std::sync::Mutex<Vec<((usize, usize), (usize, usize))>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let last_pv: Arc<std::sync::Mutex<Vec<((usize, usize), (usize, usize), Option<char>)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let last_pv_clone = last_pv.clone();
     set_info_callback(Some(Arc::new(move |_mv, _sc, _depth, pv, _hf| {
         *last_pv_clone.lock().unwrap() = pv; // capture PV from the most recent iteration
@@ -20,7 +20,7 @@ fn depth2_pv_first_move_is_exd5() {
     let history = game.get_history().clone();
     let depth = 2usize;
     let _san = generate_move_as_san(SearchMode::Normal,
-        *game.get_game_state(), &history, depth, 10_000, 1000
+        *game.get_game_state(), &history, depth, 1_000, 1000
     ).unwrap();
 
     set_info_callback(None);
