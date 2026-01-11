@@ -99,7 +99,7 @@ fn debug_moves_after_e7e5() {
     let e7e5 = e7e5_from_to.expect("e7e5 should be a legal move for Black in this FEN");
 
     // Apply ...e7e5 on full GameState (legality/path handled inside PieceMover)
-    let is_capture = gs.board().get((e7e5.1).0, (e7e5.1).1).is_some();
+    let is_capture = gs.board().get(e7e5.1.0, e7e5.1.1).is_some();
     assert!(PieceMover::move_piece(&mut gs, e7e5.0, e7e5.1, is_capture, None));
     gs.switch_player_turn(); // White to move
 
@@ -141,7 +141,7 @@ fn enumerate_legal_moves(game_state: &GameState) -> Vec<((usize, usize), (usize,
                 // Legality via applying move on a copy using PieceMover
                 let mut gs2 = *game_state;
                 let promo = if is_pawn_move && ((active_color == Color::White && tr == 7) || (active_color == Color::Black && tr == 0)) {
-                    Some(chess::piece::pieces::Piece::new(chess::piece::pieces::PieceType::Queen, active_color))
+                    Some(chess::piece::pieces::Piece::new(PieceType::Queen, active_color))
                 } else { None };
                 if PieceMover::move_piece(&mut gs2, from, to, is_capture, promo) {
                     result.push((from, to, None));

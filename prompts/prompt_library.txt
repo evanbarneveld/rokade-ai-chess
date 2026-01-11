@@ -1,3 +1,7 @@
+the engine should not avoid a threefold repetition move, when this leads to a loss in a few moves,
+because in that case, a draw would be a better outcome.
+
+--------
 please check root_moves.rs
 
 is there code that can be generalized?
