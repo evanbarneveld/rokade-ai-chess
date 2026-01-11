@@ -8,6 +8,7 @@ use crate::piece::as_square_str;
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::search::SearchMode;
+use crate::search::zobrist::compute_zobrist;
 
 #[derive(Debug)]
 pub struct Chess<> {
@@ -21,8 +22,7 @@ pub struct Chess<> {
 impl Chess {
     pub const DEFAULT_CHESS_STARTING_FEN: &'static str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     pub fn new() -> Self {
-
-        Chess {
+        let mut chess = Chess {
             starting_fen: String::from(Chess::DEFAULT_CHESS_STARTING_FEN),
             game_state:
                 match reset_from_fen(Chess::DEFAULT_CHESS_STARTING_FEN) {
@@ -33,7 +33,10 @@ impl Chess {
             history: History::new(),
             search_mode: SearchMode::Normal,
             playing_strength: 1000,
-        }
+        };
+        let zobrist = compute_zobrist(chess.game_state.board(), chess.game_state.active_color());
+        chess.history.set_starting_position(Chess::DEFAULT_CHESS_STARTING_FEN.to_string(), zobrist);
+        chess
     }
 
     pub fn get_history(&mut self) -> &History {
@@ -72,6 +75,9 @@ impl Chess {
     pub fn set_starting_fen(&mut self, fen: &str) -> Result<(), String> {
         self.starting_fen = String::from(fen);
         self.game_state = reset_from_fen(&self.starting_fen)?;
+        self.history.reset();
+        let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
+        self.history.set_starting_position(fen.to_string(), zobrist);
         self.game_state.recompute_outcome(&self.history);
         Ok(())
     }
@@ -159,7 +165,8 @@ impl Chess {
                 mv = format!("{}x{}", mv, as_square_str(to));
             }
 
-            self.history.add_move(mv.to_string(), (from, to), game_state_to_fen_string(self.game_state.clone()));
+            let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
+            self.history.add_move(mv.to_string(), (from, to), game_state_to_fen_string(self.game_state.clone()), zobrist);
             true
         } else {
             false
@@ -176,7 +183,8 @@ impl Chess {
             Ok(v) => {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
-                    self.history.add_move(mv.to_string(), (v.from, v.to), game_state_to_fen_string(self.game_state.clone()));
+                    let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
+                    self.history.add_move(mv.to_string(), (v.from, v.to), game_state_to_fen_string(self.game_state.clone()), zobrist);
                     true
                 } else {
                     false

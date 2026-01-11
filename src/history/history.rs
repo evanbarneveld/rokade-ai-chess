@@ -1,6 +1,8 @@
 #[derive(Debug, Default, Clone)]
 pub struct History {
-    plies: Vec<(String, ((usize, usize),(usize, usize)), String, String)>, //contains san_move, fen after move, fen (without move counters) after move
+    plies: Vec<(String, ((usize, usize),(usize, usize)), String, String, u64)>, // san, move, full_fen, truncated_fen, zobrist
+    starting_truncated_fen: Option<String>,
+    starting_zobrist: Option<u64>,
     // Tracks how many times each FEN has appeared in the history
     fen_counts: std::collections::HashMap<String, usize>,
 }
@@ -10,17 +12,32 @@ impl History {
         Self {
             plies: (Vec::new()),
             fen_counts: std::collections::HashMap::new(),
+            starting_truncated_fen: None,
+            starting_zobrist: None,
         }
+    }
+
+    pub fn set_starting_position(&mut self, fen: String, zobrist: u64) {
+        let truncated = fen
+            .split_whitespace()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.starting_truncated_fen = Some(truncated.clone());
+        self.starting_zobrist = Some(zobrist);
+        *self.fen_counts.entry(truncated).or_insert(0) += 1;
     }
 
     // Clears all recorded moves
     pub fn reset(&mut self) {
         self.plies.clear();
         self.fen_counts.clear();
+        self.starting_truncated_fen = None;
+        self.starting_zobrist = None;
     }
 
     // Returns a reference to the move at the given index, if it exists
-    pub fn get_move(&self, index: usize) -> Option<&(String, ((usize, usize),(usize, usize)), String, String)> {
+    pub fn get_move(&self, index: usize) -> Option<&(String, ((usize, usize),(usize, usize)), String, String, u64)> {
         self.plies.get(index)
     }
 
@@ -29,7 +46,7 @@ impl History {
     }
 
     // Adds a move to the history (SAN or other chosen notation)
-    pub fn add_move(&mut self, mv: String, board_move:((usize, usize), (usize, usize)), fen: String) {
+    pub fn add_move(&mut self, mv: String, board_move:((usize, usize), (usize, usize)), fen: String, zobrist: u64) {
         // Truncate FEN to exclude the last two move counters (half move clock and full move number)
         // Keep only the first four fields: piece placement, active color, castling, en passant target
         let truncated_fen = fen
@@ -40,13 +57,12 @@ impl History {
         // Update repetition counter for the provided FEN
         let entry = self.fen_counts.entry(truncated_fen.clone()).or_insert(0);
         *entry += 1;
-
-        self.plies.push((mv, board_move, fen ,truncated_fen));
+        self.plies.push((mv, board_move, fen ,truncated_fen, zobrist));
     }
 
     // Undoes the last move and returns it, if any
-    pub fn undo_move(&mut self) -> Option<(String, String, String)> {
-        if let Some((mv, _, fen, truncated_fen)) = self.plies.pop() {
+    pub fn undo_move(&mut self) -> Option<(String, String, String, u64)> {
+        if let Some((mv, _, fen, truncated_fen, zobrist)) = self.plies.pop() {
             if let Some(count) = self.fen_counts.get_mut(&truncated_fen) {
                 if *count > 1 {
                     *count -= 1;
@@ -55,7 +71,7 @@ impl History {
                     self.fen_counts.remove(&truncated_fen);
                 }
             }
-            Some((mv, fen, truncated_fen))
+            Some((mv, fen, truncated_fen, zobrist))
         } else {
             None
         }
@@ -102,10 +118,21 @@ impl History {
     // Returns the repetition count of the most recent position (FEN) in history
     // If there is no move yet, returns 0
     pub fn current_repetition_count(&self) -> usize {
-        if let Some((_, _, _fen, truncated_fen)) = self.plies.last() {
+        if let Some((_, _, _, truncated_fen, _)) = self.plies.last() {
             self.fen_repetition_count(truncated_fen)
         } else {
             0
         }
+    }
+
+    pub fn get_rep_stack(&self) -> Vec<u64> {
+        let mut stack = Vec::with_capacity(self.plies.len() + 1);
+        if let Some(h) = self.starting_zobrist {
+            stack.push(h);
+        }
+        for p in &self.plies {
+            stack.push(p.4);
+        }
+        stack
     }
 }

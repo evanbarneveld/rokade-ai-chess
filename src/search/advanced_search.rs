@@ -6,7 +6,6 @@ use crate::search::locking::get_tt_mutex;
 use crate::search::playing_strength::{select_move_based_using_strength, PLAYING_STRENGTH_MAX};
 use crate::search::root_moves::{
     adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves,
-    hard_root_filter,
 };
 use crate::search::threading::init_rayon_pool_if_needed;
 use crate::search::tt::{decode_move, TranspositionTable};
@@ -41,7 +40,6 @@ pub(crate) const ZOBRIST_HASHING_ENABLED: bool = true;
 pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = ZOBRIST_HASHING_ENABLED; // WARNING: Disabling TT can be 2–10x slower
 
 pub(crate) const NULL_MOVE_PRUNING_ENABLED: bool = true;
-pub(crate) const SEE_FILTERING_ENABLED: bool = true;
 pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true;
 
 pub(crate) const QUIESCENCE_ENABLED: bool = true ; // TODO Disabling may cause horizon effects
@@ -56,7 +54,7 @@ const ASP_WINDOW_INIT_CP: i32 = 30; // initial aspiration half-window
 const ASP_WINDOW_MAX_CP: i32 = 400; // maximum expanded half-window
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
-const REP_AVOIDANCE_BIAS_CP: i32 = 50_000;
+const REP_AVOIDANCE_BIAS_CP: i32 = 2000;
 pub const MAX_PLAYING_STRENGTH: usize = 1000;
 pub const DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY: usize = 3000usize;
 
@@ -145,40 +143,10 @@ pub fn find_best_move(
 
         get_root_moves(game_state, history, board, active_color, &moves, &mut v);
 
-        // Hard root filter: drop unsafe queen moves (SEE<0) and unsafe minor-piece non-check sacs
-        // (SEE<=SEE_MINOR_SAC_THRESHOLD_CP and not giving check)
-        // If filtering removes all, keep original set.
-        let mut base: Vec<((usize, usize), (usize, usize))> = if SEE_FILTERING_ENABLED && !v.is_empty() {
-            let mut filtered: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(v.len());
-            hard_root_filter(board, active_color, &mut v, &mut filtered);
-            if filtered.is_empty() { v } else { filtered }
-        } else {
-            v
-        };
-
-        // Additional opening hard filter at root: drop quiet queen moves that do not give check
-        // (captures and checks preserved). This is opening-only and keeps tactics intact.
-        // Keeps at least one move if it would otherwise drop all.
-        let mut phase_for_scale = 0i32;
-        for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
-            phase_for_scale += match p.get_type() { PieceType::Knight|PieceType::Bishop => 1, PieceType::Rook => 2, PieceType::Queen => 4, _ => 0 };
-        }}}
-        phase_for_scale = phase_for_scale.clamp(0,24);
-        if phase_for_scale >= 16 {
-            let mut kept: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(base.len());
-            for &(f, t) in &base {
-                let p = board.get(f.0, f.1);
-                let is_cap = board.get(t.0, t.1).is_some();
-                let mut btmp = board.clone();
-                if let Some(mp) = p { btmp.set(t.0, t.1, Some(mp)); btmp.set(f.0, f.1, None); }
-                let gives_check = if p.is_some() { btmp.is_side_in_check(opposite_color(active_color)) } else { false };
-                let is_quiet_queen = matches!(p, Some(pc) if pc.get_type()==PieceType::Queen) && !is_cap;
-                if !(is_quiet_queen && !gives_check) {
-                    kept.push((f,t));
-                }
-            }
-            if !kept.is_empty() { base = kept; }
-        }
+        // We use all legal moves as root moves.
+        // Hard filters (like SEE-based pruning) are disabled at root to avoid
+        // missing critical saving moves like draws by repetition.
+        let mut base = v;
 
         // Heuristic ordering at root: prioritize checking moves, then captures by MVV, then others.
         base.sort_by(|&(f1,t1), &(f2,t2)| {
@@ -317,6 +285,7 @@ pub fn find_best_move(
                     MAX_EVAL_VALUE - 1,
                     &mut tt,
                     base_hmc,
+                    history,
                 );
                 let adj = adjusted_root_eval_for_move(
                     &board,
@@ -371,9 +340,9 @@ pub fn debug_rank_root_moves(
 
     let mut v = Vec::with_capacity(moves.len());
     get_root_moves(game_state, history, board, active_color, &moves, &mut v);
-    let mut filtered: Vec<((usize, usize), (usize, usize))> = Vec::with_capacity(v.len());
-    hard_root_filter(board, active_color, &mut v, &mut filtered);
-    let root = if filtered.is_empty() { v } else { filtered };
+    // Disabling hard root filter to ensure all legal moves are considered,
+    // especially those that lead to draws by repetition which might otherwise be filtered.
+    let root = v;
 
     // No TT needed for a one-shot evaluation per move here
     let mut tt = get_tt_mutex().lock().unwrap();
@@ -389,8 +358,9 @@ pub fn debug_rank_root_moves(
             MAX_EVAL_VALUE - 1,
             &mut tt,
             base_hmc,
+            history,
         );
-        let adj = adjusted_root_eval_for_move(
+        let mut adj = adjusted_root_eval_for_move(
             board,
             active_color,
             from,
@@ -400,6 +370,16 @@ pub fn debug_rank_root_moves(
             is_capture,
             moved_is_pawn,
             playing_strength as i32,
+        );
+        adj = apply_repetition_avoidance_bias(
+            adj,
+            game_state,
+            history,
+            board,
+            active_color,
+            from,
+            to,
+            raw,
         );
         let san = convert_move_to_san(*game_state, Some((from,to))).unwrap_or_else(|| {
             format!("{}{}", crate::piece::as_square_str(from), crate::piece::as_square_str(to))
@@ -745,6 +725,7 @@ fn evaluate_root_for_bounds(
                 b,
                 tt,
                 base_hmc,
+                history,
             );
 
             if score_raw == SEARCH_ABORTED {
@@ -789,14 +770,15 @@ fn evaluate_root_for_bounds(
                     b_loc,
                     &mut local_tt,
                     base_hmc_loc,
+                    history,
                 );
 
                 if score_raw == SEARCH_ABORTED {
                     return (from, to, SEARCH_ABORTED, SEARCH_ABORTED);
                 }
 
-                // Root adjustments (skip repetition-history check to keep parallel code simple)
-                let adjusted = adjusted_root_eval_for_move(
+                // Root adjustments
+                let mut adjusted = adjusted_root_eval_for_move(
                     board,
                     side,
                     from,
@@ -806,6 +788,17 @@ fn evaluate_root_for_bounds(
                     is_capture,
                     moved_is_pawn,
                     ps,
+                );
+                // Apply repetition-avoidance bias at root for parallel moves
+                adjusted = apply_repetition_avoidance_bias(
+                    adjusted,
+                    game_state,
+                    history,
+                    board,
+                    side,
+                    from,
+                    to,
+                    score_raw,
                 );
                 (from, to, adjusted, score_raw)
             })
@@ -878,6 +871,7 @@ fn evaluate_root_for_bounds(
                 b,
                 tt,
                 base_hmc,
+                history,
             );
 
             if score_raw == SEARCH_ABORTED {
@@ -914,6 +908,7 @@ fn evaluate_root_for_bounds(
                 active_color,
                 from,
                 to,
+                score_raw,
             );
 
             // Track best
@@ -1105,15 +1100,15 @@ fn probe_with_aspiration(
 
 #[inline]
 fn apply_repetition_avoidance_bias(
-    adjusted: i32,
+    mut adjusted: i32,
     game_state: &GameState,
     history: &History,
     board: &Board,
     active_color: Color,
     from: (usize, usize),
     to: (usize, usize),
+    score_raw: i32,
 ) -> i32 {
-    let mut adjusted = adjusted;
     let is_capture = board.get(to.0, to.1).is_some();
     let mut gs = *game_state; // Copy
     let mut promote: Option<Piece> = None;
@@ -1136,12 +1131,25 @@ fn apply_repetition_avoidance_bias(
         } else {
             -adjusted
         };
-        if count >= 2 && sa > 0 {
-            adjusted -= if active_color == Color::White {
-                REP_AVOIDANCE_BIAS_CP
+        if count >= 2 {
+            // Root repetition-avoidance bias:
+            // If we are winning (sa > 0), we penalize the draw to encourage continuing the game.
+            // If we are losing (sa <= 0), we don't penalize it (we want the draw).
+            // IN ALL CASES, we floor the score at a slight penalty (-10 cp) to ensure
+            // that a draw is always preferred over a clear loss, even if root-level
+            // heuristics (like self-hang) are very negative.
+            if active_color == Color::White {
+                if sa > 0 { adjusted -= REP_AVOIDANCE_BIAS_CP; }
+                // For a draw by repetition, we want to be extremely careful not to avoid it
+                // if it's our best saving grace. We floor it at -10 CP and then 
+                // potentially override other root bonuses if they are too optimistic.
+                adjusted = adjusted.max(-10);
+                if score_raw == 0 && adjusted > 0 { adjusted = 0; }
             } else {
-                -REP_AVOIDANCE_BIAS_CP
-            };
+                if sa > 0 { adjusted += REP_AVOIDANCE_BIAS_CP; }
+                adjusted = adjusted.min(10);
+                if score_raw == 0 && adjusted < 0 { adjusted = 0; }
+            }
         }
     }
     adjusted

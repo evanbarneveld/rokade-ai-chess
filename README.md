@@ -72,7 +72,7 @@ Repository Layout (selected)
 Known Issues
 - Deterministic mode still shows move variations (non-determinism) in some runs.
 
-Roadmap / TODO
+Roadmap
 - Improve heuristics with targeted tests for poor moves.
 - Make the engine play a decent endgame.
 

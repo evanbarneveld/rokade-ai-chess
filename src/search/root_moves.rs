@@ -1,14 +1,12 @@
 use crate::board::Board;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::history::history::History;
-use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
 use crate::search::alphabeta::alphabeta;
 use crate::search::advanced_search::find_all_valid_moves;
 use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
 use crate::search::tt::{decode_move, TranspositionTable};
 use crate::search::zobrist::compute_zobrist;
-use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
 
@@ -20,25 +18,21 @@ const ENDGAME_SCALE_MAX: i32 = 21; // max scaling steps used in the formula belo
 const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15; // per-scale bonus if capture or pawn move
 const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8; // per-scale penalty if quiet move
 
-
-const REP_STACK_CAPACITY: usize = 128; // repetition detection stack capacity hint
-
 // ---- Root heuristics constants (grouped; extracted from inline literals) ----
-const CHECK_TIEBREAK_BASE: i32 = 400;
-const KING_CAPTURE_ROOT_PENALTY: i32 = 600;
-const SELF_HANG_AGGREGATE_CAP_EXTRA: i32 = 4000; // queen extra room atop 2*SEE_MAX
-const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 400;
-const KNIGHT_NON_EVAC_DEMOTION: i32 = 600;
-const KNIGHT_SAFE_EVAC_REWARD: i32 = 350;
-const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 400;
-const KNIGHT_CENTER_EXTRA_D5: i32 = 40;
-const KNIGHT_CENTER_STEP: i32 = 4;
-const CHECK_MOBILITY_BONUS_0: i32 = 500;
-const CHECK_MOBILITY_BONUS_1_2: i32 = 250;
-const CHECK_MOBILITY_BONUS_3_5: i32 = 100;
-const CHECK_MOBILITY_BONUS_6_8: i32 = 50;
-const CHECK_MOBILITY_BONUS_9_12: i32 = 25;
-const CHECK_MOBILITY_BONUS_OTHER: i32 = 10;
+const CHECK_TIEBREAK_BASE: i32 = 1;
+const KING_CAPTURE_ROOT_PENALTY: i32 = 5;
+const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 4;
+const KNIGHT_NON_EVAC_DEMOTION: i32 = 6;
+const KNIGHT_SAFE_EVAC_REWARD: i32 = 3;
+const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 4;
+const KNIGHT_CENTER_EXTRA_D5: i32 = 1;
+const KNIGHT_CENTER_STEP: i32 = 0;
+const CHECK_MOBILITY_BONUS_0: i32 = 5;
+const CHECK_MOBILITY_BONUS_1_2: i32 = 2;
+const CHECK_MOBILITY_BONUS_3_5: i32 = 1;
+const CHECK_MOBILITY_BONUS_6_8: i32 = 0;
+const CHECK_MOBILITY_BONUS_9_12: i32 = 0;
+const CHECK_MOBILITY_BONUS_OTHER: i32 = 0;
 
 // ---- Small helpers to reduce duplication (all #[inline]) ----
 #[inline]
@@ -100,23 +94,6 @@ fn knight_safe_squares(board: &Board, side: Color, from: (usize,usize)) -> Vec<(
 }
 
 #[inline]
-fn queen_hanging_after(post: &Board, side: Color) -> bool {
-    for r in 0..8 { for c in 0..8 {
-        if let Some(pq) = post.get(r,c) {
-            if pq.get_color()==side && pq.get_type()==PieceType::Queen {
-                let mut tmpq = post.clone();
-                if is_square_attacked_by_opponent(&mut tmpq, (r,c), side) {
-                    let see_q = see_dest_estimate(post, side, (r,c), 0);
-                    if see_q < -SEE_PENALTY_MIN_CP { return true; }
-                }
-                return false;
-            }
-        }
-    }}
-    false
-}
-
-#[inline]
 fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32 {
     let opp_state = GameState::from_board_and_side(post_after.clone(), checked_side);
     let replies = find_all_valid_moves(&opp_state).len() as i32;
@@ -175,63 +152,9 @@ pub fn build_pv_for_root(
     pv
 }
 
-pub fn hard_root_filter(_board: &Board, _active_color: Color, v: &mut Vec<((usize, usize), (usize, usize))>, filtered: &mut Vec<((usize, usize), (usize, usize))>) {
-    // Conservative hard filter at root: discard any quiet move that immediately hangs
-    // on the destination square, according to a simple SEE probe. This avoids blatant
-    // one-ply blunders. Also discard clearly losing captures. Keep checks, except
-    // suicidal queen checks with very negative SEE.
-    for &(from, to) in v.iter() {
-        let (mut post, moved_opt) = simulate_move(_board, from, to);
-        let Some(moved) = moved_opt else { filtered.push((from,to)); continue; };
-        let captured_opt = _board.get(to.0, to.1);
-        let is_capture = captured_opt.is_some();
-
-        // If the move gives a check, generally keep it — but still gate suicidal queen checks.
-        let opponent = opposite_color(_active_color);
-        if post.is_side_in_check(opponent) {
-            if matches!(moved.get_type(), PieceType::Queen) {
-                if see_after(&post, _active_color, to, captured_opt) < -SEE_PENALTY_MIN_CP { continue; }
-            }
-            filtered.push((from, to));
-            continue;
-        }
-
-        // Quiet move self-hang filter / losing capture gate
-        let see = if is_capture { see_after(&post, _active_color, to, captured_opt) } else { see_dest_estimate(&post, _active_color, to, 0) };
-        if see < 0 { continue; }
-
-        // Additional hard filter: if this move leaves our queen en-prise with negative SEE, drop it.
-        if queen_hanging_after(&post, _active_color) { continue; }
-        filtered.push((from, to));
-    }
-}
-
-pub fn get_root_moves(game_state: &GameState, history: &History, board: &Board, active_color: Color, moves: &Vec<((usize, usize), (usize, usize))>, v: &mut Vec<((usize, usize), (usize, usize))>) {
+pub fn get_root_moves(_game_state: &GameState, _history: &History, _board: &Board, _active_color: Color, moves: &Vec<((usize, usize), (usize, usize))>, v: &mut Vec<((usize, usize), (usize, usize))>) {
     for &(from, to) in moves {
-        let is_capture = board.get(to.0, to.1).is_some();
-        let mut gs = *game_state; // GameState is Copy
-        let mut promote: Option<Piece> = None;
-        if let Some(p) = gs.board().get(from.0, from.1) {
-            if p.get_type() == PieceType::Pawn {
-                if (active_color == Color::White && to.0 == 7)
-                    || (active_color == Color::Black && to.0 == 0)
-                {
-                    promote = Some(Piece::new(PieceType::Queen, active_color));
-                }
-            }
-        }
-        let makes_threefold = if PieceMover::move_piece(&mut gs, from, to, is_capture, promote)
-        {
-            gs.switch_player_turn();
-            let fen = game_state_to_fen_string(gs);
-            let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
-            history.fen_repetition_count(&truncated) >= 2
-        } else {
-            false
-        };
-        if !makes_threefold {
-            v.push((from, to));
-        }
+        v.push((from, to));
     }
 }
 
@@ -603,7 +526,7 @@ fn king_safety_root_heuristics(base_board: &Board, side: Color, from: (usize,usi
     if !moved_is_king { return 0; }
     let (mut postk, _) = simulate_move(base_board, from, to);
     let mut delta = 0;
-    if is_square_attacked_by_opponent(&mut postk, to, side) { delta -= SEE_PENALTY_MAX_CP.max(300); }
+    if is_square_attacked_by_opponent(&mut postk, to, side) { delta -= 50; }
     if is_capture { delta -= KING_CAPTURE_ROOT_PENALTY; }
     delta
 }
@@ -635,14 +558,14 @@ fn self_hang_or_check_mobility(
                     let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
                     total_penalty += pen;
                     if p.get_type() == PieceType::Queen {
-                        let q_extra = ((-see) * 12).clamp(4000, 12000);
+                        let q_extra = ((-see) * 12).clamp(40, 120);
                         total_penalty += q_extra;
                     }
                 }
             }
         }
     }
-    let agg_cap: i32 = SEE_PENALTY_MAX_CP * 2 + SELF_HANG_AGGREGATE_CAP_EXTRA;
+    let agg_cap: i32 = 1000;
     let hang_pen = if total_penalty > 0 {
         -total_penalty.min(agg_cap)
     } else {
@@ -671,7 +594,7 @@ fn queen_kingside_pressure_bonus(base_board: &Board, side: Color, from: (usize,u
                 if is_square_attacked_by_opponent(&mut tmp, sq, active_for_query) { hit_count += 1; }
             }
             if hit_count > 0 {
-                let bonus = match hit_count { 1 => 350, _ => 700 };
+                let bonus = match hit_count { 1 => 1, _ => 2 };
                 return apply_for_side(bonus, side);
             }
         }
@@ -690,6 +613,7 @@ pub fn evaluate_after_root_move(
     b: i32,
     tt: &mut TranspositionTable,
     base_hmc: u32,
+    history: &History,
 ) -> (i32, bool, bool) {
     let mut tmp = base_board.clone();
     let u = tmp.make_move_simple(from, to);
@@ -710,10 +634,10 @@ pub fn evaluate_after_root_move(
             crate::search::advanced_search::MIN_EVAL_VALUE + 1,
             crate::search::advanced_search::MAX_EVAL_VALUE - 1,
             child_hmc,
-            &mut Vec::new(),
+            &mut history.get_rep_stack(),
         )
     } else {
-        let mut rep_stack: Vec<u64> = Vec::with_capacity(REP_STACK_CAPACITY);
+        let mut rep_stack = history.get_rep_stack();
         let ext = if gives_check { 2 } else { 0 };
         alphabeta(
             &mut tmp,
@@ -743,9 +667,26 @@ pub fn adjusted_root_eval_for_move(
     moved_is_pawn: bool,
     ps: i32,
 ) -> i32 {
-    adjust_root_score(
+    let mut adj = adjust_root_score(
         base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw, ps,
-    )
+    );
+    
+    // Safety rule: if search says a move is losing, do not let root heuristics 
+    // pump it up to look like a win. This prevents gambling against the search result.
+    if score_raw < 0 {
+        if side == Color::White {
+            adj = adj.min(score_raw);
+        } else {
+            adj = adj.max(score_raw);
+        }
+    }
+
+    // If it's a draw by repetition (raw score 0 and likely from alphabeta),
+    // ensure heuristics don't drag it down.
+    if score_raw == 0 {
+        adj = adj.max(-10);
+    }
+    adj
 }
 
 
