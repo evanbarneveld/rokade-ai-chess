@@ -1,10 +1,13 @@
 use crate::board::Board;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::history::history::History;
-use crate::piece::pieces::{capture_value_cp, opposite_color, piece_value_cp, Color, Piece, PieceType};
+use crate::piece::pieces::{capture_value_cp, opposite_color, Color, Piece, PieceType};
 use crate::search::alphabeta::alphabeta;
 use crate::search::advanced_search::find_all_valid_moves;
-use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
+use crate::search::see::{
+    apply_destination_see_penalties, attacked_by_pawn, see_dest_estimate,
+    SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP,
+};
 use crate::search::tt::{decode_move, TranspositionTable};
 use crate::search::zobrist::compute_zobrist;
 use crate::state::game_state::GameState;
@@ -28,9 +31,6 @@ const CHECK_TIEBREAK_BASE: i32 = 1;
 const CHECK_MOBILITY_BONUS_0: i32 = 5;
 const CHECK_MOBILITY_BONUS_1_2: i32 = 2;
 const CHECK_MOBILITY_BONUS_3_5: i32 = 1;
-const CHECK_MOBILITY_BONUS_6_8: i32 = 0;
-const CHECK_MOBILITY_BONUS_9_12: i32 = 0;
-const CHECK_MOBILITY_BONUS_OTHER: i32 = 0;
 
 // King safety
 const KING_CAPTURE_ROOT_PENALTY: i32 = 5;
@@ -40,11 +40,11 @@ const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 4;
 const KNIGHT_NON_EVAC_DEMOTION: i32 = 6;
 const KNIGHT_SAFE_EVAC_REWARD: i32 = 3;
 const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 4;
-const KNIGHT_CENTER_EXTRA_D5: i32 = 1;
+const KNIGHT_CENTER_EXTRA_D4: i32 = 1;
 const KNIGHT_CENTER_STEP: i32 = 0;
 
-// SEE penalty scaling by piece type
-const MINOR_PAWN_ATTACK_PENALTY: i32 = 1200;
+// Center squares (d4, d5, e4, e5)
+const CENTER_SQUARES: [(usize, usize); 4] = [(3, 3), (3, 4), (4, 3), (4, 4)];
 
 // ============================================================
 // GENERIC BOARD UTILITIES
@@ -68,61 +68,14 @@ fn simulate_move(board: &Board, from: (usize, usize), to: (usize, usize)) -> (Bo
     (b, moved)
 }
 
-/// Compute SEE estimate after simulating a move.
-#[inline]
-fn see_after(board: &Board, side: Color, to: (usize, usize), captured: Option<Piece>) -> i32 {
-    let cap = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-    see_dest_estimate(board, side, to, cap)
-}
-
-/// Check if a square is attacked by an opponent pawn.
-#[inline]
-fn attacked_by_pawn(board: &Board, sq: (usize, usize), attacker: Color) -> bool {
-    let (r, c) = sq;
-    match attacker {
-        Color::White => {
-            (r > 0 && c > 0 && matches!(board.get(r-1, c-1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
-            || (r > 0 && c + 1 < 8 && matches!(board.get(r-1, c+1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
-        }
-        Color::Black => {
-            (r + 1 < 8 && c > 0 && matches!(board.get(r+1, c-1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
-            || (r + 1 < 8 && c + 1 < 8 && matches!(board.get(r+1, c+1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
-        }
-    }
-}
-
 /// Compute a center-proximity score for a square (higher = closer to center).
 #[inline]
 fn center_score((r, c): (usize, usize)) -> i32 {
-    let centers = [(3, 3), (3, 4), (4, 3), (4, 4)];
-    centers.iter().map(|&(cr, cc)| {
+    CENTER_SQUARES.iter().map(|&(cr, cc)| {
         let dr = if r > cr { r - cr } else { cr - r };
         let dc = if c > cc { c - cc } else { cc - c };
         (60 - 10 * ((dr + dc) as i32)).max(0)
     }).max().unwrap_or(0)
-}
-
-/// Find the opponent king square on a board.
-#[inline]
-fn find_king_square(board: &Board, color: Color) -> Option<(usize, usize)> {
-    for r in 0..8 {
-        for c in 0..8 {
-            if let Some(p) = board.get(r, c) {
-                if p.get_color() == color && p.get_type() == PieceType::King {
-                    return Some((r, c));
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Check if two squares are adjacent (within 1 step in any direction).
-#[inline]
-fn squares_adjacent(a: (usize, usize), b: (usize, usize)) -> bool {
-    let dr = if a.0 > b.0 { a.0 - b.0 } else { b.0 - a.0 };
-    let dc = if a.1 > b.1 { a.1 - b.1 } else { b.1 - a.1 };
-    dr <= 1 && dc <= 1
 }
 
 // ============================================================
@@ -137,7 +90,7 @@ fn knight_safe_squares(board: &Board, side: Color, from: (usize, usize)) -> Vec<
         (1, 2), (1, -2), (-1, 2), (-1, -2)
     ];
     let (fr, fc) = from;
-    let mut v = Vec::new();
+    let mut v = Vec::with_capacity(8);
     for (dr, dc) in DELTAS {
         let (nr, nc) = (fr as isize + dr, fc as isize + dc);
         if !(0..=7).contains(&nr) || !(0..=7).contains(&nc) {
@@ -207,14 +160,15 @@ fn knight_evacuations_priority(
             if !dest_attacked || see1 >= 0 {
                 // Safe evacuation bonus with center preference
                 let mut evac = KNIGHT_SAFE_EVAC_REWARD;
-                for &(cr, cc) in &[(3, 3), (3, 4), (4, 3), (4, 4)] {
+                for &(cr, cc) in &CENTER_SQUARES {
                     let dr = if tr > cr { tr - cr } else { cr - tr };
                     let dc = if tc > cc { tc - cc } else { cc - tc };
                     let dist = (dr + dc) as i32;
                     evac += (20 - KNIGHT_CENTER_STEP * dist).max(0);
                 }
+                // Extra bonus for d4 square
                 if (tr, tc) == (3, 3) {
-                    evac += KNIGHT_CENTER_EXTRA_D5;
+                    evac += KNIGHT_CENTER_EXTRA_D4;
                 }
                 delta += apply_for_side(evac, side);
             } else {
@@ -222,143 +176,6 @@ fn knight_evacuations_priority(
             }
         }
     }
-    delta
-}
-
-// ============================================================
-// SEE PENALTY HEURISTICS
-// ============================================================
-
-/// Check if opponent king can safely capture a piece on the destination square.
-#[inline]
-fn king_can_safely_capture(
-    post_after: &Board,
-    side: Color,
-    to: (usize, usize),
-    moved_pt: PieceType,
-) -> Option<i32> {
-    let opp = opposite_color(side);
-
-    // Find opponent king
-    let king_sq = find_king_square(post_after, opp)?;
-
-    // King can only capture if adjacent
-    if !squares_adjacent(king_sq, to) {
-        return None;
-    }
-
-    // Ensure destination holds our piece
-    let on_to = post_after.get(to.0, to.1)?;
-    if on_to.get_color() != side {
-        return None;
-    }
-
-    // Simulate king capture
-    let mut after_kx = post_after.clone();
-    after_kx.set(king_sq.0, king_sq.1, None);
-    after_kx.set(to.0, to.1, Some(Piece::new(PieceType::King, opp)));
-
-    // Check if king is safe after capture
-    let mut tmp_chk = after_kx.clone();
-    let unsafe_for_king = is_square_attacked_by_opponent(&mut tmp_chk, to, opp);
-
-    if unsafe_for_king {
-        return None;
-    }
-
-    // Apply penalty scaled by piece importance
-    let base_pen = match moved_pt {
-        PieceType::Queen => 900,
-        PieceType::Rook => 500,
-        PieceType::Bishop | PieceType::Knight => 300,
-        _ => 200,
-    };
-    let scale = match moved_pt {
-        PieceType::Queen | PieceType::Rook => 8,
-        PieceType::Bishop | PieceType::Knight => 10,
-        _ => 8,
-    };
-    Some((base_pen * scale).clamp(2400, 8000))
-}
-
-/// Calculate SEE-based penalty for checking piece attacked by pawn.
-#[inline]
-fn pawn_attacked_minor_penalty(
-    post_after: &Board,
-    side: Color,
-    to: (usize, usize),
-    moved_pt: PieceType,
-) -> i32 {
-    if moved_pt != PieceType::Knight && moved_pt != PieceType::Bishop {
-        return 0;
-    }
-    let opp = opposite_color(side);
-    if attacked_by_pawn(post_after, to, opp) {
-        MINOR_PAWN_ATTACK_PENALTY
-    } else {
-        0
-    }
-}
-
-/// Apply SEE-based penalties for destination square vulnerabilities.
-#[inline]
-fn apply_destination_see_penalties(
-    base_board: &Board,
-    post_after: &Board,
-    side: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-    is_capture: bool,
-    moved_is_pawn: bool,
-    gives_check: bool,
-    _moved_is_queen: bool,
-) -> i32 {
-    let mut delta = 0;
-    let captured = base_board.get(to.0, to.1);
-
-    if !gives_check {
-        // Non-checking moves: simple SEE penalty
-        let see = see_after(post_after, side, to, captured);
-        if see < 0 {
-            let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
-            delta += apply_for_side(-pen, side);
-            if !is_capture && moved_is_pawn {
-                delta += apply_for_side(-SEE_PENALTY_MIN_CP, side);
-            }
-        }
-        return delta;
-    }
-
-    // Checking moves: guard against suicidal checks
-    let see = see_after(post_after, side, to, captured);
-    let moved_pt = base_board.get(from.0, from.1).map(|p| p.get_type());
-
-    if see < 0 {
-        // Scale penalty by piece importance
-        let pen = match moved_pt {
-            Some(PieceType::Queen) => ((-see) * 6).clamp(600, 6000),
-            Some(PieceType::Rook) => ((-see) * 4).clamp(3600, 6000),
-            Some(PieceType::Bishop) | Some(PieceType::Knight) => ((-see) * 4).clamp(600, 3600),
-            Some(PieceType::Pawn) => ((-see) * 2).clamp(200, 2000),
-            _ => ((-see) * 3).clamp(300, 3000),
-        };
-        delta += apply_for_side(-pen, side);
-    }
-
-    // Additional penalty for minors attacked by pawn after check
-    if let Some(pt) = moved_pt {
-        delta += apply_for_side(-pawn_attacked_minor_penalty(post_after, side, to, pt), side);
-    }
-
-    // Check if opponent king can safely capture the checking piece
-    if let Some(pt) = moved_pt {
-        if matches!(pt, PieceType::Rook | PieceType::Queen | PieceType::Bishop | PieceType::Knight) {
-            if let Some(pen) = king_can_safely_capture(post_after, side, to, pt) {
-                delta += apply_for_side(-(pen as i32), side);
-            }
-        }
-    }
-
     delta
 }
 
@@ -548,9 +365,7 @@ fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32
         0 => CHECK_MOBILITY_BONUS_0,
         1..=2 => CHECK_MOBILITY_BONUS_1_2,
         3..=5 => CHECK_MOBILITY_BONUS_3_5,
-        6..=8 => CHECK_MOBILITY_BONUS_6_8,
-        9..=12 => CHECK_MOBILITY_BONUS_9_12,
-        _ => CHECK_MOBILITY_BONUS_OTHER,
+        _ => 0,
     }
 }
 
@@ -615,11 +430,10 @@ fn queen_kingside_pressure_bonus(
     from: (usize, usize),
     to: (usize, usize),
 ) -> i32 {
-    let mp = match base_board.get(from.0, from.1) {
-        Some(p) if p.get_type() == PieceType::Queen => p,
+    match base_board.get(from.0, from.1) {
+        Some(p) if p.get_type() == PieceType::Queen => {}
         _ => return 0,
-    };
-    let _ = mp;
+    }
 
     let (post, _) = simulate_move(base_board, from, to);
     let targets: &[(usize, usize)] = if side == Color::White {
@@ -777,7 +591,6 @@ pub fn adjust_root_score(
     is_capture: bool,
     moved_is_pawn: bool,
     score_raw: i32,
-    _strength_ps: i32,
 ) -> i32 {
     let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
 
@@ -898,10 +711,9 @@ pub fn adjusted_root_eval_for_move(
     score_raw: i32,
     is_capture: bool,
     moved_is_pawn: bool,
-    ps: i32,
 ) -> i32 {
     let mut adj = adjust_root_score(
-        base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw, ps,
+        base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw,
     );
 
     // Safety: don't let heuristics turn a losing move into a winning one

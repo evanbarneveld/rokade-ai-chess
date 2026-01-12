@@ -69,7 +69,7 @@ fn debug_rank_root_moves_for_mate_in_2() {
 
     let gs = *game.get_game_state();
     let hist = game.get_history().clone();
-    let rankings = debug_rank_root_moves(&gs, &hist, 4, 1000);
+    let rankings = debug_rank_root_moves(&gs, &hist, 4);
     println!("Ranked root moves (SAN, adjusted, raw):");
     for (san, adj, raw) in rankings.iter().take(15) {
         println!("{}  adj:{}  raw:{}", san, adj, raw);

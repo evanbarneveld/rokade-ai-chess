@@ -3,7 +3,7 @@ use crate::history::history::History;
 use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
 use crate::search::locking::get_tt_mutex;
-use crate::search::playing_strength::{select_move_based_using_strength_promo, PLAYING_STRENGTH_MAX};
+use crate::search::playing_strength::{select_move_based_using_strength_promo};
 use crate::search::root_moves::{
     adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves,
 };
@@ -119,14 +119,6 @@ pub fn find_best_move(
     // if depth is 0, treat it as 1 ply (evaluate after making one move)
     let search_depth = if search_depth == 0 { 1 } else { search_depth };
 
-    // Map playing_strength [1..1000] to an effective depth to intentionally weaken play at low strengths.
-    // Rough mapping: at ~300 strength, cap to ~3 ply; at 1000 keep requested depth.
-    let ps = if playing_strength == 0 {
-        1
-    } else {
-        playing_strength.min(PLAYING_STRENGTH_MAX)
-    } as i32;
-
     let effective_depth = search_depth;
 
     let root_moves: Vec<((usize, usize), (usize, usize), Option<char>)> = {
@@ -200,7 +192,6 @@ pub fn find_best_move(
                     &mut window,
                     &mut tt,
                     base_hmc,
-                    ps,
                     game_state,
                     history,
                 )
@@ -214,7 +205,6 @@ pub fn find_best_move(
                     MAX_EVAL_VALUE - 1,
                     &mut tt,
                     base_hmc,
-                    ps,
                     game_state,
                     history,
                 )
@@ -250,7 +240,6 @@ pub fn find_best_move(
                 &mut window,
                 &mut tt,
                 base_hmc,
-                ps,
                 game_state,
                 history,
             )
@@ -264,7 +253,6 @@ pub fn find_best_move(
                 MAX_EVAL_VALUE - 1,
                 &mut tt,
                 base_hmc,
-                ps,
                 game_state,
                 history,
             )
@@ -311,7 +299,6 @@ pub fn find_best_move(
                     sr,
                     is_capture,
                     moved_is_pawn,
-                    ps,
                 );
                 scored_with_promo.push((from, to, promo, adj));
             }
@@ -345,7 +332,6 @@ pub fn debug_rank_root_moves(
     game_state: &GameState,
     history: &History,
     depth: usize,
-    playing_strength: usize,
 ) -> Vec<(String, i32, i32)> {
     let board = game_state.board();
     let active_color = game_state.active_color();
@@ -357,11 +343,7 @@ pub fn debug_rank_root_moves(
 
     // No TT needed for a one-shot evaluation per move here
     let mut tt = get_tt_mutex().lock().unwrap();
-    let ps = if playing_strength == 0 {
-        1
-    } else {
-        playing_strength.min(PLAYING_STRENGTH_MAX)
-    } as i32;
+
     let mut out: Vec<(String,i32,i32)> = Vec::with_capacity(root.len());
     for (from, to, promo) in root {
         let (raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
@@ -386,7 +368,6 @@ pub fn debug_rank_root_moves(
             raw,
             is_capture,
             moved_is_pawn,
-            ps,
         );
         adj = apply_repetition_avoidance_bias(
             adj,
@@ -679,7 +660,6 @@ fn evaluate_root_for_bounds(
     b: i32,
     tt: &mut TranspositionTable,
     base_hmc: u32,
-    ps: i32,
     game_state: &GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
@@ -753,7 +733,6 @@ fn evaluate_root_for_bounds(
                 score_raw,
                 is_capture,
                 moved_is_pawn,
-                ps,
             );
 
             best_from_to_promo = Some((pv_from, pv_to, pv_promo));
@@ -800,7 +779,6 @@ fn evaluate_root_for_bounds(
                     score_raw,
                     is_capture,
                     moved_is_pawn,
-                    ps,
                 );
                 // Apply repetition-avoidance bias at root for parallel moves
                 adjusted = apply_repetition_avoidance_bias(
@@ -919,7 +897,6 @@ fn evaluate_root_for_bounds(
                 score_raw,
                 is_capture,
                 moved_is_pawn,
-                ps,
             );
             // repetition-avoidance at root
             adjusted = apply_repetition_avoidance_bias(
@@ -1037,7 +1014,6 @@ fn probe_with_aspiration(
     window: &mut i32,
     tt: &mut TranspositionTable,
     base_hmc: u32,
-    ps: i32,
     game_state: &GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
@@ -1060,7 +1036,6 @@ fn probe_with_aspiration(
             b,
             tt,
             base_hmc,
-            ps,
             game_state,
             history,
         );
@@ -1109,7 +1084,6 @@ fn probe_with_aspiration(
                 fb,
                 tt,
                 base_hmc,
-                ps,
                 game_state,
                 history,
             );

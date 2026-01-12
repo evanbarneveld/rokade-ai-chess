@@ -18,7 +18,7 @@ fn test_knight_saved() {
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 3, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     // Debug: rank root moves with adjusted scores
-    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 3, TEST_MOVE_TIME);
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 3);
     println!("Root ranks (SAN, adj, raw): {:?}", ranks);
     // The best move should be to evacuate the knight with Nd5.
     assert_eq!(san_move, "Nd5");
@@ -38,7 +38,7 @@ fn test_queen_save() {
     assert_eq!(san_move, "Qxe7+"); //only good move
 
     // Debug: rank root moves with adjusted scores
-    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 3, 1000);
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 3);
     println!("Root ranks (SAN, adj, raw): {:?}", ranks);
     // The best move saves the queen
 

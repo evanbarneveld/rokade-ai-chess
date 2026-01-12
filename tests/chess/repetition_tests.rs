@@ -27,7 +27,7 @@ fn test_prefer_draw_over_loss() {
     // Now White is in Pos where Qa7+ leads to 3rd repetition of start position.
     
     let history = game.get_history().clone();
-    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4, 1000);
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4);
     for r in ranks {
         println!("Rank: {:?}", r);
     }
