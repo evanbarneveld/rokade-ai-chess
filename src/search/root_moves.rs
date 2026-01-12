@@ -9,24 +9,22 @@ use crate::search::tt::{decode_move, TranspositionTable};
 use crate::search::zobrist::compute_zobrist;
 use crate::state::game_state::GameState;
 
+// ============================================================
+// CONSTANTS
+// ============================================================
 
-const ROOT_CAPTURE_BONUS_DIV: i32 = 10; // add captured piece value / this divisor
+// Root capture scoring
+const ROOT_CAPTURE_BONUS_DIV: i32 = 10;
 
-const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150; // only apply adjustments if side advantage above this
-const ENDGAME_HMC_THRESHOLD: u32 = 80; // start scaling after this half-move clock
-const ENDGAME_SCALE_MAX: i32 = 21; // max scaling steps used in the formula below
-const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15; // per-scale bonus if capture or pawn move
-const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8; // per-scale penalty if quiet move
+// Endgame / 50-move rule thresholds
+const ENDGAME_SIDEADV_THRESHOLD_CP: i32 = 150;
+const ENDGAME_HMC_THRESHOLD: u32 = 80;
+const ENDGAME_SCALE_MAX: i32 = 21;
+const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15;
+const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8;
 
-// ---- Root heuristics constants (grouped; extracted from inline literals) ----
+// Check and mobility bonuses (by opponent reply count)
 const CHECK_TIEBREAK_BASE: i32 = 1;
-const KING_CAPTURE_ROOT_PENALTY: i32 = 5;
-const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 4;
-const KNIGHT_NON_EVAC_DEMOTION: i32 = 6;
-const KNIGHT_SAFE_EVAC_REWARD: i32 = 3;
-const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 4;
-const KNIGHT_CENTER_EXTRA_D5: i32 = 1;
-const KNIGHT_CENTER_STEP: i32 = 0;
 const CHECK_MOBILITY_BONUS_0: i32 = 5;
 const CHECK_MOBILITY_BONUS_1_2: i32 = 2;
 const CHECK_MOBILITY_BONUS_3_5: i32 = 1;
@@ -34,65 +32,514 @@ const CHECK_MOBILITY_BONUS_6_8: i32 = 0;
 const CHECK_MOBILITY_BONUS_9_12: i32 = 0;
 const CHECK_MOBILITY_BONUS_OTHER: i32 = 0;
 
-// ---- Small helpers to reduce duplication (all #[inline]) ----
-#[inline]
-fn apply_for_side(v: i32, side: Color) -> i32 { if side == Color::White { v } else { -v } }
+// King safety
+const KING_CAPTURE_ROOT_PENALTY: i32 = 5;
 
+// Knight evacuation heuristics
+const KNIGHT_IGNORE_PAWN_THREAT_PENALTY: i32 = 4;
+const KNIGHT_NON_EVAC_DEMOTION: i32 = 6;
+const KNIGHT_SAFE_EVAC_REWARD: i32 = 3;
+const KNIGHT_SAFE_TO_SPECIFIC_REWARD: i32 = 4;
+const KNIGHT_CENTER_EXTRA_D5: i32 = 1;
+const KNIGHT_CENTER_STEP: i32 = 0;
+
+// SEE penalty scaling by piece type
+const MINOR_PAWN_ATTACK_PENALTY: i32 = 1200;
+
+// ============================================================
+// GENERIC BOARD UTILITIES
+// ============================================================
+
+/// Apply sign based on side (positive for White, negative for Black).
 #[inline]
-fn simulate_move(board: &Board, from: (usize,usize), to: (usize,usize)) -> (Board, Option<Piece>) {
+fn apply_for_side(v: i32, side: Color) -> i32 {
+    if side == Color::White { v } else { -v }
+}
+
+/// Simulate a move on a cloned board, returning the new board and the moved piece.
+#[inline]
+fn simulate_move(board: &Board, from: (usize, usize), to: (usize, usize)) -> (Board, Option<Piece>) {
     let mut b = board.clone();
     let moved = board.get(from.0, from.1);
     b.set(from.0, from.1, None);
-    if let Some(p) = moved { b.set(to.0, to.1, Some(p)); }
+    if let Some(p) = moved {
+        b.set(to.0, to.1, Some(p));
+    }
     (b, moved)
 }
 
+/// Compute SEE estimate after simulating a move.
 #[inline]
-fn see_after(board: &Board, side: Color, to: (usize,usize), captured: Option<Piece>) -> i32 {
+fn see_after(board: &Board, side: Color, to: (usize, usize), captured: Option<Piece>) -> i32 {
     let cap = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
     see_dest_estimate(board, side, to, cap)
 }
 
+/// Check if a square is attacked by an opponent pawn.
 #[inline]
-fn attacked_by_pawn(board: &Board, sq: (usize,usize), attacker: Color) -> bool {
-    let (r,c) = sq;
+fn attacked_by_pawn(board: &Board, sq: (usize, usize), attacker: Color) -> bool {
+    let (r, c) = sq;
     match attacker {
-        Color::White => (r>0 && c>0 && matches!(board.get(r-1,c-1), Some(p) if p.get_color()==attacker && p.get_type()==PieceType::Pawn))
-                     || (r>0 && c+1<8 && matches!(board.get(r-1,c+1), Some(p) if p.get_color()==attacker && p.get_type()==PieceType::Pawn)),
-        Color::Black => (r+1<8 && c>0 && matches!(board.get(r+1,c-1), Some(p) if p.get_color()==attacker && p.get_type()==PieceType::Pawn))
-                     || (r+1<8 && c+1<8 && matches!(board.get(r+1,c+1), Some(p) if p.get_color()==attacker && p.get_type()==PieceType::Pawn)),
+        Color::White => {
+            (r > 0 && c > 0 && matches!(board.get(r-1, c-1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
+            || (r > 0 && c + 1 < 8 && matches!(board.get(r-1, c+1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
+        }
+        Color::Black => {
+            (r + 1 < 8 && c > 0 && matches!(board.get(r+1, c-1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
+            || (r + 1 < 8 && c + 1 < 8 && matches!(board.get(r+1, c+1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
+        }
     }
 }
 
+/// Compute a center-proximity score for a square (higher = closer to center).
 #[inline]
-fn center_score((r,c):(usize,usize)) -> i32 {
-    let centers=[(3,3),(3,4),(4,3),(4,4)];
-    centers.iter().map(|&(cr,cc)|{
-        let dr = if r>cr {r-cr} else {cr-r};
-        let dc = if c>cc {c-cc} else {cc-c};
-        (60 - 10 * ((dr+dc) as i32)).max(0)
+fn center_score((r, c): (usize, usize)) -> i32 {
+    let centers = [(3, 3), (3, 4), (4, 3), (4, 4)];
+    centers.iter().map(|&(cr, cc)| {
+        let dr = if r > cr { r - cr } else { cr - r };
+        let dc = if c > cc { c - cc } else { cc - c };
+        (60 - 10 * ((dr + dc) as i32)).max(0)
     }).max().unwrap_or(0)
 }
 
+/// Find the opponent king square on a board.
 #[inline]
-fn knight_safe_squares(board: &Board, side: Color, from: (usize,usize)) -> Vec<(usize,usize)> {
-    const DELTAS: [(isize,isize);8] = [(2,1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)];
-    let (fr,fc)=from;
-    let mut v=Vec::new();
-    for (dr,dc) in DELTAS {
-        let (nr,nc) = (fr as isize+dr, fc as isize+dc);
-        if !(0..=7).contains(&nr) || !(0..=7).contains(&nc) { continue; }
-        let (nr,nc) = (nr as usize, nc as usize);
-        if let Some(occ)=board.get(nr,nc) { if occ.get_color()==side { continue; } }
-        let (sim, _) = simulate_move(board, from, (nr,nc));
+fn find_king_square(board: &Board, color: Color) -> Option<(usize, usize)> {
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = board.get(r, c) {
+                if p.get_color() == color && p.get_type() == PieceType::King {
+                    return Some((r, c));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check if two squares are adjacent (within 1 step in any direction).
+#[inline]
+fn squares_adjacent(a: (usize, usize), b: (usize, usize)) -> bool {
+    let dr = if a.0 > b.0 { a.0 - b.0 } else { b.0 - a.0 };
+    let dc = if a.1 > b.1 { a.1 - b.1 } else { b.1 - a.1 };
+    dr <= 1 && dc <= 1
+}
+
+// ============================================================
+// KNIGHT-SPECIFIC HEURISTICS
+// ============================================================
+
+/// Compute safe squares a knight can move to from a given position.
+#[inline]
+fn knight_safe_squares(board: &Board, side: Color, from: (usize, usize)) -> Vec<(usize, usize)> {
+    const DELTAS: [(isize, isize); 8] = [
+        (2, 1), (2, -1), (-2, 1), (-2, -1),
+        (1, 2), (1, -2), (-1, 2), (-1, -2)
+    ];
+    let (fr, fc) = from;
+    let mut v = Vec::new();
+    for (dr, dc) in DELTAS {
+        let (nr, nc) = (fr as isize + dr, fc as isize + dc);
+        if !(0..=7).contains(&nr) || !(0..=7).contains(&nc) {
+            continue;
+        }
+        let (nr, nc) = (nr as usize, nc as usize);
+        if let Some(occ) = board.get(nr, nc) {
+            if occ.get_color() == side {
+                continue;
+            }
+        }
+        let (sim, _) = simulate_move(board, from, (nr, nc));
         let mut tmp = sim.clone();
-        if !is_square_attacked_by_opponent(&mut tmp, (nr,nc), side) || see_dest_estimate(&sim, side, (nr,nc), 0) >= 0 {
-            v.push((nr,nc));
+        if !is_square_attacked_by_opponent(&mut tmp, (nr, nc), side)
+            || see_dest_estimate(&sim, side, (nr, nc), 0) >= 0
+        {
+            v.push((nr, nc));
         }
     }
     v
 }
 
+/// Priority adjustment for knight evacuations from pawn threats.
+#[inline]
+fn knight_evacuations_priority(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    gives_check: bool,
+) -> i32 {
+    if gives_check {
+        return 0;
+    }
+    let opp = opposite_color(side);
+
+    // Find all our knights attacked by pawns
+    let mut attacked_knights: Vec<(usize, usize)> = Vec::new();
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = base_board.get(r, c) {
+                if p.get_color() == side && p.get_type() == PieceType::Knight {
+                    if attacked_by_pawn(base_board, (r, c), opp) {
+                        attacked_knights.push((r, c));
+                    }
+                }
+            }
+        }
+    }
+    if attacked_knights.is_empty() {
+        return 0;
+    }
+
+    let mut delta = 0;
+
+    // Penalize moves that don't evacuate an attacked knight
+    if !attacked_knights.contains(&from) {
+        delta -= apply_for_side(500, side);
+    } else if let Some(p) = base_board.get(from.0, from.1) {
+        if p.get_type() == PieceType::Knight {
+            let (tr, tc) = to;
+            let (sim, _) = simulate_move(base_board, from, to);
+            let mut tmp = sim.clone();
+            let dest_attacked = is_square_attacked_by_opponent(&mut tmp, (tr, tc), side);
+            let see1 = see_dest_estimate(&sim, side, (tr, tc), 0);
+
+            if !dest_attacked || see1 >= 0 {
+                // Safe evacuation bonus with center preference
+                let mut evac = KNIGHT_SAFE_EVAC_REWARD;
+                for &(cr, cc) in &[(3, 3), (3, 4), (4, 3), (4, 4)] {
+                    let dr = if tr > cr { tr - cr } else { cr - tr };
+                    let dc = if tc > cc { tc - cc } else { cc - tc };
+                    let dist = (dr + dc) as i32;
+                    evac += (20 - KNIGHT_CENTER_STEP * dist).max(0);
+                }
+                if (tr, tc) == (3, 3) {
+                    evac += KNIGHT_CENTER_EXTRA_D5;
+                }
+                delta += apply_for_side(evac, side);
+            } else {
+                delta -= apply_for_side(150, side);
+            }
+        }
+    }
+    delta
+}
+
+// ============================================================
+// SEE PENALTY HEURISTICS
+// ============================================================
+
+/// Check if opponent king can safely capture a piece on the destination square.
+#[inline]
+fn king_can_safely_capture(
+    post_after: &Board,
+    side: Color,
+    to: (usize, usize),
+    moved_pt: PieceType,
+) -> Option<i32> {
+    let opp = opposite_color(side);
+
+    // Find opponent king
+    let king_sq = find_king_square(post_after, opp)?;
+
+    // King can only capture if adjacent
+    if !squares_adjacent(king_sq, to) {
+        return None;
+    }
+
+    // Ensure destination holds our piece
+    let on_to = post_after.get(to.0, to.1)?;
+    if on_to.get_color() != side {
+        return None;
+    }
+
+    // Simulate king capture
+    let mut after_kx = post_after.clone();
+    after_kx.set(king_sq.0, king_sq.1, None);
+    after_kx.set(to.0, to.1, Some(Piece::new(PieceType::King, opp)));
+
+    // Check if king is safe after capture
+    let mut tmp_chk = after_kx.clone();
+    let unsafe_for_king = is_square_attacked_by_opponent(&mut tmp_chk, to, opp);
+
+    if unsafe_for_king {
+        return None;
+    }
+
+    // Apply penalty scaled by piece importance
+    let base_pen = match moved_pt {
+        PieceType::Queen => 900,
+        PieceType::Rook => 500,
+        PieceType::Bishop | PieceType::Knight => 300,
+        _ => 200,
+    };
+    let scale = match moved_pt {
+        PieceType::Queen | PieceType::Rook => 8,
+        PieceType::Bishop | PieceType::Knight => 10,
+        _ => 8,
+    };
+    Some((base_pen * scale).clamp(2400, 8000))
+}
+
+/// Calculate SEE-based penalty for checking piece attacked by pawn.
+#[inline]
+fn pawn_attacked_minor_penalty(
+    post_after: &Board,
+    side: Color,
+    to: (usize, usize),
+    moved_pt: PieceType,
+) -> i32 {
+    if moved_pt != PieceType::Knight && moved_pt != PieceType::Bishop {
+        return 0;
+    }
+    let opp = opposite_color(side);
+    if attacked_by_pawn(post_after, to, opp) {
+        MINOR_PAWN_ATTACK_PENALTY
+    } else {
+        0
+    }
+}
+
+/// Apply SEE-based penalties for destination square vulnerabilities.
+#[inline]
+fn apply_destination_see_penalties(
+    base_board: &Board,
+    post_after: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    is_capture: bool,
+    moved_is_pawn: bool,
+    gives_check: bool,
+    _moved_is_queen: bool,
+) -> i32 {
+    let mut delta = 0;
+    let captured = base_board.get(to.0, to.1);
+
+    if !gives_check {
+        // Non-checking moves: simple SEE penalty
+        let see = see_after(post_after, side, to, captured);
+        if see < 0 {
+            let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
+            delta += apply_for_side(-pen, side);
+            if !is_capture && moved_is_pawn {
+                delta += apply_for_side(-SEE_PENALTY_MIN_CP, side);
+            }
+        }
+        return delta;
+    }
+
+    // Checking moves: guard against suicidal checks
+    let see = see_after(post_after, side, to, captured);
+    let moved_pt = base_board.get(from.0, from.1).map(|p| p.get_type());
+
+    if see < 0 {
+        // Scale penalty by piece importance
+        let pen = match moved_pt {
+            Some(PieceType::Queen) => ((-see) * 6).clamp(600, 6000),
+            Some(PieceType::Rook) => ((-see) * 4).clamp(3600, 6000),
+            Some(PieceType::Bishop) | Some(PieceType::Knight) => ((-see) * 4).clamp(600, 3600),
+            Some(PieceType::Pawn) => ((-see) * 2).clamp(200, 2000),
+            _ => ((-see) * 3).clamp(300, 3000),
+        };
+        delta += apply_for_side(-pen, side);
+    }
+
+    // Additional penalty for minors attacked by pawn after check
+    if let Some(pt) = moved_pt {
+        delta += apply_for_side(-pawn_attacked_minor_penalty(post_after, side, to, pt), side);
+    }
+
+    // Check if opponent king can safely capture the checking piece
+    if let Some(pt) = moved_pt {
+        if matches!(pt, PieceType::Rook | PieceType::Queen | PieceType::Bishop | PieceType::Knight) {
+            if let Some(pen) = king_can_safely_capture(post_after, side, to, pt) {
+                delta += apply_for_side(-(pen as i32), side);
+            }
+        }
+    }
+
+    delta
+}
+
+// ============================================================
+// THREAT RESOLUTION & EVACUATION
+// ============================================================
+
+/// Handle threat resolution and piece evacuation heuristics.
+#[inline]
+fn threat_resolution_and_evacuation(
+    base_board: &Board,
+    post_after: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    gives_check: bool,
+) -> i32 {
+    if gives_check {
+        return 0;
+    }
+
+    let mut base_clone = base_board.clone();
+    let opp = opposite_color(side);
+
+    // Find all our threatened pieces
+    let mut threatened: Vec<(usize, usize, PieceType, bool)> = Vec::new();
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = base_board.get(r, c) {
+                if p.get_color() != side {
+                    continue;
+                }
+                if !is_square_attacked_by_opponent(&mut base_clone, (r, c), side) {
+                    continue;
+                }
+                let pawn_attacks = attacked_by_pawn(base_board, (r, c), opp);
+                threatened.push((r, c, p.get_type(), pawn_attacks));
+            }
+        }
+    }
+    if threatened.is_empty() {
+        return 0;
+    }
+
+    let mut delta = 0;
+    for (tr, tc, pt, by_pawn) in threatened {
+        // Precompute knight safe squares if applicable
+        let knight_safe: Vec<(usize, usize)> = if pt == PieceType::Knight && by_pawn {
+            knight_safe_squares(base_board, side, (tr, tc))
+        } else {
+            Vec::new()
+        };
+
+        // Check if piece is still attacked after our move
+        let still_attacked = if (tr, tc) == from {
+            let mut tmpmv = post_after.clone();
+            is_square_attacked_by_opponent(&mut tmpmv, to, side)
+        } else if post_after.get(tr, tc).is_none() {
+            false
+        } else {
+            let mut tmp2 = post_after.clone();
+            is_square_attacked_by_opponent(&mut tmp2, (tr, tc), side)
+        };
+
+        if (tr, tc) == from {
+            // We moved the threatened piece - calculate evacuation bonus
+            let mut evac_bonus = 0;
+            let see_new = see_dest_estimate(post_after, side, to, 0);
+            if !still_attacked || see_new >= 0 {
+                evac_bonus += 400;
+            }
+
+            // Knight-specific center bonus
+            if pt == PieceType::Knight {
+                let mut cb = center_score(to);
+                if to == (3, 3) {
+                    cb += 80;
+                }
+                if !knight_safe.is_empty() && knight_safe.iter().any(|&sq| sq == to) {
+                    cb += 80;
+                }
+                evac_bonus += cb.max(0);
+            }
+
+            // Bonus for evacuating to a known safe square
+            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
+                if knight_safe.iter().any(|&sq| sq == to) {
+                    evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD;
+                }
+            }
+            delta += apply_for_side(evac_bonus, side);
+        } else {
+            // We did NOT move the threatened piece
+            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
+                delta -= apply_for_side(KNIGHT_IGNORE_PAWN_THREAT_PENALTY, side);
+            }
+            if still_attacked {
+                let pen = match pt {
+                    PieceType::Knight | PieceType::Bishop => 200,
+                    PieceType::Rook => 120,
+                    PieceType::Queen => 80,
+                    PieceType::Pawn => 40,
+                    PieceType::King => 400,
+                };
+                let val = if by_pawn { pen + 400 } else { pen };
+                delta -= apply_for_side(val, side);
+            }
+        }
+
+        // Additional knight demotion if not evacuating
+        if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
+            if (tr, tc) != from {
+                delta -= apply_for_side(KNIGHT_NON_EVAC_DEMOTION, side);
+            } else if knight_safe.iter().any(|&sq| sq == to) {
+                delta += apply_for_side(KNIGHT_SAFE_TO_SPECIFIC_REWARD, side);
+            }
+        }
+    }
+    delta
+}
+
+// ============================================================
+// ENDGAME & KING SAFETY
+// ============================================================
+
+/// Apply endgame / 50-move rule scaling adjustments.
+#[inline]
+fn endgame_50move_scaling(
+    side: Color,
+    score_raw: i32,
+    base_hmc: u32,
+    is_capture: bool,
+    moved_is_pawn: bool,
+) -> i32 {
+    let side_adv = apply_for_side(score_raw, side);
+    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD {
+        let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1)).min(ENDGAME_SCALE_MAX);
+        if is_capture || moved_is_pawn {
+            ENDGAME_CAPTURE_SCALE_BONUS_CP * scale
+        } else {
+            -ENDGAME_NONCAP_SCALE_PENALTY_CP * scale
+        }
+    } else {
+        0
+    }
+}
+
+/// Apply king safety heuristics for king moves.
+#[inline]
+fn king_safety_root_heuristics(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    is_capture: bool,
+) -> i32 {
+    let moved_is_king = base_board
+        .get(from.0, from.1)
+        .map(|p| p.get_type() == PieceType::King)
+        .unwrap_or(false);
+    if !moved_is_king {
+        return 0;
+    }
+
+    let (mut postk, _) = simulate_move(base_board, from, to);
+    let mut delta = 0;
+
+    if is_square_attacked_by_opponent(&mut postk, to, side) {
+        delta -= 50;
+    }
+    if is_capture {
+        delta -= KING_CAPTURE_ROOT_PENALTY;
+    }
+    delta
+}
+
+// ============================================================
+// CHECK & QUEEN HEURISTICS
+// ============================================================
+
+/// Calculate check mobility bonus based on opponent's available replies.
 #[inline]
 fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32 {
     let opp_state = GameState::from_board_and_side(post_after.clone(), checked_side);
@@ -107,431 +554,7 @@ fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32
     }
 }
 
-// / build_pv_for_root constructs the principal variation (PV) line starting from a given root move
-/// by followthe ing best moves stored in the transposition table (TT), alternating sides, and validating
-/// every step’s legality. It returns a list of move pairs (from, to) that represents the best‑known line
-/// from the root, according to the TT.
-#[inline]
-pub fn build_pv_for_root(
-    board: &Board,
-    root_side: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-    root_promo: Option<char>,
-    tt: &TranspositionTable,
-    max_len: usize,
-) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
-    let mut pv: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::with_capacity(max_len.max(1));
-    pv.push((from, to, root_promo));
-
-    // Work on a temporary board following the PV using TT best moves
-    let mut tmp = board.clone();
-    let _undo = tmp.make_move_simple(from, to, root_promo);
-    let mut side = opposite_color(root_side);
-
-    for _ in 1..max_len {
-        let key = compute_zobrist(&tmp, side);
-        let Some(entry) = tt.probe(key) else {
-            break;
-        };
-        let (bf, bt) = (entry.best_from, entry.best_to);
-        let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
-        
-        // Find the move in legal moves to get the promotion char if any
-        let gs = GameState::from_board_and_side(tmp.clone(), side);
-        let legals = find_all_valid_moves(&gs);
-        let found_move = legals.iter().find(|(f, t, _)| (*f, *t) == ((nfr, nfc), (ntr, ntc)));
-        
-        if let Some(&(f, t, p)) = found_move {
-            pv.push((f, t, p));
-            let _u = tmp.make_move_simple(f, t, p);
-            side = opposite_color(side);
-        } else {
-            break;
-        }
-    }
-    pv
-}
-
-pub fn get_root_moves(_game_state: &GameState, _history: &History, _board: &Board, _active_color: Color, moves: &Vec<((usize, usize), (usize, usize), Option<char>)>, v: &mut Vec<((usize, usize), (usize, usize), Option<char>)>) {
-    for &(from, to, promo) in moves {
-        v.push((from, to, promo));
-    }
-}
-
-// Root-level move bonus strictly limited to tiny tie-breakers that are not covered by the static evaluator.
-// Positive favors White; negative favors Black (we add for side to move).
-// Single source of truth policy: avoid duplicating evaluator logic (pawn-file preferences etc.).
-pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side: Color) -> i32 {
-    let mut bonus: i32 = 0;
-
-    // Identify piece and basic metadata
-    let piece = match board.get(from.0, from.1) {
-        Some(p) => p,
-        None => return 0,
-    };
-    let pt = piece.get_type();
-
-    let (_fr, _fc) = from;
-    let (tr, tc) = to;
-
-    // Keep only very small development/centralization nudges aren't modeled explicitly by eval:
-    // Knights to c3/f3 (White) or c6/f6 (Black)
-    if pt == PieceType::Knight {
-        match side {
-            Color::White => {
-                if (tr, tc) == (2, 2) || (tr, tc) == (2, 5) {
-                    bonus += 5;
-                }
-            }
-            Color::Black => {
-                if (tr, tc) == (5, 2) || (tr, tc) == (5, 5) {
-                    bonus += 5;
-                }
-            }
-        }
-    }
-
-    // Bishops to c4/f4 for White; c5/f5 for Black (tiny nudge)
-    if pt == PieceType::Bishop {
-        match side {
-            Color::White => {
-                if (tr, tc) == (3, 2) || (tr, tc) == (3, 5) {
-                    bonus += 3;
-                }
-            }
-            Color::Black => {
-                if (tr, tc) == (4, 2) || (tr, tc) == (4, 5) {
-                    bonus += 3;
-                }
-            }
-        }
-    }
-
-    // Apply sign for side to move (we always add for the maximizing side at root)
-    match side {
-        Color::White => bonus,
-        Color::Black => -bonus,
-    }
-}
-#[inline]
-pub fn adjust_root_score(
-    base_board: &Board,
-    side: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-    base_hmc: u32,
-    is_capture: bool,
-    moved_is_pawn: bool,
-    score_raw: i32,
-    _strength_ps: i32,
-) -> i32 {
-    // Base root bonus
-    let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
-
-    // Prepare post-position for general use
-    let (mut post_after, moved_probe) = simulate_move(base_board, from, to);
-    let opp = opposite_color(side);
-    let gives_check = post_after.is_side_in_check(opp);
-    let moved_is_queen = moved_probe.map(|p| p.get_type() == PieceType::Queen).unwrap_or(false);
-
-    // 1) Destination SEE penalties and queen suicidal check guard
-    adjusted += apply_destination_see_penalties(base_board, &post_after, side, from, to, is_capture, moved_is_pawn, gives_check, moved_is_queen);
-
-    // 2) Threat resolution and evacuation (attacked minors etc.)
-    adjusted += threat_resolution_and_evacuation(base_board, &post_after, side, from, to, gives_check);
-
-    // 3) Direct per-move knight evacuation priority from pawn threats
-    adjusted += knight_evacuations_priority(base_board, side, from, to, gives_check);
-
-    // 4) Small capture bonus at root
-    if let Some(captured) = base_board.get(to.0, to.1) {
-        adjusted += capture_value_cp(captured.get_type()) / ROOT_CAPTURE_BONUS_DIV;
-    }
-
-    // 5) Endgame / 50-move rule pressure scaling
-    adjusted += endgame_50move_scaling(side, score_raw, base_hmc, is_capture, moved_is_pawn);
-
-    // 6) Extra king safety heuristics for king moves
-    adjusted += king_safety_root_heuristics(base_board, side, from, to, is_capture);
-
-    // 7) Self-hanging penalty aggregate (if not giving check) OR check tie-break + mobility bonus
-    adjusted += self_hang_or_check_mobility(base_board, &post_after, side, from, to, gives_check, opp);
-
-    // 8) Queen kingside pressure motifs (f2/h2 or f7/h7)
-    adjusted += queen_kingside_pressure_bonus(base_board, side, from, to);
-
-    adjusted
-}
-
-// ---- Helper delegates for adjust_root_score ----
-
-#[inline]
-fn apply_destination_see_penalties(
-    base_board: &Board,
-    post_after: &Board,
-    side: Color,
-    from: (usize, usize),
-    to: (usize,usize),
-    is_capture: bool,
-    moved_is_pawn: bool,
-    gives_check: bool,
-    _moved_is_queen: bool,
-) -> i32 {
-    let mut delta = 0;
-    if !gives_check {
-        let captured = base_board.get(to.0, to.1);
-        let see = see_after(post_after, side, to, captured);
-        if see < 0 {
-            let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
-            delta += apply_for_side(-pen, side);
-            if !is_capture && moved_is_pawn { delta += apply_for_side(-SEE_PENALTY_MIN_CP, side); }
-        }
-    } else {
-        // Guard suicidal checking moves for major pieces using SEE at the destination.
-        // Previously this only applied to the queen; extend to rooks (and lightly to minors)
-        let captured = base_board.get(to.0, to.1);
-        let see = see_after(post_after, side, to, captured);
-        if see < 0 {
-            // Determine moved piece type
-            let moved_pt = base_board
-                .get(from.0, from.1)
-                .map(|p| p.get_type());
-            // Scale penalty based on piece importance
-            let pen = match moved_pt {
-                // Keep queen guard as before
-                Some(PieceType::Queen) => ((-see) * 6).clamp(600, 6000),
-                // Strengthen rook guard: checking moves that hang the rook should be strongly discouraged
-                // Set a higher minimum clamp to overcome generic check-mobility bonuses.
-                Some(PieceType::Rook) => ((-see) * 4).clamp(3600, 6000),
-                // Increase minors penalty so that hanging knight/bishop checks are avoided more reliably
-                Some(PieceType::Bishop) | Some(PieceType::Knight) => ((-see) * 4).clamp(600, 3600),
-                Some(PieceType::Pawn) => ((-see) * 2).clamp(200, 2000),
-                _ => ((-see) * 3).clamp(300, 3000),
-            };
-            // Temporary debug: trace SEE penalty for checking moves
-            //if let Some(mp) = moved_pt { if mp == PieceType::Rook {
-            //    println!("[ROOT DEBUG] Rook checking move {:?}->{:?}: SEE={} pen={} (side={:?})", from, to, see, pen, side);
-            //}}
-            // side-aware penalty (penalize mover regardless of color)
-            delta += apply_for_side(-pen, side);
-        }
-
-        // Additional specific guard for hanging knight/bishop checks immediately
-        // recaptured by a pawn on the destination square (e.g., Na5+ b4xa5).
-        // We check for opponent pawn attacks on the destination in the post position.
-        if let Some(moved_pt) = base_board.get(from.0, from.1).map(|p| p.get_type()) {
-            if moved_pt == PieceType::Knight || moved_pt == PieceType::Bishop {
-                let opp = opposite_color(side);
-                if attacked_by_pawn(post_after, to, opp) {
-                    // Apply a strong penalty to outweigh generic check bonuses and prefer safer alternatives
-                    let strong_minor_pen = 1200; // ~ minor piece value with margin
-                    delta += apply_for_side(-strong_minor_pen, side);
-                }
-            }
-        }
-
-        // Additional direct guard for checking moves: if the opponent king can immediately
-        // capture the checking piece on the destination square and remain safe, apply a
-        // very strong penalty regardless of SEE approximation.
-        // This specifically addresses patterns like Rd1+, Re1+, Rxb3+ dropping the rook to Kx,
-        // and also Bishop/ Knight checks such as Bxf7+ where Kxf7 is safe.
-        // Determine moved piece type first.
-        if let Some(moved_pt2) = base_board.get(from.0, from.1).map(|p| p.get_type()) {
-            // Consider heavy penalty for all pieces that commonly blunder on checking sacrifices.
-            // Previously only rook/queen; extend to bishops/knights as well to avoid Bxf7+, Na5+ blunders.
-            if matches!(moved_pt2, PieceType::Rook | PieceType::Queen | PieceType::Bishop | PieceType::Knight) {
-                let opp = opposite_color(side);
-                // Find opponent king square in the post position (after our checking move)
-                let mut king_sq: Option<(usize,usize)> = None;
-                'seek: for r in 0..8 { for c in 0..8 {
-                    if let Some(px) = post_after.get(r,c) {
-                        if px.get_color()==opp && px.get_type()==PieceType::King { king_sq = Some((r,c)); break 'seek; }
-                    }
-                }}
-                if let Some((kr,kc)) = king_sq {
-                    // King can capture if destination is adjacent and occupied by our moved piece
-                    let dr = if kr>to.0 { kr - to.0 } else { to.0 - kr };
-                    let dc = if kc>to.1 { kc - to.1 } else { to.1 - kc };
-                    let adjacent = dr <= 1 && dc <= 1;
-                    if adjacent {
-                        // Ensure the destination holds our moved piece in the post position
-                        if let Some(on_to) = post_after.get(to.0, to.1) {
-                            if on_to.get_color()==side {
-                                // Simulate king capture and verify king safety
-                                let mut after_kx = post_after.clone();
-                                // Remove king from old square
-                                after_kx.set(kr, kc, None);
-                                // Place king on destination (capturing our piece)
-                                after_kx.set(to.0, to.1, Some(Piece::new(PieceType::King, opp)));
-                                // Check if king on new square is attacked by our side; if not, it's a safe capture
-                                let mut tmp_chk = after_kx.clone();
-                                let unsafe_for_king = is_square_attacked_by_opponent(&mut tmp_chk, to, opp);
-                                if !unsafe_for_king {
-                                    // Apply a strong penalty: at least the piece value plus margin to overcome check bonuses
-                                    let base_pen = match moved_pt2 {
-                                        PieceType::Queen => 900,
-                                        PieceType::Rook => 500,
-                                        PieceType::Bishop | PieceType::Knight => 300,
-                                        _ => 200,
-                                    };
-                                    // Scale a bit stronger for minors to ensure avoidance at low depths
-                                    let scale = match moved_pt2 {
-                                        PieceType::Queen => 8,
-                                        PieceType::Rook => 8,
-                                        PieceType::Bishop | PieceType::Knight => 10,
-                                        _ => 8,
-                                    };
-                                    let strong_pen = (base_pen * scale).clamp(2400, 8000);
-                                    //println!("[ROOT DEBUG] Opp king safe Kx on {:?}; applying strong_pen={} for {:?}->{:?}", to, strong_pen, from, to);
-                                    delta += apply_for_side(-strong_pen, side);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    delta
-}
-
-#[inline]
-fn threat_resolution_and_evacuation(
-    base_board: &Board,
-    post_after: &Board,
-    side: Color,
-    from: (usize,usize),
-    to: (usize,usize),
-    gives_check: bool,
-) -> i32 {
-    if gives_check { return 0; }
-    let mut base_clone = base_board.clone();
-    let mut threatened: Vec<(usize, usize, PieceType, bool)> = Vec::new();
-    for r in 0..8 { for c in 0..8 {
-        if let Some(p) = base_board.get(r,c) {
-            if p.get_color() != side { continue; }
-            if !is_square_attacked_by_opponent(&mut base_clone, (r,c), side) { continue; }
-            let opp = opposite_color(side);
-            let pawn_attacks = attacked_by_pawn(base_board, (r,c), opp);
-            threatened.push((r,c,p.get_type(), pawn_attacks));
-        }
-    }}
-    if threatened.is_empty() { return 0; }
-    let mut delta = 0;
-    for (tr,tc,pt,by_pawn) in threatened {
-        // Knight-specific: precompute safe escape squares in base
-        let knight_safe: Vec<(usize,usize)> = if pt == PieceType::Knight && by_pawn { knight_safe_squares(base_board, side, (tr,tc)) } else { Vec::new() };
-
-        // Determine if still attacked after the candidate move
-        let mut tmp2 = post_after.clone();
-        let still_attacked = if (tr,tc) == from {
-            let mut tmpmv = post_after.clone();
-            is_square_attacked_by_opponent(&mut tmpmv, to, side)
-        } else {
-            if post_after.get(tr,tc).is_none() { false } else { is_square_attacked_by_opponent(&mut tmp2, (tr,tc), side) }
-        };
-
-        if (tr,tc) == from {
-            // We moved the threatened piece
-            let mut evac_bonus = 0;
-            let see_new = see_dest_estimate(post_after, side, to, 0);
-            if !still_attacked || see_new >= 0 { evac_bonus += 400; }
-            if pt == PieceType::Knight {
-                let mut cb = center_score(to);
-                if to == (3,3) { cb += 80; }
-                if !knight_safe.is_empty() && knight_safe.iter().any(|&sq| sq==to) { cb += 80; }
-                evac_bonus += cb.max(0);
-            }
-            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-                if knight_safe.iter().any(|&sq| sq==to) { evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD; }
-            }
-            delta += apply_for_side(evac_bonus, side);
-        } else {
-            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-                delta -= apply_for_side(KNIGHT_IGNORE_PAWN_THREAT_PENALTY, side);
-            }
-            if still_attacked {
-                let pen = match pt { PieceType::Knight|PieceType::Bishop => 200, PieceType::Rook=>120, PieceType::Queen=>80, PieceType::Pawn=>40, PieceType::King=>400 };
-                let val = if by_pawn { pen+400 } else { pen };
-                delta -= apply_for_side(val, side);
-            }
-        }
-
-        if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-            if (tr,tc) != from {
-                delta -= apply_for_side(KNIGHT_NON_EVAC_DEMOTION, side);
-            } else if knight_safe.iter().any(|&sq| sq==to) {
-                delta += apply_for_side(KNIGHT_SAFE_TO_SPECIFIC_REWARD, side);
-            }
-        }
-    }
-    delta
-}
-
-#[inline]
-fn knight_evacuations_priority(
-    base_board: &Board,
-    side: Color,
-    from: (usize,usize),
-    to: (usize,usize),
-    gives_check: bool,
-) -> i32 {
-    if gives_check { return 0; }
-    let opp = opposite_color(side);
-    let mut attacked_knights: Vec<(usize,usize)> = Vec::new();
-    for r in 0..8 { for c in 0..8 {
-        if let Some(p)=base_board.get(r,c) {
-            if p.get_color()==side && p.get_type()==PieceType::Knight {
-                if attacked_by_pawn(base_board, (r,c), opp) { attacked_knights.push((r,c)); }
-            }
-        }
-    }}
-    if attacked_knights.is_empty() { return 0; }
-    let mut delta = 0;
-    if !attacked_knights.contains(&from) {
-        delta -= apply_for_side(500, side);
-    } else if let Some(p)=base_board.get(from.0, from.1) { if p.get_type()==PieceType::Knight {
-        let (fr,fc) = from; let (tr,tc)=to;
-        let (sim, _) = simulate_move(base_board, (fr,fc), (tr,tc));
-        let mut tmp = sim.clone();
-        let dest_attacked = is_square_attacked_by_opponent(&mut tmp, (tr,tc), side);
-        let see1 = see_dest_estimate(&sim, side, (tr,tc), 0);
-        if !dest_attacked || see1 >= 0 {
-            let mut evac = KNIGHT_SAFE_EVAC_REWARD;
-            for &(cr,cc) in &[(3,3),(3,4),(4,3),(4,4)] {
-                let dr = if tr>cr {tr-cr}else{cr-tr}; let dc = if tc>cc {tc-cc}else{cc-tc};
-                let dist=(dr+dc) as i32; evac += (20 - KNIGHT_CENTER_STEP*dist).max(0);
-            }
-            if (tr,tc)==(3,3) { evac += KNIGHT_CENTER_EXTRA_D5; }
-            delta += apply_for_side(evac, side);
-        } else {
-            delta -= apply_for_side(150, side);
-        }
-    }}
-    delta
-}
-
-#[inline]
-fn endgame_50move_scaling(side: Color, score_raw: i32, base_hmc: u32, is_capture: bool, moved_is_pawn: bool) -> i32 {
-    let side_adv = apply_for_side(score_raw, side);
-    if side_adv > ENDGAME_SIDEADV_THRESHOLD_CP && base_hmc >= ENDGAME_HMC_THRESHOLD {
-        let scale = (base_hmc as i32 - (ENDGAME_HMC_THRESHOLD as i32 - 1)).min(ENDGAME_SCALE_MAX);
-        if is_capture || moved_is_pawn { ENDGAME_CAPTURE_SCALE_BONUS_CP * scale } else { -ENDGAME_NONCAP_SCALE_PENALTY_CP * scale }
-    } else { 0 }
-}
-
-#[inline]
-fn king_safety_root_heuristics(base_board: &Board, side: Color, from: (usize,usize), to: (usize,usize), is_capture: bool) -> i32 {
-    let moved_is_king = base_board.get(from.0, from.1).map(|p| p.get_type() == PieceType::King).unwrap_or(false);
-    if !moved_is_king { return 0; }
-    let (mut postk, _) = simulate_move(base_board, from, to);
-    let mut delta = 0;
-    if is_square_attacked_by_opponent(&mut postk, to, side) { delta -= 50; }
-    if is_capture { delta -= KING_CAPTURE_ROOT_PENALTY; }
-    delta
-}
-
+/// Self-hanging penalty aggregate OR check tie-break with mobility bonus.
 #[inline]
 fn self_hang_or_check_mobility(
     _base_board: &Board,
@@ -542,8 +565,8 @@ fn self_hang_or_check_mobility(
     gives_check: bool,
     opp: Color,
 ) -> i32 {
+    // Scan our pieces for hanging penalties
     let mut total_penalty: i32 = 0;
-    // Scan our pieces; if any square is attacked and SEE < 0 for us, penalize
     for r in 0..8 {
         for c in 0..8 {
             if let Some(p) = post_after.get(r, c) {
@@ -566,6 +589,7 @@ fn self_hang_or_check_mobility(
             }
         }
     }
+
     let agg_cap: i32 = 1000;
     let hang_pen = if total_penalty > 0 {
         -total_penalty.min(agg_cap)
@@ -573,6 +597,7 @@ fn self_hang_or_check_mobility(
         0
     };
 
+    // Check bonus
     let mut check_bonus = 0;
     if gives_check {
         check_bonus += CHECK_TIEBREAK_BASE;
@@ -582,27 +607,229 @@ fn self_hang_or_check_mobility(
     apply_for_side(hang_pen + check_bonus, side)
 }
 
+/// Bonus for queen attacking kingside squares (f2/h2 or f7/h7).
 #[inline]
-fn queen_kingside_pressure_bonus(base_board: &Board, side: Color, from: (usize,usize), to: (usize,usize)) -> i32 {
-    if let Some(mp) = base_board.get(from.0, from.1) {
-        if mp.get_type() == PieceType::Queen {
-            let (post, _) = simulate_move(base_board, from, to);
-            let targets: &[(usize,usize)] = if side == Color::White { &[(1,5),(1,7)] } else { &[(6,5),(6,7)] };
-            let mut hit_count = 0;
-            for &sq in targets {
-                let mut tmp = post.clone();
-                let active_for_query = opposite_color(side);
-                if is_square_attacked_by_opponent(&mut tmp, sq, active_for_query) { hit_count += 1; }
+fn queen_kingside_pressure_bonus(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+) -> i32 {
+    let mp = match base_board.get(from.0, from.1) {
+        Some(p) if p.get_type() == PieceType::Queen => p,
+        _ => return 0,
+    };
+    let _ = mp;
+
+    let (post, _) = simulate_move(base_board, from, to);
+    let targets: &[(usize, usize)] = if side == Color::White {
+        &[(1, 5), (1, 7)]
+    } else {
+        &[(6, 5), (6, 7)]
+    };
+
+    let mut hit_count = 0;
+    for &sq in targets {
+        let mut tmp = post.clone();
+        let active_for_query = opposite_color(side);
+        if is_square_attacked_by_opponent(&mut tmp, sq, active_for_query) {
+            hit_count += 1;
+        }
+    }
+
+    if hit_count > 0 {
+        let bonus = match hit_count {
+            1 => 1,
+            _ => 2,
+        };
+        apply_for_side(bonus, side)
+    } else {
+        0
+    }
+}
+
+// ============================================================
+// PUBLIC API: ROOT MOVE BONUSES & SCORING
+// ============================================================
+
+/// Build the principal variation line from transposition table.
+#[inline]
+pub fn build_pv_for_root(
+    board: &Board,
+    root_side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    root_promo: Option<char>,
+    tt: &TranspositionTable,
+    max_len: usize,
+) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
+    let mut pv: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::with_capacity(max_len.max(1));
+    pv.push((from, to, root_promo));
+
+    let mut tmp = board.clone();
+    let _undo = tmp.make_move_simple(from, to, root_promo);
+    let mut side = opposite_color(root_side);
+
+    for _ in 1..max_len {
+        let key = compute_zobrist(&tmp, side);
+        let Some(entry) = tt.probe(key) else {
+            break;
+        };
+        let (bf, bt) = (entry.best_from, entry.best_to);
+        let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
+
+        let gs = GameState::from_board_and_side(tmp.clone(), side);
+        let legals = find_all_valid_moves(&gs);
+        let found_move = legals.iter().find(|(f, t, _)| (*f, *t) == ((nfr, nfc), (ntr, ntc)));
+
+        if let Some(&(f, t, p)) = found_move {
+            pv.push((f, t, p));
+            let _u = tmp.make_move_simple(f, t, p);
+            side = opposite_color(side);
+        } else {
+            break;
+        }
+    }
+    pv
+}
+
+/// Collect root moves from a move list.
+pub fn get_root_moves(
+    _game_state: &GameState,
+    _history: &History,
+    _board: &Board,
+    _active_color: Color,
+    moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
+    v: &mut Vec<((usize, usize), (usize, usize), Option<char>)>,
+) {
+    for &(from, to, promo) in moves {
+        v.push((from, to, promo));
+    }
+}
+
+/// Small development/centralization bonus for knights and bishops.
+pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), side: Color) -> i32 {
+    let piece = match board.get(from.0, from.1) {
+        Some(p) => p,
+        None => return 0,
+    };
+    let pt = piece.get_type();
+    let (tr, tc) = to;
+    let mut bonus: i32 = 0;
+
+    // Knights to c3/f3 (White) or c6/f6 (Black)
+    if pt == PieceType::Knight {
+        match side {
+            Color::White => {
+                if (tr, tc) == (2, 2) || (tr, tc) == (2, 5) {
+                    bonus += 5;
+                }
             }
-            if hit_count > 0 {
-                let bonus = match hit_count { 1 => 1, _ => 2 };
-                return apply_for_side(bonus, side);
+            Color::Black => {
+                if (tr, tc) == (5, 2) || (tr, tc) == (5, 5) {
+                    bonus += 5;
+                }
             }
         }
     }
-    0
+
+    // Bishops to c4/f4 (White) or c5/f5 (Black)
+    if pt == PieceType::Bishop {
+        match side {
+            Color::White => {
+                if (tr, tc) == (3, 2) || (tr, tc) == (3, 5) {
+                    bonus += 3;
+                }
+            }
+            Color::Black => {
+                if (tr, tc) == (4, 2) || (tr, tc) == (4, 5) {
+                    bonus += 3;
+                }
+            }
+        }
+    }
+
+    match side {
+        Color::White => bonus,
+        Color::Black => -bonus,
+    }
 }
 
+/// Main orchestrator: adjust raw search score with root-level heuristics.
+///
+/// Applies the following adjustments in order:
+/// 1. Development/centralization bonus
+/// 2. SEE destination penalties
+/// 3. Threat resolution and evacuation
+/// 4. Knight evacuation priority
+/// 5. Capture bonus
+/// 6. Endgame / 50-move scaling
+/// 7. King safety
+/// 8. Self-hanging penalty / check mobility bonus
+/// 9. Queen kingside pressure
+#[inline]
+pub fn adjust_root_score(
+    base_board: &Board,
+    side: Color,
+    from: (usize, usize),
+    to: (usize, usize),
+    base_hmc: u32,
+    is_capture: bool,
+    moved_is_pawn: bool,
+    score_raw: i32,
+    _strength_ps: i32,
+) -> i32 {
+    let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
+
+    // Prepare post-position for heuristics
+    let (mut post_after, moved_probe) = simulate_move(base_board, from, to);
+    let opp = opposite_color(side);
+    let gives_check = post_after.is_side_in_check(opp);
+    let moved_is_queen = moved_probe
+        .map(|p| p.get_type() == PieceType::Queen)
+        .unwrap_or(false);
+
+    // 1. SEE penalties
+    adjusted += apply_destination_see_penalties(
+        base_board, &post_after, side, from, to,
+        is_capture, moved_is_pawn, gives_check, moved_is_queen,
+    );
+
+    // 2. Threat resolution and evacuation
+    adjusted += threat_resolution_and_evacuation(
+        base_board, &post_after, side, from, to, gives_check,
+    );
+
+    // 3. Knight evacuation priority
+    adjusted += knight_evacuations_priority(base_board, side, from, to, gives_check);
+
+    // 4. Capture bonus
+    if let Some(captured) = base_board.get(to.0, to.1) {
+        adjusted += capture_value_cp(captured.get_type()) / ROOT_CAPTURE_BONUS_DIV;
+    }
+
+    // 5. Endgame / 50-move scaling
+    adjusted += endgame_50move_scaling(side, score_raw, base_hmc, is_capture, moved_is_pawn);
+
+    // 6. King safety
+    adjusted += king_safety_root_heuristics(base_board, side, from, to, is_capture);
+
+    // 7. Self-hang or check mobility
+    adjusted += self_hang_or_check_mobility(
+        base_board, &post_after, side, from, to, gives_check, opp,
+    );
+
+    // 8. Queen kingside pressure
+    adjusted += queen_kingside_pressure_bonus(base_board, side, from, to);
+
+    adjusted
+}
+
+// ============================================================
+// PUBLIC API: EVALUATION WRAPPERS
+// ============================================================
+
+/// Evaluate a position after making a root move.
 #[inline]
 pub fn evaluate_after_root_move(
     base_board: &Board,
@@ -624,12 +851,15 @@ pub fn evaluate_after_root_move(
         .map(|p| p.get_type() == PieceType::Pawn)
         .unwrap_or(false);
     let is_capture = base_board.get(to.0, to.1).is_some();
-    let child_hmc: u32 = if is_capture || moved_is_pawn { 0 } else { base_hmc.saturating_add(1) };
-    // Root selective extension: extend by 1 ply for checking moves (helps find forcing lines like mates)
+    let child_hmc: u32 = if is_capture || moved_is_pawn {
+        0
+    } else {
+        base_hmc.saturating_add(1)
+    };
+
     let gives_check = tmp.is_side_in_check(opposite_color(side));
     let score_raw = if depth_now <= 1 {
-        // At shallow depth, avoid plain static eval to prevent horizon blunders.
-        // Use quiescence search to account for immediate captures/tactics.
+        // Shallow depth: use qsearch to avoid horizon blunders
         crate::search::qsearch::qsearch(
             &mut tmp,
             opposite_color(side),
@@ -657,6 +887,7 @@ pub fn evaluate_after_root_move(
     (score_raw, is_capture, moved_is_pawn)
 }
 
+/// Get adjusted evaluation for a root move, with safety clamping.
 #[inline]
 pub fn adjusted_root_eval_for_move(
     base_board: &Board,
@@ -672,9 +903,8 @@ pub fn adjusted_root_eval_for_move(
     let mut adj = adjust_root_score(
         base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw, ps,
     );
-    
-    // Safety rule: if search says a move is losing, do not let root heuristics 
-    // pump it up to look like a win. This prevents gambling against the search result.
+
+    // Safety: don't let heuristics turn a losing move into a winning one
     if score_raw < 0 {
         if side == Color::White {
             adj = adj.min(score_raw);
@@ -683,13 +913,9 @@ pub fn adjusted_root_eval_for_move(
         }
     }
 
-    // If it's a draw by repetition (raw score 0 and likely from alphabeta),
-    // ensure heuristics don't drag it down.
+    // Don't drag draw scores down
     if score_raw == 0 {
         adj = adj.max(-10);
     }
     adj
 }
-
-
-
