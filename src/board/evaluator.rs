@@ -13,6 +13,50 @@ const ROOK: i32 = 500;
 const QUEEN: i32 = 900;
 const KING: i32 = 0; // King material is not counted; PST handles its safety/activity
 
+pub struct PawnFileCounts {
+    pub white: [i32; 8],
+    pub black: [i32; 8],
+}
+
+// --- Public Functions ---
+
+/// Public evaluation function: positive = better for White; negative = better for Black
+pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
+    let ctx = EvalContext::new(board);
+    let mut score: i32 = 0;
+
+    for row in 0..8 {
+        for col in 0..8 {
+            if let Some(piece) = board.get(row, col) {
+                let val = ctx.evaluate_piece(piece.get_type(), row, col, piece.get_color());
+                match piece.get_color() {
+                    Color::White => score += val,
+                    Color::Black => score -= val,
+                }
+            }
+        }
+    }
+
+    score += ctx.evaluate_hanging_pieces();
+    
+    // Tempo
+    let tempo = (12 * ctx.phase) / 24;
+    match side_to_move {
+        Color::White => score += tempo,
+        Color::Black => score -= tempo,
+    }
+
+    score += ctx.evaluate_mobility();
+    score += ctx.evaluate_holes();
+    score += ctx.evaluate_center_control();
+    score += ctx.evaluate_space();
+    score += ctx.evaluate_global_features();
+
+    score = apply_drawish_tweaks(board, score);
+
+    score
+}
+
 #[inline]
 pub(crate) fn is_piece(board: &Board, r: usize, c: usize, color: Color, pt: PieceType) -> bool {
     matches!(board.get(r, c), Some(p) if p.get_color() == color && p.get_type() == pt)
@@ -40,11 +84,82 @@ pub(crate) fn material_value(piece: PieceType) -> i32 {
     }
 }
 
-// Compute a simple material-based game phase: 24 = full midgame, 0 = pure endgame
-pub struct PawnFileCounts {
-    pub white: [i32; 8],
-    pub black: [i32; 8],
+#[inline]
+pub(crate) fn game_phase(board: &Board) -> i32 {
+    // Piece phase weights per piece instance
+    const PHASE_KNIGHT: i32 = 1;
+    const PHASE_BISHOP: i32 = 1;
+    const PHASE_ROOK: i32 = 2;
+    const PHASE_QUEEN: i32 = 4;
+
+    let mut phase: i32 = 0;
+
+    // Count pieces for both sides
+    for row in 0..8 {
+        for col in 0..8 {
+            if let Some(piece) = board.get(row, col) {
+                phase += match piece.get_type() {
+                    PieceType::Knight => PHASE_KNIGHT,
+                    PieceType::Bishop => PHASE_BISHOP,
+                    PieceType::Rook => PHASE_ROOK,
+                    PieceType::Queen => PHASE_QUEEN,
+                    _ => 0,
+                };
+            }
+        }
+    }
+
+    // Clamp to [0, 24] where 24 is initial (all heavy/minor pieces present)
+    if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
 }
+
+#[inline]
+pub(crate) fn square_attacked_by_enemy_pawn(board: &Board, r: usize, c: usize, enemy: Color) -> bool {
+    match enemy {
+        Color::White => {
+            // White pawns attack up: from (r-1,c-1) and (r-1,c+1) to (r,c)
+            if r > 0 {
+                if c > 0 && is_piece(board, r-1, c-1, Color::White, PieceType::Pawn) { return true; }
+                if c < 7 && is_piece(board, r-1, c+1, Color::White, PieceType::Pawn) { return true; }
+            }
+        }
+        Color::Black => {
+            // Black pawns attack down: from (r+1,c-1) and (r+1,c+1) to (r,c)
+            if r < 7 {
+                if c > 0 && is_piece(board, r+1, c-1, Color::Black, PieceType::Pawn) { return true; }
+                if c < 7 && is_piece(board, r+1, c+1, Color::Black, PieceType::Pawn) { return true; }
+            }
+        }
+    }
+    false
+}
+
+#[inline]
+pub(crate) fn find_king(board: &Board, color: Color) -> Option<(usize, usize)> {
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = board.get(r, c) {
+                if p.get_color() == color && p.get_type() == PieceType::King { return Some((r, c)); }
+            }
+        }
+    }
+    None
+}
+
+#[inline]
+pub(crate) fn opponent(color: Color) -> Color {
+    match color {
+        Color::White => Color::Black,
+        Color::Black => Color::White,
+    }
+}
+
+#[inline]
+pub(crate) fn chebyshev_dist(a: (i32, i32), b: (i32, i32)) -> i32 {
+    (a.0 - b.0).abs().max((a.1 - b.1).abs())
+}
+
+// --- Private Functions and Types ---
 
 struct EvalContext<'a> {
     board: &'a Board,
@@ -87,11 +202,6 @@ impl<'a> EvalContext<'a> {
             white_pawns,
             black_pawns,
         }
-    }
-
-    #[inline]
-    fn taper(&self, mg: i32, eg: i32) -> i32 {
-        tapered_eval(mg, eg, self.phase)
     }
 
     fn evaluate_piece(&self, pt: PieceType, row: usize, col: usize, color: Color) -> i32 {
@@ -390,118 +500,11 @@ impl<'a> EvalContext<'a> {
 
         score
     }
-}
 
-#[inline]
-pub(crate) fn game_phase(board: &Board) -> i32 {
-    // Piece phase weights per piece instance
-    const PHASE_KNIGHT: i32 = 1;
-    const PHASE_BISHOP: i32 = 1;
-    const PHASE_ROOK: i32 = 2;
-    const PHASE_QUEEN: i32 = 4;
-
-    let mut phase: i32 = 0;
-
-    // Count pieces for both sides
-    for row in 0..8 {
-        for col in 0..8 {
-            if let Some(piece) = board.get(row, col) {
-                phase += match piece.get_type() {
-                    PieceType::Knight => PHASE_KNIGHT,
-                    PieceType::Bishop => PHASE_BISHOP,
-                    PieceType::Rook => PHASE_ROOK,
-                    PieceType::Queen => PHASE_QUEEN,
-                    _ => 0,
-                };
-            }
-        }
+    #[inline]
+    fn taper(&self, mg: i32, eg: i32) -> i32 {
+        tapered_eval(mg, eg, self.phase)
     }
-
-    // Clamp to [0, 24] where 24 is initial (all heavy/minor pieces present)
-    if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
-}
-
-// Public evaluation function: positive = better for White; negative = better for Black
-pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
-    let ctx = EvalContext::new(board);
-    let mut score: i32 = 0;
-
-    for row in 0..8 {
-        for col in 0..8 {
-            if let Some(piece) = board.get(row, col) {
-                let val = ctx.evaluate_piece(piece.get_type(), row, col, piece.get_color());
-                match piece.get_color() {
-                    Color::White => score += val,
-                    Color::Black => score -= val,
-                }
-            }
-        }
-    }
-
-    score += ctx.evaluate_hanging_pieces();
-    
-    // Tempo
-    let tempo = (12 * ctx.phase) / 24;
-    match side_to_move {
-        Color::White => score += tempo,
-        Color::Black => score -= tempo,
-    }
-
-    score += ctx.evaluate_mobility();
-    score += ctx.evaluate_holes();
-    score += ctx.evaluate_center_control();
-    score += ctx.evaluate_space();
-    score += ctx.evaluate_global_features();
-
-    score = apply_drawish_tweaks(board, score);
-
-    score
-}
-
-#[inline]
-pub(crate) fn square_attacked_by_enemy_pawn(board: &Board, r: usize, c: usize, enemy: Color) -> bool {
-    match enemy {
-        Color::White => {
-            // White pawns attack up: from (r-1,c-1) and (r-1,c+1) to (r,c)
-            if r > 0 {
-                if c > 0 && is_piece(board, r-1, c-1, Color::White, PieceType::Pawn) { return true; }
-                if c < 7 && is_piece(board, r-1, c+1, Color::White, PieceType::Pawn) { return true; }
-            }
-        }
-        Color::Black => {
-            // Black pawns attack down: from (r+1,c-1) and (r+1,c+1) to (r,c)
-            if r < 7 {
-                if c > 0 && is_piece(board, r+1, c-1, Color::Black, PieceType::Pawn) { return true; }
-                if c < 7 && is_piece(board, r+1, c+1, Color::Black, PieceType::Pawn) { return true; }
-            }
-        }
-    }
-    false
-}
-
-#[inline]
-pub(crate) fn find_king(board: &Board, color: Color) -> Option<(usize, usize)> {
-    for r in 0..8 {
-        for c in 0..8 {
-            if let Some(p) = board.get(r, c) {
-                if p.get_color() == color && p.get_type() == PieceType::King { return Some((r, c)); }
-            }
-        }
-    }
-    None
-}
-
-#[inline]
-pub(crate) fn opponent(color: Color) -> Color {
-    match color {
-        Color::White => Color::Black,
-        Color::Black => Color::White,
-    }
-}
-
-#[inline]
-pub(crate) fn chebyshev_dist(a: (i32, i32), b: (i32, i32)) -> i32 {
-    (a.0 - b.0).abs().max((a.1 - b.1).abs())
 }
 
 // ---- Lightweight mobility and attack/defense helpers ----
