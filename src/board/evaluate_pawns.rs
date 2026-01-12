@@ -1,6 +1,46 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{is_piece, square_attacked_by_enemy_pawn, PawnFileCounts, opponent, chebyshev_dist};
+use crate::board::evaluator::{is_piece, square_attacked_by_enemy_pawn, PawnFileCounts, opponent, chebyshev_dist, taper_general};
+
+pub fn evaluate_pawn(
+    board: &Board,
+    row: usize,
+    col: usize,
+    color: Color,
+    phase: i32,
+    king_w: Option<(usize, usize)>,
+    king_b: Option<(usize, usize)>,
+    att_w: &[[bool; 8]; 8],
+    att_b: &[[bool; 8]; 8],
+) -> i32 {
+    let mut val = 0;
+    // File bonuses from a..h: a/h negative, c/f small positive, d/e strong positive
+    const FILE_BONUS: [i32; 8] = [-30, -10, 10, 25, 25, 10, -10, -30];
+    val += (FILE_BONUS[col] * phase) / 24;
+
+    // Mild penalty for advanced rook pawns in opening
+    if phase > 12 {
+        if col == 0 || col == 7 {
+            let advancement = match color {
+                Color::White => row as i32,
+                Color::Black => (7 - row) as i32,
+            };
+            if advancement >= 3 {
+                val -= (15 * phase) / 24;
+            }
+        }
+    }
+
+    if is_doubled_pawn(board, row, col, color) { val -= 12; }
+    if is_isolated_pawn(board, col, color) { val -= 14; }
+    if is_backward_pawn(board, row, col, color) {
+        val -= taper_general(phase, 22, 8);
+    }
+    if is_passed_pawn(board, row, col, color) {
+        val += evaluate_passed_pawn(board, row, col, color, phase, king_w, king_b, att_w, att_b);
+    }
+    val
+}
 use crate::board::evaluate_king::is_king_in_front_of_pawn;
 
 pub fn is_doubled_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool {

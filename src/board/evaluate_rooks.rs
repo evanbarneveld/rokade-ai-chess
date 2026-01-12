@@ -1,6 +1,55 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{PawnFileCounts, is_piece};
+use crate::board::evaluator::{PawnFileCounts, is_piece, find_king, opponent};
+
+pub fn evaluate_rook(
+    board: &Board,
+    row: usize,
+    col: usize,
+    color: Color,
+    phase: i32,
+    eg: i32,
+    white_pawns: i32,
+    black_pawns: i32,
+) -> i32 {
+    let mut val = 0;
+    if eg > 0 {
+        // Rook on 7th
+        let on_7th = match color {
+            Color::White => row == 6 && black_pawns > 0,
+            Color::Black => row == 1 && white_pawns > 0,
+        };
+        if on_7th { val += (30 * eg) / 24; }
+
+        // Rook behind passed pawn
+        if let Some((pp_r, _)) = crate::board::evaluate_pawns::find_passed_pawn_on_file(board, col, color) {
+            let behind = match color { Color::White => row < pp_r, Color::Black => row > pp_r };
+            if behind && file_clear_between(board, row, pp_r, col) {
+                let adv = match color { Color::White => pp_r as i32, Color::Black => (7 - pp_r) as i32 };
+                val += ((12 + 2 * adv) * eg) / 24;
+            }
+        }
+
+        // Cut-off king
+        if let Some((ek_r, ek_c)) = find_king(board, opponent(color)) {
+            if col == ek_c && file_clear_between(board, row, ek_r, col) {
+                if (row as i32 - ek_r as i32).abs() >= 2 { val += (10 * eg) / 24; }
+            }
+            if row == ek_r && rank_clear_between(board, col, ek_c, row) {
+                if (col as i32 - ek_c as i32).abs() >= 2 { val += (10 * eg) / 24; }
+            }
+        }
+    }
+    if phase > 0 {
+        let (is_back_rank, start_row) = match color { Color::White => (row==0, 1usize), Color::Black => (row==7, 6usize) };
+        if is_back_rank {
+            let left_block = col > 0 && is_piece(board, start_row, col-1, color, PieceType::Pawn);
+            let right_block = col < 7 && is_piece(board, start_row, col+1, color, PieceType::Pawn);
+            if left_block && right_block { val -= (16 * phase) / 24; }
+        }
+    }
+    val
+}
 
 pub fn file_clear_between(board: &Board, r1: usize, r2: usize, file: usize) -> bool {
     let start = r1.min(r2);

@@ -1,4 +1,5 @@
 use crate::board::Board;
+pub(crate) use crate::board::pst::{tapered_eval as taper_general};
 use crate::board::pst::*;
 use crate::piece::pieces::{Color, PieceType};
 
@@ -208,137 +209,14 @@ impl<'a> EvalContext<'a> {
         let mut val = material_value(pt) + pst_value_tapered(pt, row, col, color, self.phase);
 
         match pt {
-            PieceType::Pawn => val += self.evaluate_pawn(row, col, color),
-            PieceType::Knight => val += self.evaluate_knight(row, col, color),
-            PieceType::Bishop => val += self.evaluate_bishop(row, col, color),
-            PieceType::Rook => val += self.evaluate_rook(row, col, color),
-            PieceType::Queen => val += self.evaluate_queen(row, col, color),
+            PieceType::Pawn => val += crate::board::evaluate_pawns::evaluate_pawn(self.board, row, col, color, self.phase, self.king_w, self.king_b, &self.att_w, &self.att_b),
+            PieceType::Knight => val += crate::board::evaluate_knights::evaluate_knight(self.board, row, col, color, self.phase),
+            PieceType::Bishop => val += crate::board::evaluate_bishops::evaluate_bishop(row, col, color, self.phase),
+            PieceType::Rook => val += crate::board::evaluate_rooks::evaluate_rook(self.board, row, col, color, self.phase, self.eg, self.white_pawns, self.black_pawns),
+            PieceType::Queen => val += crate::board::evaluate_queens::evaluate_queen(self.board, row, col, color, self.phase),
             _ => {}
         }
 
-        val
-    }
-
-    fn evaluate_pawn(&self, row: usize, col: usize, color: Color) -> i32 {
-        let mut val = 0;
-        // File bonuses from a..h: a/h negative, c/f small positive, d/e strong positive
-        const FILE_BONUS: [i32; 8] = [-30, -10, 10, 25, 25, 10, -10, -30];
-        val += (FILE_BONUS[col] * self.phase) / 24;
-
-        // Mild penalty for advanced rook pawns in opening
-        if self.phase > 12 {
-            if col == 0 || col == 7 {
-                let advancement = match color {
-                    Color::White => row as i32,
-                    Color::Black => (7 - row) as i32,
-                };
-                if advancement >= 3 {
-                    val -= (15 * self.phase) / 24;
-                }
-            }
-        }
-
-        if crate::board::evaluate_pawns::is_doubled_pawn(self.board, row, col, color) { val -= 12; }
-        if crate::board::evaluate_pawns::is_isolated_pawn(self.board, col, color) { val -= 14; }
-        if crate::board::evaluate_pawns::is_backward_pawn(self.board, row, col, color) {
-            val -= self.taper(22, 8);
-        }
-        if crate::board::evaluate_pawns::is_passed_pawn(self.board, row, col, color) {
-            val += crate::board::evaluate_pawns::evaluate_passed_pawn(self.board, row, col, color, self.phase, self.king_w, self.king_b, &self.att_w, &self.att_b);
-        }
-        val
-    }
-
-    fn evaluate_knight(&self, row: usize, col: usize, color: Color) -> i32 {
-        let mut val = 0;
-        if self.phase > 0 {
-            let dev_bonus = match color {
-                Color::White => match (row, col) {
-                    (2, 2) | (2, 5) => 6,
-                    (1, 3) | (1, 4) => 4,
-                    _ => 0,
-                },
-                Color::Black => match (row, col) {
-                    (5, 2) | (5, 5) => 6,
-                    (6, 3) | (6, 4) => 4,
-                    _ => 0,
-                },
-            };
-            val += (dev_bonus * self.phase) / 24;
-        }
-        if crate::board::evaluate_knights::is_knight_outpost(self.board, row, col, color) {
-            val += self.taper(22, 8);
-        }
-        val
-    }
-
-    fn evaluate_bishop(&self, row: usize, col: usize, color: Color) -> i32 {
-        let mut val = 0;
-        if self.phase > 0 {
-            let home = match color {
-                Color::White => row == 0 && (col == 2 || col == 5),
-                Color::Black => row == 7 && (col == 2 || col == 5),
-            };
-            if !home { val += (8 * self.phase) / 24; }
-        }
-        val
-    }
-
-    fn evaluate_rook(&self, row: usize, col: usize, color: Color) -> i32 {
-        let mut val = 0;
-        if self.eg > 0 {
-            // Rook on 7th
-            let on_7th = match color {
-                Color::White => row == 6 && self.black_pawns > 0,
-                Color::Black => row == 1 && self.white_pawns > 0,
-            };
-            if on_7th { val += (30 * self.eg) / 24; }
-
-            // Rook behind passed pawn
-            if let Some((pp_r, _)) = crate::board::evaluate_pawns::find_passed_pawn_on_file(self.board, col, color) {
-                let behind = match color { Color::White => row < pp_r, Color::Black => row > pp_r };
-                if behind && crate::board::evaluate_rooks::file_clear_between(self.board, row, pp_r, col) {
-                    let adv = match color { Color::White => pp_r as i32, Color::Black => (7 - pp_r) as i32 };
-                    val += ((12 + 2 * adv) * self.eg) / 24;
-                }
-            }
-
-            // Cut-off king
-            if let Some((ek_r, ek_c)) = find_king(self.board, opponent(color)) {
-                if col == ek_c && crate::board::evaluate_rooks::file_clear_between(self.board, row, ek_r, col) {
-                    if (row as i32 - ek_r as i32).abs() >= 2 { val += (10 * self.eg) / 24; }
-                }
-                if row == ek_r && crate::board::evaluate_rooks::rank_clear_between(self.board, col, ek_c, row) {
-                    if (col as i32 - ek_c as i32).abs() >= 2 { val += (10 * self.eg) / 24; }
-                }
-            }
-        }
-        if self.phase > 0 {
-            let (is_back_rank, start_row) = match color { Color::White => (row==0, 1usize), Color::Black => (row==7, 6usize) };
-            if is_back_rank {
-                let left_block = col > 0 && is_piece(self.board, start_row, col-1, color, PieceType::Pawn);
-                let right_block = col < 7 && is_piece(self.board, start_row, col+1, color, PieceType::Pawn);
-                if left_block && right_block { val -= (16 * self.phase) / 24; }
-            }
-        }
-        val
-    }
-
-    fn evaluate_queen(&self, row: usize, col: usize, color: Color) -> i32 {
-        let mut val = 0;
-        if self.phase > 0 {
-            if col == 0 || col == 7 {
-                let deep = match color { Color::White => row >= 3, Color::Black => row <= 4 };
-                if deep { val -= (12 * self.phase) / 24; }
-            }
-            let (back_r, k1c, k2c) = match color { Color::White => (0, 1, 6), Color::Black => (7, 1, 6) };
-            let both_knights_back = is_piece(self.board, back_r, k1c, color, PieceType::Knight)
-                && is_piece(self.board, back_r, k2c, color, PieceType::Knight);
-            if both_knights_back {
-                let shallow = match color { Color::White => row <= 2, Color::Black => row >= 5 };
-                if shallow { val -= (14 * self.phase) / 24; }
-            }
-        }
         val
     }
 
@@ -503,7 +381,7 @@ impl<'a> EvalContext<'a> {
 
     #[inline]
     fn taper(&self, mg: i32, eg: i32) -> i32 {
-        tapered_eval(mg, eg, self.phase)
+        taper_general(self.phase, mg, eg)
     }
 }
 

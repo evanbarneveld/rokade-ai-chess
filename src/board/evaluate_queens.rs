@@ -2,6 +2,24 @@ use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
 use crate::board::evaluator::{PawnFileCounts, is_piece};
 
+pub fn evaluate_queen(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> i32 {
+    let mut val = 0;
+    if phase > 0 {
+        if col == 0 || col == 7 {
+            let deep = match color { Color::White => row >= 3, Color::Black => row <= 4 };
+            if deep { val -= (12 * phase) / 24; }
+        }
+        let (back_r, k1c, k2c) = match color { Color::White => (0, 1, 6), Color::Black => (7, 1, 6) };
+        let both_knights_back = is_piece(board, back_r, k1c, color, PieceType::Knight)
+            && is_piece(board, back_r, k2c, color, PieceType::Knight);
+        if both_knights_back {
+            let shallow = match color { Color::White => row <= 2, Color::Black => row >= 5 };
+            if shallow { val -= (14 * phase) / 24; }
+        }
+    }
+    val
+}
+
 pub fn queen_on_semi_open_file_bonus(board: &Board, color: Color, counts: &PawnFileCounts) -> i32 {
     let mut score = 0;
     for c in 0..8 {
