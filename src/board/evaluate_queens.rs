@@ -1,0 +1,64 @@
+use crate::board::Board;
+use crate::piece::pieces::{Color, PieceType};
+use crate::board::evaluator::{PawnFileCounts, is_piece};
+
+pub fn queen_on_semi_open_file_bonus(board: &Board, color: Color, counts: &PawnFileCounts) -> i32 {
+    let mut score = 0;
+    for c in 0..8 {
+        let mut has_queen = false;
+        for r in 0..8 { if is_piece(board, r, c, color, PieceType::Queen) { has_queen = true; break; } }
+        if has_queen {
+            let friendly = match color { Color::White => counts.white[c], Color::Black => counts.black[c] };
+            if friendly == 0 { score += 6; }
+        }
+    }
+    score
+}
+
+pub fn early_queen_penalty(board: &Board, color: Color, counts: &PawnFileCounts) -> i32 {
+    let mut pen = 0;
+    let mut queen_pos = None;
+    for r in 0..8 {
+        for c in 0..8 {
+            if is_piece(board, r, c, color, PieceType::Queen) { queen_pos = Some((r, c)); break; }
+        }
+    }
+    if let Some((r, c)) = queen_pos {
+        let (home_row, start_col) = match color { Color::White => (0, 3), Color::Black => (7, 3) };
+        if r != home_row || c != start_col {
+            let mut minor_pieces_at_home = 0;
+            let minors = match color { Color::White => [(0, 1), (0, 2), (0, 5), (0, 6)], Color::Black => [(7, 1), (7, 2), (7, 5), (7, 6)] };
+            for &(mr, mc) in &minors {
+                if let Some(p) = board.get(mr, mc) {
+                    if p.get_color() == color && (p.get_type() == PieceType::Knight || p.get_type() == PieceType::Bishop) {
+                        minor_pieces_at_home += 1;
+                    }
+                }
+            }
+            if minor_pieces_at_home >= 2 {
+                pen += 15 * minor_pieces_at_home;
+                let (_own_pawns, opp_pawns) = match color {
+                    Color::White => (&counts.white, &counts.black),
+                    Color::Black => (&counts.black, &counts.white),
+                };
+                let mut advanced = false;
+                match color {
+                    Color::White => if r >= 2 { advanced = true; },
+                    Color::Black => if r <= 5 { advanced = true; },
+                }
+                if advanced {
+                    let mut exposed = false;
+                    for dc in -1..=1 {
+                        let nc = c as i32 + dc;
+                        if nc >= 0 && nc <= 7 {
+                            let nc = nc as usize;
+                            if opp_pawns[nc] > 0 { exposed = true; break; }
+                        }
+                    }
+                    if exposed { pen += 20; }
+                }
+            }
+        }
+    }
+    pen
+}
