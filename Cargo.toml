@@ -35,6 +35,16 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+[[bin]]
+name = "rokade-ai-chess"
+path = "src/chess_main.rs"
+
+[profile.engine-only]
+inherits = "release"
+
+[[bin]]
+name = "rokade-ai-chess-engine"
+path = "src/engine_main.rs"
 
 [dev-dependencies]
 serial_test = "*"

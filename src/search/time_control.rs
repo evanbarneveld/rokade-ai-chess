@@ -11,7 +11,7 @@ fn deadline_cell() -> &'static Mutex<Option<Instant>> {
 
 
 /// Set a hard time budget for the ongoing Search. Passing 0 disables the budget.
-pub(crate) fn set_time_budget_ms(ms: usize) {
+pub fn set_time_budget_ms(ms: usize) {
     let mut guard = deadline_cell().lock().unwrap();
     if ms == 0 {
         *guard = None;

@@ -3,7 +3,7 @@ pub(crate) mod tt;
 pub(crate) mod zobrist;
 pub(crate) mod heuristics;
 pub mod playing_strength;
-pub(crate) mod time_control;
+pub mod time_control;
 pub mod uci_feedback;
 pub(crate) mod threading;
 pub(crate) mod telemetry;

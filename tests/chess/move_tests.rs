@@ -129,6 +129,26 @@ fn test_bad_rook_move2() {
 
 #[test]
 #[serial]
+fn no_valid_moves_possible_error() {
+    // in this position the engine says no valid moves are possible
+    let fen = "r2qkb1r/p1ppp1pp/4p3/1B6/2P5/N5N1/nPQPKPbn/1RB4R w kq - 0 14";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 200, 1000);
+    if san_move.is_none() {
+        println!("No valid moves found");
+        panic!("No valid moves found");
+    }
+    let san_move = san_move.unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_eq!(san_move, "Rxh2");
+}
+
+#[test]
+#[serial]
 fn test_bad_rook_move3() {
     // in this position the engine generates a rook move Rxb3+
     // but now the rook can immediately be captured by a2xb3

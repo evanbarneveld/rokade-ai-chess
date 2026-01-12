@@ -221,6 +221,10 @@ pub fn find_best_move(
             };
 
             if best_raw == SEARCH_ABORTED {
+                if chosen.is_none() {
+                    let (bf, bt, bpromo) = root_moves[0];
+                    chosen = Some((bf, bt, bpromo, 0, 1));
+                }
                 break;
             }
 
@@ -236,7 +240,7 @@ pub fn find_best_move(
         // Single-depth Search without iterative deepening
         let depth_now = effective_depth;
         tt.next_age();
-        let ((bf, bt, bpromo), best_adj, _best_raw) = if ASPIRATION_WINDOWS_ENABLED {
+        let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
             probe_with_aspiration(
                 &board,
                 active_color,
@@ -265,12 +269,18 @@ pub fn find_best_move(
                 history,
             )
         };
-        let hf = tt.hashfull_permille();
-        let pv = build_pv_for_root(board, active_color, bf, bt, bpromo, &tt, depth_now);
-        // Always report UCI scores from White's perspective
-        let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
-        emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
-        chosen = Some((bf, bt, bpromo, best_adj, depth_now));
+
+        if best_raw == SEARCH_ABORTED {
+            let (bf, bt, bpromo) = root_moves[0];
+            chosen = Some((bf, bt, bpromo, 0, 1));
+        } else {
+            let hf = tt.hashfull_permille();
+            let pv = build_pv_for_root(board, active_color, bf, bt, bpromo, &tt, depth_now);
+            // Always report UCI scores from White's perspective
+            let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
+            emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
+            chosen = Some((bf, bt, bpromo, best_adj, depth_now));
+        }
     }
 
             // Final selection based on playing_strength from the last iteration
