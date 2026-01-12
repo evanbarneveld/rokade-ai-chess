@@ -4,5 +4,6 @@ pub(crate) mod checks;
 pub mod san_move;
 
 pub mod evaluator;
+pub mod pst;
 
 pub use board::Board;
