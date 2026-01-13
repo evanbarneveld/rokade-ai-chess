@@ -52,18 +52,6 @@ Tests
 cargo test -- --nocapture
 ```
 
-Repository Layout (selected)
-- `src/board` — board representation and checks/display helpers
-- `src/generator` — move generation
-- `src/search` — search/evaluation logic and heuristics
-- `src/state` — game state and FEN handling (`src/state/fen`)
-- `src/piece` — piece rules, validators, and movers
-- `src/parser` — PGN/move parsing (`ambiguous_move_solvers`)
-- `src/pgn_player` — play-through utilities for PGN
-- `src/uci` — UCI protocol support (not complete)
-- `src/cli` — CLI entry helpers; `src/main.rs` calls `cli::run_cli()`
-- `tests/` — unit/integration tests
-
 Known Issues
 - Deterministic mode still shows move variations (non-determinism) in some runs.
 
