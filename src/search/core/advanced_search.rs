@@ -20,6 +20,7 @@ pub const SEARCH_ABORTED: i32 = MAX_EVAL_VALUE + 50000;
 pub(crate) use crate::book::book::{book_pick, get_order_book_enabled};
 use crate::search::Search;
 use crate::board::san_move::convert_move_to_san;
+use crate::search::core::alphabeta::with_heuristics;
 
 pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 pub const MAX_SEARCH_DEPTH: usize = 20;
@@ -78,8 +79,17 @@ pub fn find_best_move(
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     init_rayon_pool_if_needed();
 
+    // Clear heuristics for deterministic search
+    with_heuristics(|h| h.clear());
+
     let mut gs = *game_state;
     let tt_mutex = get_tt_mutex();
+    {
+        let mut tt_lock = tt_mutex.lock().unwrap();
+        if crate::search::is_deterministic() {
+            tt_lock.clear();
+        }
+    }
 
     // Unified move loop - works for both maximizing (White) and minimizing (Black)
     let gen_moves = find_all_valid_moves(&mut gs);

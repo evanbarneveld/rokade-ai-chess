@@ -17,6 +17,12 @@ impl SearchHeuristics {
             killers: vec![[ -1, -1 ]; max_ply.max(64)],
         }
     }
+    pub fn clear(&mut self) {
+        self.history = [[[0; 64]; 64]; 2];
+        for k in &mut self.killers {
+            *k = [-1, -1];
+        }
+    }
     #[inline]
     fn idx_side(side: Color) -> usize { if let Color::White = side { 0 } else { 1 } }
     #[inline]

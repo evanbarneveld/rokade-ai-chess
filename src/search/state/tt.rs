@@ -47,6 +47,14 @@ impl TranspositionTable {
     #[inline]
     pub fn next_age(&mut self) { self.age = self.age.wrapping_add(1); }
 
+    pub fn clear(&mut self) {
+        for e in self.entries.iter_mut() {
+            *e = Entry::default();
+        }
+        self.age = 0;
+        self.used_slots = 0;
+    }
+
     #[inline]
     pub fn probe(&self, key: u64) -> Option<&Entry> {
         if !crate::search::advanced_search::TRANSPOSITION_TABLE_ENABLED { return None; }

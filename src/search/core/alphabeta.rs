@@ -541,7 +541,7 @@ fn opponent(color: Color) -> Color {
 
 /// Thread-local heuristics accessor
 #[inline]
-fn with_heuristics<F, R>(f: F) -> R
+pub fn with_heuristics<F, R>(f: F) -> R
 where
     F: FnOnce(&mut SearchHeuristics) -> R,
 {
