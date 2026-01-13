@@ -1,8 +1,10 @@
 use std::path::PathBuf;
+use serial_test::serial;
 use chess::parser::pgn_document::PGNDocument;
 
 /// tests related to reading PGN files
 #[test]
+#[serial]
 fn read_simple_pgn_and_iterate_moves() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests");
@@ -24,6 +26,7 @@ fn read_simple_pgn_and_iterate_moves() {
 }
 
 #[test]
+#[serial]
 fn read_pgn_and_iterate_moves() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests");
