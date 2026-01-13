@@ -23,7 +23,7 @@ pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize,
     let end_c: i32 = to.1 as i32;
 
     while r != end_r && c != end_c {
-        if !board.board_square_is_empty((r as usize, c as usize)) { return false; }
+        if !board.is_empty((r as usize, c as usize)) { return false; }
         r += step_row;
         c += step_col;
     }

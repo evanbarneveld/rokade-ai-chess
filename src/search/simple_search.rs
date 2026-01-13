@@ -38,8 +38,8 @@ impl Search for SimpleSearch {
             let is_capture = gs.board().get(to.0, to.1).is_some()
                 || (matches!(promo, None)
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
-                    && gs.get_en_passant_target().is_some()
-                    && Some(to) == gs.get_en_passant_target());
+                    && gs.en_passant_target().is_some()
+                    && Some(to) == gs.en_passant_target());
 
             let promotion_piece: Option<Piece> = match promo {
                 Some('q') => Some(Piece::new(PieceType::Queen, root_side)),
@@ -95,8 +95,8 @@ fn minimax(state: &mut GameState, depth: usize, root_side: Color) -> i32 {
             let is_capture = gs.board().get(to.0, to.1).is_some()
                 || (matches!(promo, None)
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
-                    && gs.get_en_passant_target().is_some()
-                    && Some(to) == gs.get_en_passant_target());
+                    && gs.en_passant_target().is_some()
+                    && Some(to) == gs.en_passant_target());
             let promotion_piece: Option<Piece> = match promo {
                 Some('q') => Some(Piece::new(PieceType::Queen, state.active_color())),
                 Some('r') => Some(Piece::new(PieceType::Rook, state.active_color())),
@@ -119,8 +119,8 @@ fn minimax(state: &mut GameState, depth: usize, root_side: Color) -> i32 {
             let is_capture = gs.board().get(to.0, to.1).is_some()
                 || (matches!(promo, None)
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
-                    && gs.get_en_passant_target().is_some()
-                    && Some(to) == gs.get_en_passant_target());
+                    && gs.en_passant_target().is_some()
+                    && Some(to) == gs.en_passant_target());
             let promotion_piece: Option<Piece> = match promo {
                 Some('q') => Some(Piece::new(PieceType::Queen, state.active_color())),
                 Some('r') => Some(Piece::new(PieceType::Rook, state.active_color())),

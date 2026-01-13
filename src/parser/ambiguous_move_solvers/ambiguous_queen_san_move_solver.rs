@@ -19,9 +19,9 @@ pub fn solve_ambiguous_queen_san_move(from_col: i8, from_row: i8, to_col: i8, to
 
     // Validate target occupancy depending on capture flag
     let target_ok = if is_capture {
-        board.board_square_has_piece_of_opposite_color((to_row_u, to_col_u), active_color)
+        board.has_opposite_color_piece((to_row_u, to_col_u), active_color)
     } else {
-        board.board_square_is_empty((to_row_u, to_col_u))
+        board.is_empty((to_row_u, to_col_u))
     };
     if !target_ok { return None; }
 

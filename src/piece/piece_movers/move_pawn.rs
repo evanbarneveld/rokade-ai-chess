@@ -5,9 +5,9 @@ pub fn move_pawn(game_state: &mut GameState, piece: Piece, from: (usize, usize),
     if is_capture && game_state.en_passant_target().is_some() {
         if game_state.en_passant_target().unwrap() == to {
             if piece.get_color() == Color::White {
-                game_state.clear_square(to.0-1, to.1);
+                game_state.mutable_board().clear(to.0-1, to.1);
             } else {
-                game_state.clear_square(to.0+1, to.1);
+                game_state.mutable_board().clear(to.0+1, to.1);
             }
         }
     }
@@ -29,7 +29,7 @@ pub fn move_pawn(game_state: &mut GameState, piece: Piece, from: (usize, usize),
     } else if from.0 == 6 && to.0 == 4 && from.1 == to.1 {
         game_state.set_en_passant_target(Option::from((5, from.1)));
     } else {
-        game_state.set_en_passant_target(Option::None);
+        game_state.set_en_passant_target(None);
     }
 
     game_state.reset_half_move_clock();

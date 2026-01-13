@@ -3,7 +3,7 @@ use crate::state::game_state::GameState;
 
 pub fn move_king(game_state: &mut GameState, piece: Piece, from: (usize, usize), to: (usize, usize), is_capture: bool) -> bool {
     // Perform the actual king move on the board
-    let moved = game_state.move_piece(from, to);
+    let moved = game_state.mutable_board().move_piece_basic(from, to);
     if !moved { return false; }
 
     // Any king move revokes both castling rights for that color
@@ -17,12 +17,12 @@ pub fn move_king(game_state: &mut GameState, piece: Piece, from: (usize, usize),
         // Kingside castling (to column 6)
         if to.1 == 6 {
             // Rook moves from h-file (7) to f-file (5)
-            let _ = game_state.move_piece((row, 7), (row, 5));
+            let _ = game_state.mutable_board().move_piece_basic((row, 7), (row, 5));
         }
         // Queenside castling (to column 2)
         else if to.1 == 2 {
             // Rook moves from a-file (0) to d-file (3)
-            let _ = game_state.move_piece((row, 0), (row, 3));
+            let _ = game_state.mutable_board().move_piece_basic((row, 0), (row, 3));
         }
     }
 

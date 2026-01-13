@@ -16,14 +16,14 @@ pub fn is_valid_rook_move(board: &mut Board, from: (usize, usize), to: (usize, u
         let start = if from.1 < to.1 { from.1 + 1 } else { to.1 + 1 };
         let end = if from.1 < to.1 { to.1 } else { from.1 };
         for c in start..end {
-            if !board.board_square_is_empty((from.0, c)) { return false; }
+            if !board.is_empty((from.0, c)) { return false; }
         }
     } else {
         // Move along rows
         let start = if from.0 < to.0 { from.0 + 1 } else { to.0 + 1 };
         let end = if from.0 < to.0 { to.0 } else { from.0 };
         for r in start..end {
-            if !board.board_square_is_empty((r, from.1)) { return false; }
+            if !board.is_empty((r, from.1)) { return false; }
         }
     }
 

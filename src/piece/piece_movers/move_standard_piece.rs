@@ -4,7 +4,7 @@ use crate::state::game_state::GameState;
 /// Handles the common logic: move piece, clear en-passant, update half-move clock.
 pub fn move_standard_piece(game_state: &mut GameState, from: (usize, usize), to: (usize, usize), is_capture: bool) -> bool {
     // Perform the actual move on the board
-    let moved = game_state.move_piece(from, to);
+    let moved = game_state.mutable_board().move_piece_basic(from, to);
     if !moved { return false; }
 
     // Standard piece move clears any en-passant target

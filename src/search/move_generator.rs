@@ -35,7 +35,7 @@ pub fn find_all_valid_moves(
                         && en_passant_target.is_some()
                         && to == en_passant_target.unwrap());
 
-                if !game_state.move_from_and_to_validation_check(
+                if !game_state.board().move_from_and_to_validation_check(
                     from,
                     to,
                     active_color,
@@ -114,7 +114,7 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                             && game_state.en_passant_target().is_some()
                             && to == game_state.en_passant_target().unwrap());
                     let is_pawn_move = piece.get_type() == PieceType::Pawn;
-                    if !game_state.move_from_and_to_validation_check(
+                    if !game_state.board().move_from_and_to_validation_check(
                         from, to, active_color, is_capture, is_pawn_move, game_state.en_passant_target(),
                     ) { continue; }
 

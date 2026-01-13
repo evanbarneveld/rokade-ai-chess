@@ -66,10 +66,10 @@ pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: 
     if is_kingside {
         let rook_col = 7usize;
         // rook must exist and match color
-        if !matches!(game_state.board().get(row, rook_col), Some(p) if p.get_type()==PieceType::Rook && p.get_color()==color) { return false; }
+        if !rook_exist_with_matching_color(game_state, color, row, rook_col) { return false; }
         // squares between king and rook must be empty: f (5) and g (6)
-        if !game_state.board_square_is_empty((row, 5)) { return false; }
-        if !game_state.board_square_is_empty((row, 6)) { return false; }
+        if !game_state.board().is_empty((row, 5)) { return false; }
+        if !game_state.board().is_empty((row, 6)) { return false; }
         // squares not under attack: current (4), f (5), g (6)
         if is_square_attacked_by_opponent(game_state.mutable_board(), (row, 4), color) { return false; }
         if is_square_attacked_by_opponent(game_state.mutable_board(), (row, 5), color) { return false; }
@@ -78,16 +78,21 @@ pub fn is_valid_king_move(game_state: &mut GameState, from: (usize, usize), to: 
     } else {
         // queenside
         let rook_col = 0usize;
-        if !matches!(game_state.board().get(row, rook_col), Some(p) if p.get_type()==PieceType::Rook && p.get_color()==color) { return false; }
+        if !rook_exist_with_matching_color(game_state, color, row, rook_col) { return false; }
         // empty: b (1), c (2), d (3)
-        if !game_state.board_square_is_empty((row, 1)) { return false; }
-        if !game_state.board_square_is_empty((row, 2)) { return false; }
-        if !game_state.board_square_is_empty((row, 3)) { return false; }
+        if !game_state.board().is_empty((row, 1)) { return false; }
+        if !game_state.board().is_empty((row, 2)) { return false; }
+        if !game_state.board().is_empty((row, 3)) { return false; }
         // not attacked: e (4), d (3), c (2)
         if is_square_attacked_by_opponent(game_state.mutable_board(), (row, 4), color) { return false; }
         if is_square_attacked_by_opponent(game_state.mutable_board(), (row, 3), color) { return false; }
         if is_square_attacked_by_opponent(game_state.mutable_board(), (row, 2), color) { return false; }
         true
     }
+}
+
+#[inline]
+fn rook_exist_with_matching_color(game_state: &mut GameState, color: Color, row: usize, rook_col: usize) -> bool {
+    matches!(game_state.board().get(row, rook_col), Some(p) if p.get_type()==PieceType::Rook && p.get_color()==color)
 }
 

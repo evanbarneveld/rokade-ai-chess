@@ -25,7 +25,7 @@ impl PieceMover {
 
         let active_color = game_state.active_color();
 
-        if !game_state.move_from_and_to_validation_check(from, to, active_color, is_capture, piece.get_type() == PieceType::Pawn, game_state.en_passant_target()) {
+        if !game_state.board().move_from_and_to_validation_check(from, to, active_color, is_capture, piece.get_type() == PieceType::Pawn, game_state.en_passant_target()) {
             return false;
         }
 

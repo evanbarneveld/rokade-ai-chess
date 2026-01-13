@@ -5,6 +5,18 @@ use crate::piece::pieces::{Piece, Color, PieceType};
 use crate::state::outcome::{recompute_outcome, OutcomeType};
 use crate::state::castling::CastlingRights;
 
+// ============================================================
+// GAME STATE - Chess Rules + Game Management
+// ============================================================
+
+/// GameState represents a complete chess game position including:
+/// - Board position (piece placement)
+/// - Game rules state (castling rights, en passant, clocks)
+/// - Turn management (active color, move numbers)
+/// - Outcome tracking
+///
+/// The Board contains piece placement and basic operations.
+/// GameState adds the chess rules layer on top.
 #[derive(Debug, Clone, Copy)]
 pub struct GameState {
     board: Board,
@@ -17,19 +29,30 @@ pub struct GameState {
 }
 
 impl GameState {
+    // ============================================================
+    // CONSTRUCTION
+    // ============================================================
+
     pub fn new() -> Self {
         GameState {
             board: Board::new(),
             active_color: Color::White,
             castling_rights: CastlingRights::all(),
             en_passant_target: None,
-            half_move_clock: 0, //for 50 move rule (since last move_validators move or capture)
+            half_move_clock: 0,
             full_move_number: 1,
             outcome: None
         }
     }
 
-    pub fn new_from_existing_state(board: Board, active_color: Color, castling_rights: CastlingRights, en_passant_target: Option<(usize, usize)>, half_move_clock: u32, full_move_number: u32) -> Self {
+    pub fn new_from_existing_state(
+        board: Board,
+        active_color: Color,
+        castling_rights: CastlingRights,
+        en_passant_target: Option<(usize, usize)>,
+        half_move_clock: u32,
+        full_move_number: u32
+    ) -> Self {
         GameState {
             board,
             active_color,
@@ -41,6 +64,42 @@ impl GameState {
         }
     }
 
+    /// Construct GameState from board and side, inferring castling rights
+    pub fn from_board_and_side(board: Board, side: Color) -> Self {
+        let mut rights_str = String::new();
+
+        // White castling
+        if matches!(board.get(0,4), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::King) {
+            if matches!(board.get(0,7), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::Rook) {
+                rights_str.push('K');
+            }
+            if matches!(board.get(0,0), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::Rook) {
+                rights_str.push('Q');
+            }
+        }
+
+        // Black castling
+        if matches!(board.get(7,4), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::King) {
+            if matches!(board.get(7,7), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::Rook) {
+                rights_str.push('k');
+            }
+            if matches!(board.get(7,0), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::Rook) {
+                rights_str.push('q');
+            }
+        }
+
+        if rights_str.is_empty() {
+            rights_str.push('-');
+        }
+
+        let rights = CastlingRights::from_fen(&rights_str);
+        GameState::new_from_existing_state(board, side, rights, None, 0, 1)
+    }
+
+    // ============================================================
+    // BOARD ACCESS
+    // ============================================================
+
     pub fn board(&self) -> &Board {
         &self.board
     }
@@ -49,8 +108,16 @@ impl GameState {
         &mut self.board
     }
 
+    // ============================================================
+    // GAME STATE ACCESSORS
+    // ============================================================
+
+    pub fn active_color(&self) -> Color {
+        self.active_color
+    }
+
     pub fn castling_rights(&self) -> CastlingRights {
-        self.castling_rights.clone()
+        self.castling_rights
     }
 
     pub fn en_passant_target(&self) -> Option<(usize, usize)> {
@@ -65,70 +132,47 @@ impl GameState {
         self.full_move_number
     }
 
-    pub fn move_from_and_to_validation_check(&self, from: (usize, usize), to: (usize, usize), active_color: Color, is_capture: bool, is_pawn_move: bool, en_passant_target: Option<(usize, usize)>) -> bool {
-        self.board.move_from_and_to_validation_check(from, to, active_color, is_capture, is_pawn_move, en_passant_target)
+    pub fn get_outcome(&self) -> Option<OutcomeType> {
+        self.outcome
     }
 
-    pub fn board_square_has_piece_of_opposite_color(&self, to: (usize, usize), active_color: Color) -> bool {
-        self.board.board_square_has_piece_of_opposite_color(to, active_color)
-    }
-
-    pub fn board_square_is_empty(&self, location: (usize, usize)) -> bool {
-        self.board.board_square_is_empty(location)
-    }
-
-    pub fn clear_square(&mut self, row: usize, col: usize) {
-        self.board.clear(row, col);
-    }
-
-    pub fn move_piece(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
-        self.board.move_piece(from, to)
-    }
-
-    pub fn move_pawn(&mut self, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {
-        self.board.move_pawn(from, to, promotion_piece)
-    }
+    // ============================================================
+    // GAME STATE MUTATIONS
+    // ============================================================
 
     pub fn set_en_passant_target(&mut self, target: Option<(usize, usize)>) {
         self.en_passant_target = target;
     }
 
-    pub fn get_en_passant_target(&self) -> Option<(usize, usize)> {
-        self.en_passant_target
-    }
-
-    pub fn active_color(&self) -> Color {
-        self.active_color
-    }
-
-    pub fn switch_player_turn(&mut self) {
-        match self.active_color {
-            Color::White => self.active_color = Color::Black,
-            Color::Black => self.active_color = Color::White,
-        }
-        if self.active_color == Color::White {
-            self.increment_full_move_number();
-        }
-    }
-
-    pub fn increment_full_move_number(&mut self) {
-        self.full_move_number += 1;
-    }
-
-    pub fn increment_half_move_clock(&mut self) {
-        self.half_move_clock += 1;
-    }
-
-    pub fn update_king_location(&mut self, color: Color, location: (usize, usize)) {
-        self.board.set_king_location(color, location);
+    pub fn set_half_move_clock(&mut self, val: u32) {
+        self.half_move_clock = val;
     }
 
     pub fn reset_half_move_clock(&mut self) {
         self.half_move_clock = 0;
     }
 
-    pub fn set_half_move_clock(&mut self, val: u32) {
-        self.half_move_clock = val;
+    pub fn increment_half_move_clock(&mut self) {
+        self.half_move_clock += 1;
+    }
+
+    pub fn increment_full_move_number(&mut self) {
+        self.full_move_number += 1;
+    }
+
+    pub fn switch_player_turn(&mut self) {
+        self.active_color = match self.active_color {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        };
+
+        if self.active_color == Color::White {
+            self.increment_full_move_number();
+        }
+    }
+
+    pub fn update_king_location(&mut self, color: Color, location: (usize, usize)) {
+        self.board.set_king_location(color, location);
     }
 
     pub fn revoke_castling_rights_for_color(&mut self, color: Color) {
@@ -138,46 +182,32 @@ impl GameState {
         }
     }
 
-    pub fn get_half_move_clock(&self) -> u32 { self.half_move_clock }
-
     pub fn recompute_outcome(&mut self, history: &History) {
         self.outcome = Some(recompute_outcome(self, history));
     }
 
-    pub fn get_outcome(&self) -> Option<OutcomeType> { self.outcome.clone() }
+    #[deprecated(note = "Use game_state.mutable_board() with manual promotion handling instead")]
+    pub fn move_pawn(&mut self, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {
+        let mut piece = self.board.get(from.0, from.1);
+        if piece.is_none() {
+            return false;
+        }
 
-    // Lightweight constructor for validators: build a GameState from a Board snapshot and side to move.
-    // Castling rights are inferred from piece placement on initial squares (approximation).
-    pub fn from_board_and_side(board: Board, side: Color) -> Self {
-        // Infer castling rights string based on king/rook presence at start squares
-        let mut rights_str = String::new();
-        // White
-        if matches!(board.get(0,4), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::King) {
-            if matches!(board.get(0,7), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::Rook) {
-                rights_str.push('K');
-            }
-            if matches!(board.get(0,0), Some(p) if p.get_color()==Color::White && p.get_type()==PieceType::Rook) {
-                rights_str.push('Q');
-            }
+        if promotion_piece.is_some() {
+            piece = promotion_piece;
         }
-        // Black
-        if matches!(board.get(7,4), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::King) {
-            if matches!(board.get(7,7), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::Rook) {
-                rights_str.push('k');
-            }
-            if matches!(board.get(7,0), Some(p) if p.get_color()==Color::Black && p.get_type()==PieceType::Rook) {
-                rights_str.push('q');
-            }
-        }
-        if rights_str.is_empty() { rights_str.push('-'); }
-        let rights = CastlingRights::from_fen(&rights_str);
-        GameState::new_from_existing_state(board, side, rights, None, 0, 1)
+
+        self.board.set(to.0, to.1, piece);
+        self.board.set(from.0, from.1, None);
+        true
     }
 }
 
+// ============================================================
+// FAST MAKE/UNMAKE FOR SEARCH
+// ============================================================
 
-// Fast make/unmake specifically for perft and search hot paths.
-// Applies a move on the current GameState and returns an undo snapshot for perfect restoration.
+/// Undo information for perfect move reversal in search
 #[derive(Clone, Copy)]
 pub struct UndoGameState {
     pub(crate) board_undo: UndoMove,
@@ -186,13 +216,12 @@ pub struct UndoGameState {
     pub(crate) prev_en_passant_target: Option<(usize, usize)>,
     pub(crate) prev_half_move_clock: u32,
     pub(crate) prev_full_move_number: u32,
-    // En passant captured pawn (if any)
     pub(crate) ep_captured_sq: Option<(usize, usize)>,
     pub(crate) ep_captured_piece: Option<Piece>,
 }
 
 impl GameState {
-    // Single entry-point "make": handles captures (incl. EP), promotions, castling rights, clocks, EP target, and side to move.
+    /// Fast move application for search - handles all chess rules
     pub fn make_move_fast(&mut self, from: (usize, usize), to: (usize, usize), promo: Option<char>) -> UndoGameState {
         let prev_active_color = self.active_color;
         let prev_castling_rights = self.castling_rights;
@@ -202,34 +231,31 @@ impl GameState {
 
         let moving_piece = self.board.get(from.0, from.1);
 
-        // Determine if this is an en passant capture before moving
+        // Detect en passant capture before moving
         let mut ep_captured_sq: Option<(usize, usize)> = None;
         let mut ep_captured_piece: Option<Piece> = None;
+
         if let Some(p) = moving_piece {
             if p.get_type() == PieceType::Pawn {
                 if let Some(ep) = self.en_passant_target {
                     if ep == to && self.board.get(to.0, to.1).is_none() && from.1 != to.1 {
-                        // EP capture: captured pawn sits behind the target square
                         let cap_row = if p.get_color() == Color::White { to.0 - 1 } else { to.0 + 1 };
                         ep_captured_sq = Some((cap_row, to.1));
                         ep_captured_piece = self.board.get(cap_row, to.1);
-                        // Remove captured pawn now (before board.move) would be messy; do it after move
                     }
                 }
             }
         }
 
-        // Apply the board move (handles king+rook relocation for castling and normal captures on destination)
+        // Apply board move (handles castling and normal captures)
         let board_undo = self.board.make_move_simple(from, to, promo);
 
-        // If this was an en passant capture, clear the captured pawn square
-        if let (Some(sq), Some(_pc)) = (ep_captured_sq, ep_captured_piece) {
+        // Clear en passant captured pawn
+        if let (Some(sq), Some(_)) = (ep_captured_sq, ep_captured_piece) {
             self.board.clear(sq.0, sq.1);
         }
 
-        // Handle promotion: replace pawn at destination with promoted piece if requested
-        // NOTE: make_move_simple already handles this, so this is redundant but we keep it
-        // for safety, ensuring it doesn't corrupt state.
+        // Handle promotion (make_move_simple already does this, but ensure correctness)
         if let (Some(p), Some(pc)) = (moving_piece, promo) {
             if p.get_type() == PieceType::Pawn {
                 let promote_to = match pc {
@@ -241,13 +267,14 @@ impl GameState {
                 };
                 let promoted_piece = Piece::new(promote_to, p.get_color());
                 self.board.set(to.0, to.1, Some(promoted_piece));
+
                 if promoted_piece.get_type() == PieceType::King {
-                     self.board.set_king_location(promoted_piece.get_color(), to);
+                    self.board.set_king_location(promoted_piece.get_color(), to);
                 }
             }
         }
 
-        // Update castling rights due to king/rook moves or rook capture from original squares
+        // Update castling rights
         if let Some(p) = moving_piece {
             match (p.get_type(), p.get_color()) {
                 (PieceType::King, Color::White) => {
@@ -257,69 +284,113 @@ impl GameState {
                     self.castling_rights.revoke_black_castling();
                 }
                 (PieceType::Rook, Color::White) => {
-                    if from == (0, 0) { // a1
-                        self.castling_rights = CastlingRights { white_kingside: self.castling_rights.white_kingside(), white_queenside: false, black_kingside: self.castling_rights.black_kingside(), black_queenside: self.castling_rights.black_queenside() };
-                    } else if from == (0, 7) { // h1
-                        self.castling_rights = CastlingRights { white_kingside: false, white_queenside: self.castling_rights.white_queenside(), black_kingside: self.castling_rights.black_kingside(), black_queenside: self.castling_rights.black_queenside() };
+                    if from == (0, 0) {
+                        self.castling_rights = CastlingRights {
+                            white_kingside: self.castling_rights.white_kingside(),
+                            white_queenside: false,
+                            black_kingside: self.castling_rights.black_kingside(),
+                            black_queenside: self.castling_rights.black_queenside()
+                        };
+                    } else if from == (0, 7) {
+                        self.castling_rights = CastlingRights {
+                            white_kingside: false,
+                            white_queenside: self.castling_rights.white_queenside(),
+                            black_kingside: self.castling_rights.black_kingside(),
+                            black_queenside: self.castling_rights.black_queenside()
+                        };
                     }
                 }
                 (PieceType::Rook, Color::Black) => {
-                    if from == (7, 0) { // a8
-                        self.castling_rights = CastlingRights { white_kingside: self.castling_rights.white_kingside(), white_queenside: self.castling_rights.white_queenside(), black_kingside: self.castling_rights.black_kingside(), black_queenside: false };
-                    } else if from == (7, 7) { // h8
-                        self.castling_rights = CastlingRights { white_kingside: self.castling_rights.white_kingside(), white_queenside: self.castling_rights.white_queenside(), black_kingside: false, black_queenside: self.castling_rights.black_queenside() };
+                    if from == (7, 0) {
+                        self.castling_rights = CastlingRights {
+                            white_kingside: self.castling_rights.white_kingside(),
+                            white_queenside: self.castling_rights.white_queenside(),
+                            black_kingside: self.castling_rights.black_kingside(),
+                            black_queenside: false
+                        };
+                    } else if from == (7, 7) {
+                        self.castling_rights = CastlingRights {
+                            white_kingside: self.castling_rights.white_kingside(),
+                            white_queenside: self.castling_rights.white_queenside(),
+                            black_kingside: false,
+                            black_queenside: self.castling_rights.black_queenside()
+                        };
                     }
-                }
-                _ => {}
-            }
-        }
-        // If a rook on initial square was captured (including EP is never rook), revoke corresponding rights
-        if board_undo.captured.is_some() {
-            let cap_sq = to;
-            match cap_sq {
-                (0, 0) => { // a1 rook captured
-                    self.castling_rights = CastlingRights { white_kingside: self.castling_rights.white_kingside(), white_queenside: false, black_kingside: self.castling_rights.black_kingside(), black_queenside: self.castling_rights.black_queenside() };
-                }
-                (0, 7) => { // h1 rook captured
-                    self.castling_rights = CastlingRights { white_kingside: false, white_queenside: self.castling_rights.white_queenside(), black_kingside: self.castling_rights.black_kingside(), black_queenside: self.castling_rights.black_queenside() };
-                }
-                (7, 0) => { // a8 rook captured
-                    self.castling_rights = CastlingRights { white_kingside: self.castling_rights.white_kingside(), white_queenside: self.castling_rights.white_queenside(), black_kingside: self.castling_rights.black_kingside(), black_queenside: false };
-                }
-                (7, 7) => { // h8 rook captured
-                    self.castling_rights = CastlingRights { white_kingside: self.castling_rights.white_kingside(), white_queenside: self.castling_rights.white_queenside(), black_kingside: false, black_queenside: self.castling_rights.black_queenside() };
                 }
                 _ => {}
             }
         }
 
-        // Update en passant target: only set for double pawn pushes, else clear
+        // Revoke castling rights if rook captured
+        if board_undo.captured.is_some() {
+            match to {
+                (0, 0) => {
+                    self.castling_rights = CastlingRights {
+                        white_kingside: self.castling_rights.white_kingside(),
+                        white_queenside: false,
+                        black_kingside: self.castling_rights.black_kingside(),
+                        black_queenside: self.castling_rights.black_queenside()
+                    };
+                }
+                (0, 7) => {
+                    self.castling_rights = CastlingRights {
+                        white_kingside: false,
+                        white_queenside: self.castling_rights.white_queenside(),
+                        black_kingside: self.castling_rights.black_kingside(),
+                        black_queenside: self.castling_rights.black_queenside()
+                    };
+                }
+                (7, 0) => {
+                    self.castling_rights = CastlingRights {
+                        white_kingside: self.castling_rights.white_kingside(),
+                        white_queenside: self.castling_rights.white_queenside(),
+                        black_kingside: self.castling_rights.black_kingside(),
+                        black_queenside: false
+                    };
+                }
+                (7, 7) => {
+                    self.castling_rights = CastlingRights {
+                        white_kingside: self.castling_rights.white_kingside(),
+                        white_queenside: self.castling_rights.white_queenside(),
+                        black_kingside: false,
+                        black_queenside: self.castling_rights.black_queenside()
+                    };
+                }
+                _ => {}
+            }
+        }
+
+        // Update en passant target
         self.en_passant_target = None;
+
         if let Some(p) = moving_piece {
             if p.get_type() == PieceType::Pawn {
-                // Reset half-move clock for pawn move
                 self.half_move_clock = 0;
+
                 let start_row = if p.get_color() == Color::White { 1 } else { 6 };
                 let dir = if p.get_color() == Color::White { 1isize } else { -1isize };
-                if from.0 == start_row && (to.0 as isize) == (from.0 as isize + 2*dir) && from.1 == to.1 {
-                    // double push; ep target is the square jumped over
+
+                if from.0 == start_row && (to.0 as isize) == (from.0 as isize + 2 * dir) && from.1 == to.1 {
                     let mid_row = (from.0 as isize + dir) as usize;
                     self.en_passant_target = Some((mid_row, from.1));
                 }
             } else {
-                // Non-pawn move: increment half-move clock; reset on capture handled below
                 self.half_move_clock = self.half_move_clock.saturating_add(1);
             }
         }
 
-        // Capture resets half-move clock
+        // Reset clock on capture
         if board_undo.captured.is_some() || ep_captured_piece.is_some() {
             self.half_move_clock = 0;
         }
 
-        // Switch side to move and increment full-move number when Black just moved
-        self.active_color = match self.active_color { Color::White => Color::Black, Color::Black => Color::White };
-        if self.active_color == Color::White { // just completed a black move
+        // Switch side and increment move number
+        self.active_color = match self.active_color {
+            Color::White => Color::Black,
+            Color::Black => Color::White
+        };
+
+        if self.active_color == Color::White {
             self.full_move_number += 1;
         }
 
@@ -335,18 +406,21 @@ impl GameState {
         }
     }
 
-    // Complementary unmake: fully restore GameState to its previous snapshot
+    /// Fast move reversal for search
     pub fn unmake_move_fast(&mut self, u: UndoGameState) {
-        // Restore board state first (moves pieces back, handles un-castling)
+        // Restore board
         self.board.unmake_move_simple(u.board_undo);
-        // If an en-passant capture occurred, restore the captured pawn
+
+        // Restore en passant captured pawn
         if let (Some(sq), Some(pc)) = (u.ep_captured_sq, u.ep_captured_piece) {
             self.board.set(sq.0, sq.1, Some(pc));
+
             if pc.get_type() == PieceType::King {
                 self.board.set_king_location(pc.get_color(), sq);
             }
         }
-        // Restore metadata
+
+        // Restore game state
         self.active_color = u.prev_active_color;
         self.castling_rights = u.prev_castling_rights;
         self.en_passant_target = u.prev_en_passant_target;
@@ -355,13 +429,11 @@ impl GameState {
 
         #[cfg(debug_assertions)]
         {
-            // King locations should match the snapshot stored in the board undo
             let wk = self.board.get_king_location(Color::White);
             let bk = self.board.get_king_location(Color::Black);
             debug_assert_eq!(wk, u.board_undo.prev_white_king, "White king location mismatch after unmake");
             debug_assert_eq!(bk, u.board_undo.prev_black_king, "Black king location mismatch after unmake");
 
-            // Squares actually contain kings of the right colors
             if let Some(k) = self.board.get(wk.0, wk.1) {
                 debug_assert!(k.get_type() == PieceType::King && k.get_color() == Color::White, "Expected white king on its square after unmake");
             }
@@ -371,5 +443,3 @@ impl GameState {
         }
     }
 }
-
-

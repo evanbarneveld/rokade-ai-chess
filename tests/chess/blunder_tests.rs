@@ -137,7 +137,7 @@ fn enumerate_legal_moves(game_state: &GameState) -> Vec<((usize, usize), (usize,
                 let is_capture = board.get(tr, tc).is_some()
                     || (piece.get_type() == PieceType::Pawn && game_state.en_passant_target().is_some() && to == game_state.en_passant_target().unwrap());
                 let is_pawn_move = piece.get_type() == PieceType::Pawn;
-                if !game_state.move_from_and_to_validation_check(from, to, active_color, is_capture, is_pawn_move, game_state.en_passant_target()) { continue; }
+                if !game_state.board().move_from_and_to_validation_check(from, to, active_color, is_capture, is_pawn_move, game_state.en_passant_target()) { continue; }
                 // Legality via applying move on a copy using PieceMover
                 let mut gs2 = *game_state;
                 let is_pawn_promotion = is_pawn_move && ((active_color == Color::White && tr == 7) || (active_color == Color::Black && tr == 0));

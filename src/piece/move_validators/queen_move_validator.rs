@@ -33,14 +33,14 @@ fn is_valid_queen_orthogonal_move(board: &mut Board, from: (usize, usize), to: (
         let start = if from.1 < to.1 { from.1 + 1 } else { to.1 + 1 };
         let end = if from.1 < to.1 { to.1 } else { from.1 };
         for c in start..end {
-            if !board.board_square_is_empty((from.0, c)) { return false; }
+            if !board.is_empty((from.0, c)) { return false; }
         }
     } else {
         // Move along rows
         let start = if from.0 < to.0 { from.0 + 1 } else { to.0 + 1 };
         let end = if from.0 < to.0 { to.0 } else { from.0 };
         for r in start..end {
-            if !board.board_square_is_empty((r, from.1)) { return false; }
+            if !board.is_empty((r, from.1)) { return false; }
         }
     }
 
@@ -69,7 +69,7 @@ fn is_valid_diagonal_move(board: &mut Board, from: (usize, usize), to: (usize, u
     let end_c: i32 = to.1 as i32;
 
     while r != end_r && c != end_c {
-        if !board.board_square_is_empty((r as usize, c as usize)) { return false; }
+        if !board.is_empty((r as usize, c as usize)) { return false; }
         r += step_row;
         c += step_col;
     }
