@@ -413,12 +413,6 @@ impl Board {
         false
     }
 
-    // ============================================================
-    // LEGACY METHODS (For backward compatibility)
-    // These forward to the new cleaner API above.
-    // TODO: Eventually migrate call sites to use the new API directly.
-    // ============================================================
-
     /// Legacy validation method with confusing parameter list.
     /// Consider moving this logic to GameState where it has access to game rules.
     #[allow(deprecated)]
@@ -427,34 +421,4 @@ impl Board {
         move_from_and_to_validation_check(self, from, to, active_color, is_capture, is_pawn_move, en_passant_target)
     }
 
-    #[deprecated(note = "Use has_opposite_color_piece instead")]
-    pub fn board_square_has_piece_of_opposite_color(&self, to: (usize, usize), active_color: Color) -> bool {
-        self.has_opposite_color_piece(to, active_color)
-    }
-
-    #[deprecated(note = "Use is_empty instead")]
-    pub fn board_square_is_empty(&self, location: (usize, usize)) -> bool {
-        self.is_empty(location)
-    }
-
-    #[deprecated(note = "Use move_piece_basic instead")]
-    pub fn move_piece(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
-        self.move_piece_basic(from, to)
-    }
-
-    #[deprecated(note = "Use move_piece_basic with GameState handling promotion")]
-    pub fn move_pawn(&mut self, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {
-        let mut piece = self.get(from.0, from.1);
-        if piece.is_none() {
-            return false;
-        }
-
-        if promotion_piece.is_some() {
-            piece = promotion_piece;
-        }
-
-        self.set(to.0, to.1, piece);
-        self.set(from.0, from.1, None);
-        true
-    }
 }
