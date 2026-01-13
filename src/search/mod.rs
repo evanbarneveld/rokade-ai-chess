@@ -1,4 +1,8 @@
 pub mod advanced_search;
+pub mod move_generator;
+pub(crate) mod aspiration;
+pub(crate) mod root_evaluator;
+pub(crate) mod repetition;
 pub(crate) mod tt;
 pub(crate) mod zobrist;
 pub(crate) mod heuristics;
@@ -11,6 +15,7 @@ pub(crate) mod locking;
 pub(crate) mod prune_null_moves;
 pub(crate) mod qsearch;
 pub(crate) mod see;
+pub(crate) mod root_heuristics;
 mod alphabeta;
 mod root_moves;
 mod simple_search;

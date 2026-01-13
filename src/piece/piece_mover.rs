@@ -8,11 +8,8 @@ use crate::piece::move_validators::king_move_validator::is_valid_king_move;
 use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 
 use crate::piece::piece_movers::move_pawn::move_pawn;
-use crate::piece::piece_movers::move_knight::move_knight;
-use crate::piece::piece_movers::move_bishop::move_bishop;
-use crate::piece::piece_movers::move_rook::move_rook;
-use crate::piece::piece_movers::move_queen::move_queen;
 use crate::piece::piece_movers::move_king::move_king;
+use crate::piece::piece_movers::move_standard_piece::move_standard_piece;
 
 #[derive(Debug)]
 pub struct PieceMover {}
@@ -42,25 +39,25 @@ impl PieceMover {
             }
             PieceType::Knight => {
                 if is_valid_knight_move(game_state.mutable_board(), from, to, true) {
-                    return move_knight(game_state, from, to, is_capture);
+                    return move_standard_piece(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Bishop => {
                 if is_valid_bishop_move(game_state.mutable_board(), from, to, true) {
-                    return move_bishop(game_state, from, to, is_capture);
+                    return move_standard_piece(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Rook => {
                 if is_valid_rook_move(game_state.mutable_board(), from, to, true) {
-                    return move_rook(game_state, from, to, is_capture);
+                    return move_standard_piece(game_state, from, to, is_capture);
                 }
                 false
             }
             PieceType::Queen => {
                 if is_valid_queen_move(game_state.mutable_board(), from, to, true) {
-                    return move_queen(game_state, from, to, is_capture);
+                    return move_standard_piece(game_state, from, to, is_capture);
                 }
                 false
             }

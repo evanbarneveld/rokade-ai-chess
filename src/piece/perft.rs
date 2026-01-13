@@ -85,8 +85,8 @@ pub fn perft_divide(gs: &GameState, depth: u32) -> Vec<(String, u64)> {
     }
     // Ensure a clean TT for divide as well (not strictly necessary but keeps counts isolated)
     PERFT_TT.with(|tt| tt.borrow_mut().clear());
-    let moves = find_all_valid_moves(gs);
     let mut work = *gs;
+    let moves = find_all_valid_moves(&mut work);
     for (from, to, promo) in moves {
         let u = work.make_move_fast(from, to, promo);
         let count = perft_count_mut(&mut work, depth - 1);

@@ -21,7 +21,8 @@ impl Search for SimpleSearch {
         let depth_limit: usize = search_depth;
 
         // Generate all legal root moves
-        let moves = find_all_valid_moves(game_state);
+        let mut gs_root = *game_state;
+        let moves = find_all_valid_moves(&mut gs_root);
         if moves.is_empty() {
             return None;
         }
@@ -53,7 +54,7 @@ impl Search for SimpleSearch {
                 continue;
             }
 
-            let score = minimax(gs, depth_limit - 1, root_side);
+            let score = minimax(&mut gs, depth_limit - 1, root_side);
 
             match best {
                 None => best = Some((from, to, promo, score)),
@@ -66,14 +67,15 @@ impl Search for SimpleSearch {
     }
 }
 
-fn minimax(state: GameState, depth: usize, root_side: Color) -> i32 {
+fn minimax(state: &mut GameState, depth: usize, root_side: Color) -> i32 {
     if depth == 0 {
         // Evaluate from White's perspective, then convert to root-side perspective.
         let white_centric = evaluate_position(state.board(), state.active_color());
         return if root_side == Color::White { white_centric } else { -white_centric };
     }
 
-    let moves = find_all_valid_moves(&state);
+    let mut mut_state = state.clone();
+    let moves = find_all_valid_moves(&mut mut_state);
     if moves.is_empty() {
         // No legal moves: checkmate or stalemate. Score from root perspective.
         // If side to move is in check -> mate (large loss for side to move).
@@ -89,7 +91,7 @@ fn minimax(state: GameState, depth: usize, root_side: Color) -> i32 {
     if maximizing {
         let mut best = i32::MIN;
         for (from, to, promo) in moves {
-            let mut gs = state;
+            let mut gs = mut_state.clone();
             let is_capture = gs.board().get(to.0, to.1).is_some()
                 || (matches!(promo, None)
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
@@ -103,7 +105,7 @@ fn minimax(state: GameState, depth: usize, root_side: Color) -> i32 {
                 _ => None,
             };
             if PieceMover::move_piece(&mut gs, from, to, is_capture, promotion_piece) {
-                let val = minimax(gs, depth - 1, root_side);
+                let val = minimax(&mut gs, depth - 1, root_side);
                 if val > best {
                     best = val;
                 }
@@ -113,7 +115,7 @@ fn minimax(state: GameState, depth: usize, root_side: Color) -> i32 {
     } else {
         let mut best = i32::MAX;
         for (from, to, promo) in moves {
-            let mut gs = state;
+            let mut gs = mut_state.clone();
             let is_capture = gs.board().get(to.0, to.1).is_some()
                 || (matches!(promo, None)
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
@@ -127,7 +129,7 @@ fn minimax(state: GameState, depth: usize, root_side: Color) -> i32 {
                 _ => None,
             };
             if PieceMover::move_piece(&mut gs, from, to, is_capture, promotion_piece) {
-                let val = minimax(gs, depth - 1, root_side);
+                let val = minimax(&mut gs, depth - 1, root_side);
                 if val < best {
                     best = val;
                 }

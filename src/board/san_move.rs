@@ -98,8 +98,8 @@ fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize),
         return String::new();
     }
     // Check for mate: if opponent has no legal moves
-    let opp_state = GameState::from_board_and_side(tmp, opp);
-    let legals = find_all_valid_moves(&opp_state);
+    let mut opp_state = GameState::from_board_and_side(tmp, opp);
+    let legals = find_all_valid_moves(&mut opp_state);
     if legals.is_empty() { "#".to_string() } else { "+".to_string() }
 }
 

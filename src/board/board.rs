@@ -52,6 +52,25 @@ impl Board {
         &self.squares
     }
 
+    /// Iterate over all pieces on the board with their positions
+    pub fn iter_pieces(&self) -> impl Iterator<Item = ((usize, usize), Piece)> + '_ {
+        self.squares.iter().enumerate().flat_map(|(r, row)| {
+            row.iter().enumerate().filter_map(move |(c, piece)| {
+                piece.map(|p| ((r, c), p))
+            })
+        })
+    }
+
+    /// Iterate over pieces of a specific color
+    pub fn iter_pieces_of_color(&self, color: Color) -> impl Iterator<Item = ((usize, usize), Piece)> + '_ {
+        self.iter_pieces().filter(move |(_, p)| p.get_color() == color)
+    }
+
+    /// Iterate over pieces of a specific type
+    pub fn iter_pieces_of_type(&self, piece_type: PieceType) -> impl Iterator<Item = ((usize, usize), Piece)> + '_ {
+        self.iter_pieces().filter(move |(_, p)| p.get_type() == piece_type)
+    }
+
     pub fn get_king_location(&self, color:Color) -> (usize, usize) {
         if color == Color::White { self.white_king_location } else { self.black_king_location }
     }

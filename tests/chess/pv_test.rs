@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use serial_test::serial;
 use chess::generator::move_generator::generate_move_as_san;
 use chess::search::{set_deterministic, SearchMode};
 use chess::search::uci_feedback::set_info_callback;
 
 #[test]
+#[serial]
 fn depth2_pv_first_move_is_exd5() {
     use chess::Chess;
     let fen = "8/8/4p3/3Q4/8/8/8/2K2k2 b - - 0 1";

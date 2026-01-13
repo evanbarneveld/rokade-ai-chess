@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::board::attack_maps::build_attack_maps;
 pub(crate) use crate::board::pst::{tapered_eval as taper_general};
 use crate::board::pst::*;
 use crate::piece::pieces::{Color, PieceType};
@@ -181,7 +182,7 @@ impl<'a> EvalContext<'a> {
         let eg = 24 - phase;
         let king_w = find_king(board, Color::White);
         let king_b = find_king(board, Color::Black);
-        let pawn_counts = crate::board::evaluate_pawns::pawn_file_counts(board);
+        let pawn_counts = crate::board::evaluators::evaluate_pawns::pawn_file_counts(board);
         let (att_w, att_b) = build_attack_maps(board);
         
         let mut white_pawns = 0;
@@ -209,11 +210,11 @@ impl<'a> EvalContext<'a> {
         let mut val = material_value(pt) + pst_value_tapered(pt, row, col, color, self.phase);
 
         match pt {
-            PieceType::Pawn => val += crate::board::evaluate_pawns::evaluate_pawn(self.board, row, col, color, self.phase, self.king_w, self.king_b, &self.att_w, &self.att_b),
-            PieceType::Knight => val += crate::board::evaluate_knights::evaluate_knight(self.board, row, col, color, self.phase),
-            PieceType::Bishop => val += crate::board::evaluate_bishops::evaluate_bishop(row, col, color, self.phase),
-            PieceType::Rook => val += crate::board::evaluate_rooks::evaluate_rook(self.board, row, col, color, self.phase, self.eg, self.white_pawns, self.black_pawns),
-            PieceType::Queen => val += crate::board::evaluate_queens::evaluate_queen(self.board, row, col, color, self.phase),
+            PieceType::Pawn => val += crate::board::evaluators::evaluate_pawns::evaluate_pawn(self.board, row, col, color, self.phase, self.king_w, self.king_b, &self.att_w, &self.att_b),
+            PieceType::Knight => val += crate::board::evaluators::evaluate_knights::evaluate_knight(self.board, row, col, color, self.phase),
+            PieceType::Bishop => val += crate::board::evaluators::evaluate_bishops::evaluate_bishop(row, col, color, self.phase),
+            PieceType::Rook => val += crate::board::evaluators::evaluate_rooks::evaluate_rook(self.board, row, col, color, self.phase, self.eg, self.white_pawns, self.black_pawns),
+            PieceType::Queen => val += crate::board::evaluators::evaluate_queens::evaluate_queen(self.board, row, col, color, self.phase),
             _ => {}
         }
 
@@ -270,7 +271,7 @@ impl<'a> EvalContext<'a> {
         for r in 2..=5 {
             for c in 2..=5 {
                 // White holes
-                if crate::board::evaluate_pawns::is_hole_square_limited(self.board, r, c, Color::White, self.phase) {
+                if crate::board::evaluators::evaluate_pawns::is_hole_square_limited(self.board, r, c, Color::White, self.phase) {
                     let influenced = self.att_b[r][c];
                     let occ_minor = matches!(get_piece_type(self.board, r, c), Some(PieceType::Knight | PieceType::Bishop))
                         && is_color(self.board, r, c, Color::Black);
@@ -281,7 +282,7 @@ impl<'a> EvalContext<'a> {
                     }
                 }
                 // Black holes
-                if crate::board::evaluate_pawns::is_hole_square_limited(self.board, r, c, Color::Black, self.phase) {
+                if crate::board::evaluators::evaluate_pawns::is_hole_square_limited(self.board, r, c, Color::Black, self.phase) {
                     let influenced = self.att_w[r][c];
                     let occ_minor = matches!(get_piece_type(self.board, r, c), Some(PieceType::Knight | PieceType::Bishop))
                         && is_color(self.board, r, c, Color::White);
@@ -323,13 +324,13 @@ impl<'a> EvalContext<'a> {
             // White pawn on 5th rank (r==4)
             if is_piece(self.board, 4, c, Color::White, PieceType::Pawn) {
                 let safe = !square_attacked_by_enemy_pawn(self.board, 4, c, Color::Black)
-                    || crate::board::evaluate_pawns::friendly_pawn_adjacent_behind_limited(self.board, 4, c, Color::White, self.phase);
+                    || crate::board::evaluators::evaluate_pawns::friendly_pawn_adjacent_behind_limited(self.board, 4, c, Color::White, self.phase);
                 if safe { score += (SPACE_PAWN5_CP * self.phase) / 24; }
             }
             // Black pawn on 5th rank (r==3)
             if is_piece(self.board, 3, c, Color::Black, PieceType::Pawn) {
                 let safe = !square_attacked_by_enemy_pawn(self.board, 3, c, Color::White)
-                    || crate::board::evaluate_pawns::friendly_pawn_adjacent_behind_limited(self.board, 3, c, Color::Black, self.phase);
+                    || crate::board::evaluators::evaluate_pawns::friendly_pawn_adjacent_behind_limited(self.board, 3, c, Color::Black, self.phase);
                 if safe { score -= (SPACE_PAWN5_CP * self.phase) / 24; }
             }
         }
@@ -340,41 +341,41 @@ impl<'a> EvalContext<'a> {
         let mut score = 0;
 
         // Bishop pair
-        let (w_bishops, b_bishops) = crate::board::evaluate_bishops::count_bishops(self.board);
+        let (w_bishops, b_bishops) = crate::board::evaluators::evaluate_bishops::count_bishops(self.board);
         if w_bishops >= 2 { score += self.taper(36, 24); }
         if b_bishops >= 2 { score -= self.taper(36, 24); }
 
         // Rook/Queen activity and coordination
-        let w_rook_act = crate::board::evaluate_rooks::rook_file_activity(self.board, Color::White, &self.pawn_counts);
-        let b_rook_act = crate::board::evaluate_rooks::rook_file_activity(self.board, Color::Black, &self.pawn_counts);
+        let w_rook_act = crate::board::evaluators::evaluate_rooks::rook_file_activity(self.board, Color::White, &self.pawn_counts);
+        let b_rook_act = crate::board::evaluators::evaluate_rooks::rook_file_activity(self.board, Color::Black, &self.pawn_counts);
         score += (w_rook_act * self.phase) / 24;
         score -= (b_rook_act * self.phase) / 24;
 
-        score += (crate::board::evaluate_rooks::doubled_rooks_bonus(self.board, Color::White, &self.pawn_counts) * self.phase) / 24;
-        score -= (crate::board::evaluate_rooks::doubled_rooks_bonus(self.board, Color::Black, &self.pawn_counts) * self.phase) / 24;
+        score += (crate::board::evaluators::evaluate_rooks::doubled_rooks_bonus(self.board, Color::White, &self.pawn_counts) * self.phase) / 24;
+        score -= (crate::board::evaluators::evaluate_rooks::doubled_rooks_bonus(self.board, Color::Black, &self.pawn_counts) * self.phase) / 24;
 
-        score += (crate::board::evaluate_rooks::rook_on_enemy_king_file_bonus(self.board, Color::White) * self.phase) / 24;
-        score -= (crate::board::evaluate_rooks::rook_on_enemy_king_file_bonus(self.board, Color::Black) * self.phase) / 24;
+        score += (crate::board::evaluators::evaluate_rooks::rook_on_enemy_king_file_bonus(self.board, Color::White) * self.phase) / 24;
+        score -= (crate::board::evaluators::evaluate_rooks::rook_on_enemy_king_file_bonus(self.board, Color::Black) * self.phase) / 24;
 
-        score += (crate::board::evaluate_queens::queen_on_semi_open_file_bonus(self.board, Color::White, &self.pawn_counts) * self.phase) / 24;
-        score -= (crate::board::evaluate_queens::queen_on_semi_open_file_bonus(self.board, Color::Black, &self.pawn_counts) * self.phase) / 24;
+        score += (crate::board::evaluators::evaluate_queens::queen_on_semi_open_file_bonus(self.board, Color::White, &self.pawn_counts) * self.phase) / 24;
+        score -= (crate::board::evaluators::evaluate_queens::queen_on_semi_open_file_bonus(self.board, Color::Black, &self.pawn_counts) * self.phase) / 24;
 
         // King safety and activity
-        score += (crate::board::evaluate_king::king_safety(self.board, Color::White) * self.phase) / 24;
-        score -= (crate::board::evaluate_king::king_safety(self.board, Color::Black) * self.phase) / 24;
+        score += (crate::board::evaluators::evaluate_king::king_safety(self.board, Color::White) * self.phase) / 24;
+        score -= (crate::board::evaluators::evaluate_king::king_safety(self.board, Color::Black) * self.phase) / 24;
 
-        score += (crate::board::evaluate_king::king_activity_endgame(self.board, Color::White) * self.eg) / 24;
-        score -= (crate::board::evaluate_king::king_activity_endgame(self.board, Color::Black) * self.eg) / 24;
+        score += (crate::board::evaluators::evaluate_king::king_activity_endgame(self.board, Color::White) * self.eg) / 24;
+        score -= (crate::board::evaluators::evaluate_king::king_activity_endgame(self.board, Color::Black) * self.eg) / 24;
 
         // Development penalty
         if self.phase > 12 {
-            score += crate::board::evaluate_king::development_penalty_on_backrank(self.board, Color::White) * (self.phase - 12) / 12;
-            score -= crate::board::evaluate_king::development_penalty_on_backrank(self.board, Color::Black) * (self.phase - 12) / 12;
+            score += crate::board::evaluators::evaluate_king::development_penalty_on_backrank(self.board, Color::White) * (self.phase - 12) / 12;
+            score -= crate::board::evaluators::evaluate_king::development_penalty_on_backrank(self.board, Color::Black) * (self.phase - 12) / 12;
         }
 
         // Early queen penalty
-        score -= (crate::board::evaluate_queens::early_queen_penalty(self.board, Color::White, &self.pawn_counts) * self.phase) / 24;
-        score += (crate::board::evaluate_queens::early_queen_penalty(self.board, Color::Black, &self.pawn_counts) * self.phase) / 24;
+        score -= (crate::board::evaluators::evaluate_queens::early_queen_penalty(self.board, Color::White, &self.pawn_counts) * self.phase) / 24;
+        score += (crate::board::evaluators::evaluate_queens::early_queen_penalty(self.board, Color::Black, &self.pawn_counts) * self.phase) / 24;
 
         score
     }
@@ -434,71 +435,6 @@ fn count_slider_targets(board: &Board, r: usize, c: usize, color: Color, dirs: &
         }
     }
     n
-}
-
-// Attack maps (pseudo-legal): squares attacked by White and by Black
-fn build_attack_maps(board: &Board) -> ([[bool;8];8], [[bool;8];8]) {
-    let mut w = [[false;8];8];
-    let mut b = [[false;8];8];
-    for r in 0..8 { for c in 0..8 {
-        if let Some(p)=board.get(r,c) {
-            let color = p.get_color();
-            match p.get_type() {
-                PieceType::Knight => add_knight_attacks(board, r, c, color, &mut w, &mut b),
-                PieceType::Bishop => add_slider_attacks(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)], &mut w, &mut b),
-                PieceType::Rook   => add_slider_attacks(board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)], &mut w, &mut b),
-                PieceType::Queen  => add_slider_attacks(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)], &mut w, &mut b),
-                PieceType::King   => add_king_attacks(r, c, color, &mut w, &mut b),
-                PieceType::Pawn   => add_pawn_attacks(r, c, color, &mut w, &mut b),
-            }
-        }
-    }}
-    (w, b)
-}
-
-#[inline]
-fn add_knight_attacks(_board: &Board, r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
-    const K: [(i32,i32);8] = [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)];
-    for (dr,dc) in K { let nr=r as i32+dr; let nc=c as i32+dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
-        match color { Color::White => w[nr as usize][nc as usize]=true, Color::Black => b[nr as usize][nc as usize]=true }
-    }}
-}
-
-#[inline]
-fn add_slider_attacks(board: &Board, r: usize, c: usize, color: Color, dirs: &[(i32,i32)], w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
-    for (dr,dc) in dirs.iter() {
-        let mut nr=r as i32+dr; let mut nc=c as i32+dc;
-        while nr>=0&&nr<8&&nc>=0&&nc<8 {
-            match color { Color::White => w[nr as usize][nc as usize]=true, Color::Black => b[nr as usize][nc as usize]=true }
-            if board.get(nr as usize, nc as usize).is_some() { break; }
-            nr += dr; nc += dc;
-        }
-    }
-}
-
-#[inline]
-fn add_king_attacks(r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
-    for dr in -1..=1 { for dc in -1..=1 { if dr==0&&dc==0 { continue; } let nr=r as i32+dr; let nc=c as i32+dc; if nr>=0&&nr<8&&nc>=0&&nc<8 {
-        match color { Color::White => w[nr as usize][nc as usize]=true, Color::Black => b[nr as usize][nc as usize]=true }
-    }}}
-}
-
-#[inline]
-fn add_pawn_attacks(r: usize, c: usize, color: Color, w: &mut [[bool;8];8], b: &mut [[bool;8];8]) {
-    match color {
-        Color::White => {
-            if r<7 {
-                if c>0 { w[r+1][c-1]=true; }
-                if c<7 { w[r+1][c+1]=true; }
-            }
-        }
-        Color::Black => {
-            if r>0 {
-                if c>0 { b[r-1][c-1]=true; }
-                if c<7 { b[r-1][c+1]=true; }
-            }
-        }
-    }
 }
 
 // ---- Drawishness helpers ----
