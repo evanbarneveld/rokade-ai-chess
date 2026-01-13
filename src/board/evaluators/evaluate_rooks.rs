@@ -22,7 +22,7 @@ pub fn evaluate_rook(
         if on_7th { val += (30 * eg) / 24; }
 
         // Rook behind passed pawn
-        if let Some((pp_r, _)) = crate::board::evaluate_pawns::find_passed_pawn_on_file(board, col, color) {
+        if let Some((pp_r, _)) = crate::board::evaluators::evaluate_pawns::find_passed_pawn_on_file(board, col, color) {
             let behind = match color { Color::White => row < pp_r, Color::Black => row > pp_r };
             if behind && file_clear_between(board, row, pp_r, col) {
                 let adv = match color { Color::White => pp_r as i32, Color::Black => (7 - pp_r) as i32 };

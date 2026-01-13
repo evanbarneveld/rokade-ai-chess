@@ -41,7 +41,7 @@ pub fn evaluate_pawn(
     }
     val
 }
-use crate::board::evaluate_king::is_king_in_front_of_pawn;
+use crate::board::evaluators::evaluate_king::is_king_in_front_of_pawn;
 
 pub fn is_doubled_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool {
     for r in 0..8 {
