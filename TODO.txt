@@ -3,7 +3,3 @@
 Questions:
 
 - is there a fen that shows that a better move can only be found if the engine looks deeper than say 5?
-- since Commit 3c3787f, 13-1-2026 20:43 'claude: refactorings', there are 2 tests that frequently
-  fail on the buildserver:
-    - chess::move_tests::test_bad_knight_check_move
-    - chess::move_tests::test_bad_rook_move3
