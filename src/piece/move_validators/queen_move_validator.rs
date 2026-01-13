@@ -52,8 +52,8 @@ fn is_valid_diagonal_move(board: &mut Board, from: (usize, usize), to: (usize, u
     if from == to { return false; }
 
     // Bishop must move diagonally: absolute delta row equals absolute delta col
-    let d_row = if to.0 > from.0 { to.0 - from.0 } else { from.0 - to.0 };
-    let d_col = if to.1 > from.1 { to.1 - from.1 } else { from.1 - to.1 };
+    let d_row = to.0.abs_diff(from.0);
+    let d_col = to.1.abs_diff(from.1);
 
     if d_row == 0 || d_col == 0 { return false; }
     if d_row != d_col { return false; }

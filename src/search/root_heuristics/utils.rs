@@ -50,7 +50,7 @@ pub fn apply_for_side(v: i32, side: Color) -> i32 {
 /// Simulate a move on a cloned board, returning the new board and the moved piece.
 #[inline]
 pub fn simulate_move(board: &Board, from: (usize, usize), to: (usize, usize)) -> (Board, Option<Piece>) {
-    let mut b = board.clone();
+    let mut b = *board;
     let moved = board.get(from.0, from.1);
     b.set(from.0, from.1, None);
     if let Some(p) = moved {
@@ -63,8 +63,8 @@ pub fn simulate_move(board: &Board, from: (usize, usize), to: (usize, usize)) ->
 #[inline]
 pub fn center_score((r, c): (usize, usize)) -> i32 {
     CENTER_SQUARES.iter().map(|&(cr, cc)| {
-        let dr = if r > cr { r - cr } else { cr - r };
-        let dc = if c > cc { c - cc } else { cc - c };
+        let dr = r.abs_diff(cr);
+        let dc = c.abs_diff(cc);
         (60 - 10 * ((dr + dc) as i32)).max(0)
     }).max().unwrap_or(0)
 }

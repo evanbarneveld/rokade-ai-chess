@@ -38,8 +38,8 @@ pub fn prune_null_moves(
             let mut has_non_pawn_minor = false;
             'scan: for r in 0..8 {
                 for c in 0..8 {
-                    if let Some(p) = game_state.board().get(r, c) {
-                        if p.get_color() == to_move {
+                    if let Some(p) = game_state.board().get(r, c)
+                        && p.get_color() == to_move {
                             match p.get_type() {
                                 PieceType::Knight | PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
                                     has_non_pawn_minor = true;
@@ -48,7 +48,6 @@ pub fn prune_null_moves(
                                 _ => {}
                             }
                         }
-                    }
                 }
             }
             if has_non_pawn_minor {
@@ -84,10 +83,8 @@ pub fn prune_null_moves(
                     if score >= beta {
                         return Some(score); // null-move cutoff for White
                     }
-                } else {
-                    if score <= alpha {
-                        return Some(score); // null-move cutoff for Black
-                    }
+                } else if score <= alpha {
+                    return Some(score); // null-move cutoff for Black
                 }
             }
         }

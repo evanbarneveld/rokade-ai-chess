@@ -11,11 +11,10 @@ pub fn find_all_valid_moves(
     let mut pieces_to_move = Vec::new();
     for r in 0..8 {
         for c in 0..8 {
-            if let Some(p) = game_state.board().get(r, c) {
-                if p.get_color() == active_color {
+            if let Some(p) = game_state.board().get(r, c)
+                && p.get_color() == active_color {
                     pieces_to_move.push(((r, c), p.get_type()));
                 }
-            }
         }
     }
 
@@ -59,19 +58,17 @@ pub fn find_all_valid_moves(
                             'n' => PieceType::Knight,
                             _ => PieceType::Queen,
                         }, active_color));
-                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece) {
-                             if !gs_var.mutable_board().is_side_in_check(active_color) {
+                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
+                             && !gs_var.mutable_board().is_side_in_check(active_color) {
                                  result.push((from, to, Some(pc)));
                              }
-                        }
                     }
                 } else {
                     let mut gs_var = *game_state;
-                    if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None) {
-                        if !gs_var.mutable_board().is_side_in_check(active_color) {
+                    if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
+                        && !gs_var.mutable_board().is_side_in_check(active_color) {
                             result.push((from, to, None));
                         }
-                    }
                 }
             }
         }
@@ -130,8 +127,8 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                         for pt in promo_types.iter() {
                             let mut gs_var = *game_state;
                             let promo_piece = Some(Piece::new(*pt, active_color));
-                            if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece) {
-                                if !gs_var.mutable_board().is_side_in_check(active_color) {
+                            if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
+                                && !gs_var.mutable_board().is_side_in_check(active_color) {
                                     let ch = match pt {
                                         PieceType::Queen => Some('q'),
                                         PieceType::Rook => Some('r'),
@@ -141,15 +138,13 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                                     };
                                     out.push(PerftMove { from, to, is_capture, promo: ch });
                                 }
-                            }
                         }
                     } else {
                         let mut gs_var = *game_state;
-                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None) {
-                            if !gs_var.mutable_board().is_side_in_check(active_color) {
+                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
+                            && !gs_var.mutable_board().is_side_in_check(active_color) {
                                 out.push(PerftMove { from, to, is_capture, promo: None });
                             }
-                        }
                     }
                 }
             }
@@ -166,7 +161,7 @@ pub fn _dump_all_valid_moves(
     to_san: bool,
 ) {
     use crate::board::san_move::convert_move_to_san;
-    let mut gs = game_state.clone();
+    let mut gs = *game_state;
     let moves = find_all_valid_moves(&mut gs);
     if moves.is_empty() {
         println!("No moves");
@@ -191,7 +186,6 @@ pub fn _dump_all_valid_moves(
             }
         }
         println!("{}", parts.join(" "));
-        return;
     } else {
         let mut parts: Vec<String> = Vec::with_capacity(moves.len());
         for (from, to, promo) in moves {

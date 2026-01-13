@@ -71,7 +71,7 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
 
-        if line.to_ascii_lowercase() == "uci" {
+        if line.eq_ignore_ascii_case("uci") {
             send_uci_response();
         }
 
@@ -137,8 +137,8 @@ pub fn run_uci() -> io::Result<()> {
                         set_parallel_search(false);
                     }
                 }
-            } else if lower.contains("name order book") {
-                if let Some(idx) = lower.find("value ") {
+            } else if lower.contains("name order book")
+                && let Some(idx) = lower.find("value ") {
                     let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
                         set_order_book_enabled(true);
@@ -146,7 +146,6 @@ pub fn run_uci() -> io::Result<()> {
                         set_order_book_enabled(false);
                     }
                 }
-            }
             continue;
         }
         if line == "isready" {
@@ -432,10 +431,10 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
         }
         let file = (bytes[0] as char).to_ascii_lowercase();
         let rank = bytes[1] as char;
-        if file < 'a' || file > 'h' {
+        if !('a'..='h').contains(&file) {
             return None;
         }
-        if rank < '1' || rank > '8' {
+        if !('1'..='8').contains(&rank) {
             return None;
         }
         let col = (file as u8 - b'a') as usize;
@@ -522,10 +521,9 @@ fn write_to_stdout_and_log_with_flush(direction: &str, text: &str) {
 
 fn log_with_flush(direction: &str, text: &str) {
     let now = Local::now().format("%Y-%m-%d %H:%M:%S");
-    if let Some(mutex) = LOG.get() {
-        if let Ok(mut log) = mutex.lock() {
+    if let Some(mutex) = LOG.get()
+        && let Ok(mut log) = mutex.lock() {
             let _ = writeln!(log, "[{}] [{:5}] [{}] {}", now, std::process::id(), direction, text);
             let _ = log.flush();
         }
-    }
 }

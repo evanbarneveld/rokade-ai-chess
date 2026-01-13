@@ -3,15 +3,14 @@ use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
 
 pub fn move_pawn(game_state: &mut GameState, piece: Piece, from: (usize, usize), to: (usize, usize), is_capture: bool, promotion_piece: Option<Piece>) -> bool {
-    if is_capture && game_state.en_passant_target().is_some() {
-        if game_state.en_passant_target().unwrap() == to {
+    if is_capture && game_state.en_passant_target().is_some()
+        && game_state.en_passant_target().unwrap() == to {
             if piece.get_color() == Color::White {
                 game_state.mutable_board().clear(to.0-1, to.1);
             } else {
                 game_state.mutable_board().clear(to.0+1, to.1);
             }
         }
-    }
 
     let mut promotion_piece_to_use = promotion_piece;
 
@@ -53,7 +52,7 @@ pub fn move_pawn(game_state: &mut GameState, piece: Piece, from: (usize, usize),
 
     game_state.reset_half_move_clock();
 
-    return true
+    true
 }
 
 pub fn move_pawn_promotion2(board : &mut Board, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {

@@ -34,16 +34,15 @@ pub fn solve_ambiguous_king_san_move(from_col: i8, from_row: i8, to_col: i8, to_
             let from_r = to_row - dr; // invert delta to find source
             let from_c = to_col - dc;
 
-            if from_r < 0 || from_r > 7 || from_c < 0 || from_c > 7 { continue; }
+            if !(0..=7).contains(&from_r) || !(0..=7).contains(&from_c) { continue; }
             if !col_matches(from_c) || !row_matches(from_r) { continue; }
 
             let from_r_u = from_r as usize;
             let from_c_u = from_c as usize;
-            if let Some(p) = board.get(from_r_u, from_c_u) {
-                if p.get_type() == PieceType::King && p.get_color() == active_color {
+            if let Some(p) = board.get(from_r_u, from_c_u)
+                && p.get_type() == PieceType::King && p.get_color() == active_color {
                     candidates.push((from_r_u, from_c_u));
                 }
-            }
         }
     }
 

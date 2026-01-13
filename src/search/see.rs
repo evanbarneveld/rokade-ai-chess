@@ -26,10 +26,10 @@ pub fn see_dest_estimate(
     };
     let moved_val = piece_value_cp(moved_piece.get_type());
     // We need a mutable board for the attack probe helper; clone cheaply
-    let mut tmp1 = board_after.clone();
+    let mut tmp1 = *board_after;
     let attacked_by_opp = is_square_attacked_by_opponent(&mut tmp1, dest, side_just_moved);
     // defend check: reuse helper by swapping perspective
-    let mut tmp2 = board_after.clone();
+    let mut tmp2 = *board_after;
     let defended_by_us =
         is_square_attacked_by_opponent(&mut tmp2, dest, opposite_color(side_just_moved));
 
@@ -83,11 +83,10 @@ pub fn attacked_by_pawn(board: &Board, sq: (usize, usize), attacker: Color) -> b
 fn find_king_square(board: &Board, color: Color) -> Option<(usize, usize)> {
     for r in 0..8 {
         for c in 0..8 {
-            if let Some(p) = board.get(r, c) {
-                if p.get_color() == color && p.get_type() == PieceType::King {
+            if let Some(p) = board.get(r, c)
+                && p.get_color() == color && p.get_type() == PieceType::King {
                     return Some((r, c));
                 }
-            }
         }
     }
     None
@@ -96,8 +95,8 @@ fn find_king_square(board: &Board, color: Color) -> Option<(usize, usize)> {
 /// Check if two squares are adjacent (within 1 step in any direction).
 #[inline]
 fn squares_adjacent(a: (usize, usize), b: (usize, usize)) -> bool {
-    let dr = if a.0 > b.0 { a.0 - b.0 } else { b.0 - a.0 };
-    let dc = if a.1 > b.1 { a.1 - b.1 } else { b.1 - a.1 };
+    let dr = a.0.abs_diff(b.0);
+    let dc = a.1.abs_diff(b.1);
     dr <= 1 && dc <= 1
 }
 
@@ -130,12 +129,12 @@ pub fn king_can_safely_capture(
     }
 
     // Simulate king capture
-    let mut after_kx = post_after.clone();
+    let mut after_kx = *post_after;
     after_kx.set(king_sq.0, king_sq.1, None);
     after_kx.set(to.0, to.1, Some(Piece::new(PieceType::King, opp)));
 
     // Check if king is safe after capture
-    let mut tmp_chk = after_kx.clone();
+    let mut tmp_chk = after_kx;
     let unsafe_for_king = is_square_attacked_by_opponent(&mut tmp_chk, to, opp);
 
     if unsafe_for_king {
@@ -227,13 +226,11 @@ pub fn apply_destination_see_penalties(
     }
 
     // Check if opponent king can safely capture the checking piece
-    if let Some(pt) = moved_pt {
-        if matches!(pt, PieceType::Rook | PieceType::Queen | PieceType::Bishop | PieceType::Knight) {
-            if let Some(pen) = king_can_safely_capture(post_after, side, to, pt) {
-                delta += apply_for_side(-(pen as i32), side);
+    if let Some(pt) = moved_pt
+        && matches!(pt, PieceType::Rook | PieceType::Queen | PieceType::Bishop | PieceType::Knight)
+            && let Some(pen) = king_can_safely_capture(post_after, side, to, pt) {
+                delta += apply_for_side(-pen, side);
             }
-        }
-    }
 
     delta
 }

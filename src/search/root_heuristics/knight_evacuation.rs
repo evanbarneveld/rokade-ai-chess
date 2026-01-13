@@ -25,13 +25,12 @@ pub fn knight_safe_squares(board: &Board, side: Color, from: (usize, usize)) -> 
             continue;
         }
         let (nr, nc) = (nr as usize, nc as usize);
-        if let Some(occ) = board.get(nr, nc) {
-            if occ.get_color() == side {
+        if let Some(occ) = board.get(nr, nc)
+            && occ.get_color() == side {
                 continue;
             }
-        }
         let (sim, _) = simulate_move(board, from, (nr, nc));
-        let mut tmp = sim.clone();
+        let mut tmp = sim;
         if !is_square_attacked_by_opponent(&mut tmp, (nr, nc), side)
             || see_dest_estimate(&sim, side, (nr, nc), 0) >= 0
         {
@@ -59,13 +58,11 @@ pub fn knight_evacuations_priority(
     let mut attacked_knights: Vec<(usize, usize)> = Vec::new();
     for r in 0..8 {
         for c in 0..8 {
-            if let Some(p) = base_board.get(r, c) {
-                if p.get_color() == side && p.get_type() == PieceType::Knight {
-                    if attacked_by_pawn(base_board, (r, c), opp) {
+            if let Some(p) = base_board.get(r, c)
+                && p.get_color() == side && p.get_type() == PieceType::Knight
+                    && attacked_by_pawn(base_board, (r, c), opp) {
                         attacked_knights.push((r, c));
                     }
-                }
-            }
         }
     }
     if attacked_knights.is_empty() {
@@ -77,11 +74,11 @@ pub fn knight_evacuations_priority(
     // Penalize moves that don't evacuate an attacked knight
     if !attacked_knights.contains(&from) {
         delta -= apply_for_side(500, side);
-    } else if let Some(p) = base_board.get(from.0, from.1) {
-        if p.get_type() == PieceType::Knight {
+    } else if let Some(p) = base_board.get(from.0, from.1)
+        && p.get_type() == PieceType::Knight {
             let (tr, tc) = to;
             let (sim, _) = simulate_move(base_board, from, to);
-            let mut tmp = sim.clone();
+            let mut tmp = sim;
             let dest_attacked = is_square_attacked_by_opponent(&mut tmp, (tr, tc), side);
             let see1 = see_dest_estimate(&sim, side, (tr, tc), 0);
 
@@ -89,8 +86,8 @@ pub fn knight_evacuations_priority(
                 // Safe evacuation bonus with center preference
                 let mut evac = KNIGHT_SAFE_EVAC_REWARD;
                 for &(cr, cc) in &CENTER_SQUARES {
-                    let dr = if tr > cr { tr - cr } else { cr - tr };
-                    let dc = if tc > cc { tc - cc } else { cc - tc };
+                    let dr = tr.abs_diff(cr);
+                    let dc = tc.abs_diff(cc);
                     let dist = (dr + dc) as i32;
                     evac += (20 - KNIGHT_CENTER_STEP * dist).max(0);
                 }
@@ -103,6 +100,5 @@ pub fn knight_evacuations_priority(
                 delta -= apply_for_side(150, side);
             }
         }
-    }
     delta
 }

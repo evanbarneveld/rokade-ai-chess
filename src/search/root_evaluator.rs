@@ -52,7 +52,7 @@ pub(crate) fn evaluate_root_for_bounds(
     let mut best_adjusted = best_score_raw;
 
     // Order: if TT has a move at root, try to place it first, then apply light opening-aware tie-breakers
-    let mut ordered: Vec<((usize, usize), (usize, usize), Option<char>)> = root_moves.iter().copied().collect();
+    let mut ordered: Vec<((usize, usize), (usize, usize), Option<char>)> = root_moves.to_vec();
     reorder_with_tt_hint(&mut ordered, tt, game_state.board(), active_color);
 
     // Opening-aware tiny reordering: demote quiet queen moves; promote minor development and castling
@@ -66,7 +66,7 @@ pub(crate) fn evaluate_root_for_bounds(
             phase += match p.get_type() { PieceType::Knight|PieceType::Bishop => 1, PieceType::Rook => 2, PieceType::Queen => 4, _ => 0 };
         }}}
         if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
-    } as i32;
+    };
     if depth_now >= 1 {
         let b = game_state.board();
         ordered.sort_by(|&(f1,t1, _), &(f2,t2, _)| {
@@ -126,7 +126,7 @@ pub(crate) fn evaluate_root_for_bounds(
                 // local TT per task
                 let mut local_tt = TranspositionTable::new_with_default_size();
                 // WE MUST CLONE game_state for parallel tasks
-                let mut local_gs = game_state.clone();
+                let mut local_gs = *game_state;
                 let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
                     &mut local_gs,
                     from,
@@ -319,11 +319,9 @@ pub(crate) fn root_move_order_bias(board: &Board, side: Color, from: (usize,usiz
         let back_r = if side==Color::White { 0usize } else { 7usize };
         let mut undeveloped = 0;
         for fc in 0..8 {
-            if let Some(p) = board.get(back_r, fc) {
-                if p.get_color()==side {
-                    if matches!(p.get_type(), PieceType::Knight | PieceType::Bishop) { undeveloped += 1; }
-                }
-            }
+            if let Some(p) = board.get(back_r, fc)
+                && p.get_color()==side
+                    && matches!(p.get_type(), PieceType::Knight | PieceType::Bishop) { undeveloped += 1; }
         }
         if undeveloped >= 3 { demote += 6; } else if undeveloped >= 2 { demote += 3; }
         // Extra demotion for big queen sorties (long leaps) in the opening

@@ -18,6 +18,12 @@ pub struct MoveParser {
     san_move_resolver: SanMoveCompleter
 }
 
+impl Default for MoveParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MoveParser {
     pub fn new() -> Self {
         MoveParser {
@@ -65,11 +71,11 @@ impl MoveParser {
 
         //println!("{:?}", caps);
 
-        if caps.len() == 0 || caps.get(0).is_none() {
+        if caps.is_empty() || caps.is_empty() {
             return Err(String::from("Invalid move format"));
         }
 
-        let cap0 = caps.get(0).unwrap();
+        let cap0 = caps.first().unwrap();
         if cap0.get(0).map(|m| m.as_str()) != Some(san_move) {
             return Err(String::from("Invalid move format"));
         }
@@ -104,7 +110,7 @@ impl MoveParser {
                                cap0.get(3).map(|m| m.as_str()).unwrap_or("?")
         );
 
-        let move_to = format!("{}", cap0.get(5).map(|m| m.as_str()).unwrap_or("?"));
+        let move_to = cap0.get(5).map(|m| m.as_str()).unwrap_or("?").to_string();
 
         //println!("Piece: {}, Move from: {}, move to: {}, capture: {}, promotion: {}, king side castle: {}, queen side castle: {}", piece_char, move_from, move_to, is_capture, is_promotion, is_king_side_castle, is_queen_side_castle);
 

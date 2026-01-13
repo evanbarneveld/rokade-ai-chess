@@ -27,8 +27,9 @@ pub fn is_piece_move_valid(
     is_capture: bool,
 ) -> bool {
     // piece-type specific path/shape validation including pin checks
-    let mut tmp = board.clone();
-    let ok = match piece.get_type() {
+    let mut tmp = *board;
+    
+    match piece.get_type() {
         PieceType::Pawn => is_valid_pawn_move(
             &mut tmp,
             from,
@@ -45,8 +46,8 @@ pub fn is_piece_move_valid(
         PieceType::Queen => is_valid_queen_move(&mut tmp, from, to, true),
         PieceType::King => {
             // king: allow single-square moves that do not move into check (no castling here)
-            let dr = if r > tr { r - tr } else { tr - r };
-            let dc = if c > tc { c - tc } else { tc - c };
+            let dr = r.abs_diff(tr);
+            let dc = c.abs_diff(tc);
             if dr <= 1 && dc <= 1 {
                 // ensure the king wouldn't be in check after the move
                 !is_king_in_check_after_move(&mut tmp, from, to, None)
@@ -54,6 +55,5 @@ pub fn is_piece_move_valid(
                 false
             }
         }
-    };
-    ok
+    }
 }

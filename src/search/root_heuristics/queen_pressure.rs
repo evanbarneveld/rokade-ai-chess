@@ -28,7 +28,7 @@ pub fn queen_kingside_pressure_bonus(
 
     let mut hit_count = 0;
     for &sq in targets {
-        let mut tmp = post.clone();
+        let mut tmp = post;
         let active_for_query = opposite_color(side);
         if is_square_attacked_by_opponent(&mut tmp, sq, active_for_query) {
             hit_count += 1;

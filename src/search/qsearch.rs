@@ -30,7 +30,7 @@ pub fn qsearch(
     // Draw checks in quiescence as well (only if Zobrist hashing is enabled)
     if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
         let key_here = compute_zobrist(game_state.board(), to_move);
-        if rep_stack.iter().any(|&k| k == key_here) {
+        if rep_stack.contains(&key_here) {
             return 0;
         }
     }
@@ -73,7 +73,7 @@ pub fn qsearch(
                 }
                 // SEE pre-check: build post-move board and evaluate destination safety
                 // NOTE: Still using a clone here for SEE, but SEE itself might be optimized later
-                let mut post = game_state.board().clone();
+                let mut post = *game_state.board();
                 let moved = match game_state.board().get(from.0, from.1) {
                     Some(p) => p,
                     None => return false,
@@ -112,11 +112,10 @@ pub fn qsearch(
             let mut pieces_to_check = Vec::new();
             for r in 0..8 {
                 for c in 0..8 {
-                    if let Some(p) = game_state.board().get(r, c) {
-                        if p.get_color() == to_move && p.get_type() == PieceType::Pawn {
+                    if let Some(p) = game_state.board().get(r, c)
+                        && p.get_color() == to_move && p.get_type() == PieceType::Pawn {
                             pieces_to_check.push((r, c));
                         }
-                    }
                 }
             }
 
@@ -181,10 +180,8 @@ pub fn qsearch(
             if stand_pat + DELTA_MARGIN <= alpha {
                 return stand_pat;
             }
-        } else {
-            if stand_pat - DELTA_MARGIN >= beta {
-                return stand_pat;
-            }
+        } else if stand_pat - DELTA_MARGIN >= beta {
+            return stand_pat;
         }
     }
 
@@ -217,8 +214,8 @@ pub fn qsearch(
     if to_move == Color::White {
         let mut best = MIN_EVAL_VALUE;
         for (from, to, promo) in moves.into_iter() {
-            if !in_check && QSEE_PRUNING_ENABLED {
-                if let (Some(att), Some(vic)) = (game_state.board().get(from.0, from.1), game_state.board().get(to.0, to.1)) {
+            if !in_check && QSEE_PRUNING_ENABLED
+                && let (Some(att), Some(vic)) = (game_state.board().get(from.0, from.1), game_state.board().get(to.0, to.1)) {
                     let att_v = piece_value_cp(att.get_type());
                     let vic_v = piece_value_cp(vic.get_type());
                     // Skip "bad" captures where attacker is significantly more valuable than victim
@@ -230,7 +227,6 @@ pub fn qsearch(
                         continue;
                     }
                 }
-            }
             let u = game_state.make_move_fast(from, to, promo);
             let score = qsearch(game_state, a, bnd, rep_stack);
             game_state.unmake_move_fast(u);
@@ -248,8 +244,8 @@ pub fn qsearch(
     } else {
         let mut best = MAX_EVAL_VALUE;
         for (from, to, promo) in moves.into_iter() {
-            if !in_check && QSEE_PRUNING_ENABLED {
-                if let (Some(att), Some(vic)) = (game_state.board().get(from.0, from.1), game_state.board().get(to.0, to.1)) {
+            if !in_check && QSEE_PRUNING_ENABLED
+                && let (Some(att), Some(vic)) = (game_state.board().get(from.0, from.1), game_state.board().get(to.0, to.1)) {
                     let att_v = piece_value_cp(att.get_type());
                     let vic_v = piece_value_cp(vic.get_type());
                     if vic_v + 50 < att_v && promo.is_none() {
@@ -260,7 +256,6 @@ pub fn qsearch(
                         continue;
                     }
                 }
-            }
             let u = game_state.make_move_fast(from, to, promo);
             let score = qsearch(game_state, a, bnd, rep_stack);
             game_state.unmake_move_fast(u);

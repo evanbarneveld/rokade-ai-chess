@@ -36,7 +36,7 @@ impl Search for SimpleSearch {
 
             // Determine capture and promotion piece
             let is_capture = gs.board().get(to.0, to.1).is_some()
-                || (matches!(promo, None)
+                || (promo.is_none()
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
                     && gs.en_passant_target().is_some()
                     && Some(to) == gs.en_passant_target());
@@ -74,7 +74,7 @@ fn minimax(state: &mut GameState, depth: usize, root_side: Color) -> i32 {
         return if root_side == Color::White { white_centric } else { -white_centric };
     }
 
-    let mut mut_state = state.clone();
+    let mut mut_state = *state;
     let moves = find_all_valid_moves(&mut mut_state);
     if moves.is_empty() {
         // No legal moves: checkmate or stalemate. Score from root perspective.
@@ -91,9 +91,9 @@ fn minimax(state: &mut GameState, depth: usize, root_side: Color) -> i32 {
     if maximizing {
         let mut best = i32::MIN;
         for (from, to, promo) in moves {
-            let mut gs = mut_state.clone();
+            let mut gs = mut_state;
             let is_capture = gs.board().get(to.0, to.1).is_some()
-                || (matches!(promo, None)
+                || (promo.is_none()
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
                     && gs.en_passant_target().is_some()
                     && Some(to) == gs.en_passant_target());
@@ -115,9 +115,9 @@ fn minimax(state: &mut GameState, depth: usize, root_side: Color) -> i32 {
     } else {
         let mut best = i32::MAX;
         for (from, to, promo) in moves {
-            let mut gs = mut_state.clone();
+            let mut gs = mut_state;
             let is_capture = gs.board().get(to.0, to.1).is_some()
-                || (matches!(promo, None)
+                || (promo.is_none()
                     && gs.board().get(from.0, from.1).map(|p| p.get_type()) == Some(PieceType::Pawn)
                     && gs.en_passant_target().is_some()
                     && Some(to) == gs.en_passant_target());

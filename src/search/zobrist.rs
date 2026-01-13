@@ -60,7 +60,7 @@ pub fn compute_zobrist_full(
         for c in 0..8 {
             if let Some(p) = board.get(r, c) {
                 let idx = piece_index(p.get_type(), p.get_color());
-                let sq = (r * 8 + c) as usize;
+                let sq = r * 8 + c;
                 unsafe { key ^= Z_PIECE[idx][sq]; }
             }
         }
@@ -95,7 +95,7 @@ pub fn compute_zobrist(board: &Board, to_move: Color) -> u64 {
         for c in 0..8 {
             if let Some(p) = board.get(r, c) {
                 let idx = piece_index(p.get_type(), p.get_color());
-                let sq = (r * 8 + c) as usize;
+                let sq = r * 8 + c;
                 unsafe { key ^= Z_PIECE[idx][sq]; }
             }
         }

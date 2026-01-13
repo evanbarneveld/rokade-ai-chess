@@ -17,7 +17,7 @@ pub(crate) fn apply_repetition_avoidance_bias(
     promo: Option<char>,
     score_raw: i32,
 ) -> i32 {
-    let mut gs = game_state.clone();
+    let mut gs = *game_state;
     gs.make_move_fast(from, to, promo);
     
     let fen = game_state_to_fen_string(gs);

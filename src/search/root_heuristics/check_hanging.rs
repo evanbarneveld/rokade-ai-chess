@@ -15,7 +15,7 @@ use super::utils::{
 /// Calculate check mobility bonus based on opponent's available replies.
 #[inline]
 pub fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32 {
-    let mut opp_state = GameState::from_board_and_side(post_after.clone(), checked_side);
+    let mut opp_state = GameState::from_board_and_side(*post_after, checked_side);
     let replies = find_all_valid_moves(&mut opp_state).len() as i32;
     match replies {
         0 => CHECK_MOBILITY_BONUS_0,
@@ -44,7 +44,7 @@ pub fn self_hang_or_check_mobility(
                 if p.get_color() != side {
                     continue;
                 }
-                let mut post_for_query = post_after.clone();
+                let mut post_for_query = *post_after;
                 if !is_square_attacked_by_opponent(&mut post_for_query, (r, c), side) {
                     continue;
                 }

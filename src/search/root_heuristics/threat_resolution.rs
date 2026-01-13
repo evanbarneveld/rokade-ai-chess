@@ -25,7 +25,7 @@ pub fn threat_resolution_and_evacuation(
         return 0;
     }
 
-    let mut base_clone = base_board.clone();
+    let mut base_clone = *base_board;
     let opp = opposite_color(side);
 
     // Find all our threatened pieces
@@ -59,12 +59,12 @@ pub fn threat_resolution_and_evacuation(
 
         // Check if piece is still attacked after our move
         let still_attacked = if (tr, tc) == from {
-            let mut tmpmv = post_after.clone();
+            let mut tmpmv = *post_after;
             is_square_attacked_by_opponent(&mut tmpmv, to, side)
         } else if post_after.get(tr, tc).is_none() {
             false
         } else {
-            let mut tmp2 = post_after.clone();
+            let mut tmp2 = *post_after;
             is_square_attacked_by_opponent(&mut tmp2, (tr, tc), side)
         };
 
@@ -82,18 +82,17 @@ pub fn threat_resolution_and_evacuation(
                 if to == (3, 3) {
                     cb += 80;
                 }
-                if !knight_safe.is_empty() && knight_safe.iter().any(|&sq| sq == to) {
+                if !knight_safe.is_empty() && knight_safe.contains(&to) {
                     cb += 80;
                 }
                 evac_bonus += cb.max(0);
             }
 
             // Bonus for evacuating to a known safe square
-            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-                if knight_safe.iter().any(|&sq| sq == to) {
+            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty()
+                && knight_safe.contains(&to) {
                     evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD;
                 }
-            }
             delta += apply_for_side(evac_bonus, side);
         } else {
             // We did NOT move the threatened piece
@@ -117,7 +116,7 @@ pub fn threat_resolution_and_evacuation(
         if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
             if (tr, tc) != from {
                 delta -= apply_for_side(KNIGHT_NON_EVAC_DEMOTION, side);
-            } else if knight_safe.iter().any(|&sq| sq == to) {
+            } else if knight_safe.contains(&to) {
                 delta += apply_for_side(KNIGHT_SAFE_TO_SPECIFIC_REWARD, side);
             }
         }

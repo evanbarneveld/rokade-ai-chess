@@ -11,7 +11,7 @@ pub fn move_king(game_state: &mut GameState, piece: Piece, from: (usize, usize),
 
     // Handle castling: if king moves two files horizontally on same rank
     let same_rank = from.0 == to.0;
-    let file_diff = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
+    let file_diff = from.1.abs_diff(to.1);
     if same_rank && file_diff == 2 {
         let row = from.0;
         // Kingside castling (to column 6)

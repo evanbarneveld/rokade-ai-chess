@@ -43,7 +43,7 @@ pub fn build_pv_for_root(
     let mut pv: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::with_capacity(max_len.max(1));
     pv.push((from, to, root_promo));
 
-    let mut tmp = board.clone();
+    let mut tmp = *board;
     let _undo = tmp.make_move_simple(from, to, root_promo);
     let mut side = opposite_color(root_side);
 
@@ -55,7 +55,7 @@ pub fn build_pv_for_root(
         let (bf, bt) = (entry.best_from, entry.best_to);
         let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
 
-        let mut gs = GameState::from_board_and_side(tmp.clone(), side);
+        let mut gs = GameState::from_board_and_side(tmp, side);
         let legals = find_all_valid_moves(&mut gs);
         let found_move = legals.iter().find(|(f, t, _)| (*f, *t) == ((nfr, nfc), (ntr, ntc)));
 

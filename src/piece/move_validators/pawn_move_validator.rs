@@ -28,9 +28,7 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
                 if is_capture { return false };
                 if !board.is_empty( (from.0 + 1, from.1)) { return false }
             }
-         } else {
-            if to.0 as i32 - from.0 as i32 != 1 { return false };
-         }
+         } else if to.0 as i32 - from.0 as i32 != 1 { return false }
     } else {
         //black
         if from.0 == 6 {
@@ -43,24 +41,18 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
                 if is_capture { return false };
                 if !board.is_empty( (from.0 - 1, from.1)) { return false }
             }
-        } else {
-            if from.0 as i32 - to.0 as i32 != 1 { return false }
-        }
+        } else if from.0 as i32 - to.0 as i32 != 1 { return false }
     }
 
     if promotion_piece.is_some() {
         if active_color == Color::White {
             if to.0 != 7 { return false }
-        } else {
-            if to.0 != 0 { return false }
-        }
+        } else if to.0 != 0 { return false }
     } else {
         //a promotion piece must be supplied if the move is a promotion
         if active_color == Color::White {
             if to.0 == 7 { return false }
-        } else {
-            if to.0 == 0 { return false }
-        }
+        } else if to.0 == 0 { return false }
     }
 
     if do_pin_check && is_king_in_check_after_move(board, (from.0, from.1), (to.0, to.1), en_passant_target) {

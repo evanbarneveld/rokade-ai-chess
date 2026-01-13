@@ -51,7 +51,7 @@ where
     F: FnOnce(&mut SearchHeuristics) -> R,
 {
     thread_local! {
-        static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
+        static HEUR: OnceLock<Mutex<SearchHeuristics>> = const { OnceLock::new() };
     }
     HEUR.with(|h| {
         let mut m = h
@@ -228,24 +228,23 @@ fn calculate_lmr_reduction(
     }
 
     // Extra reduction for quiet queen moves in opening with undeveloped pieces
-    if let Some(mp) = board.get(to.0, to.1) {
-        if mp.get_type() == PieceType::Queen && phase >= 12 {
+    if let Some(mp) = board.get(to.0, to.1)
+        && mp.get_type() == PieceType::Queen && phase >= 12 {
             let back_r = if to_move == Color::White { 0 } else { 7 };
             let mut undeveloped = 0;
 
             for fc in 0..8 {
-                if let Some(p) = board.get(back_r, fc) {
-                    if p.get_color() == to_move && matches!(p.get_type(), PieceType::Knight | PieceType::Bishop) {
+                if let Some(p) = board.get(back_r, fc)
+                    && p.get_color() == to_move && matches!(p.get_type(), PieceType::Knight | PieceType::Bishop) {
                         undeveloped += 1;
                     }
-                }
             }
 
             let king_file = (0..8).find(|&fc| {
                 board.get(back_r, fc)
-                    .map_or(false, |p| p.get_color() == to_move && p.get_type() == PieceType::King)
+                    .is_some_and(|p| p.get_color() == to_move && p.get_type() == PieceType::King)
             });
-            let uncastled = king_file.map_or(true, |kf| kf != 2 && kf != 6);
+            let uncastled = king_file.is_none_or(|kf| kf != 2 && kf != 6);
 
             if undeveloped >= 3 {
                 r += 2;
@@ -257,7 +256,6 @@ fn calculate_lmr_reduction(
                 r += 1;
             }
         }
-    }
 
     r.min(3)
 }
@@ -298,8 +296,8 @@ fn search_moves(
 
         {
             let b = game_state.board();
-            if let Some(p) = b.get(to.0, to.1) {
-                if p.get_type() == PieceType::Pawn
+            if let Some(p) = b.get(to.0, to.1)
+                && p.get_type() == PieceType::Pawn
                     && b.game_phase_light() <= 8
                     && b.is_passed_pawn_simple(to.0, to.1, p.get_color())
                 {
@@ -311,12 +309,11 @@ fn search_moves(
                         child_depth = child_depth.saturating_add(1);
                     }
                 }
-            }
         }
 
         let gives_check = game_state.mutable_board().is_side_in_check(opponent(to_move));
         let quiet = !is_capture && game_state.board().get(to.0, to.1)
-            .map_or(false, |p| p.get_type() != PieceType::Pawn);
+            .is_some_and(|p| p.get_type() != PieceType::Pawn);
         let allow_reduce = !(gives_check && child_depth <= 5);
 
         // Calculate LMR reduction
@@ -435,7 +432,7 @@ pub fn alphabeta(
     // Repetition detection
     let mut pushed_rep = false;
     if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
-        if rep_stack.iter().any(|&k| k == key) {
+        if rep_stack.contains(&key) {
             return 0; // Draw by repetition
         }
         rep_stack.push(key);
@@ -468,8 +465,8 @@ pub fn alphabeta(
     }
 
     // Transposition table probe
-    if let Some(entry) = tt.probe(key) {
-        if entry.depth as usize >= depth {
+    if let Some(entry) = tt.probe(key)
+        && entry.depth as usize >= depth {
             let tt_score = from_tt_score(entry.score, ply);
             match entry.bound {
                 Bound::Exact => {
@@ -497,7 +494,6 @@ pub fn alphabeta(
                 return tt_score;
             }
         }
-    }
 
     // Generate and order moves
     let moves = find_all_valid_moves(game_state);

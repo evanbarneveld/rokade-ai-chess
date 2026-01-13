@@ -55,10 +55,10 @@ pub fn run_cli() {
 
         print_user_prompt(&mut game);
 
-        let input: Option<String>;
+        
         let mut move_is_bot_move: bool = false;
 
-        input = read_user_input(&mut game, &mut mode);
+        let input: Option<String> = read_user_input(&mut game, &mut mode);
 
         if input.is_some() {
             let some_input = input.unwrap();
@@ -128,23 +128,20 @@ pub fn run_cli() {
                 continue;
             }
 
-            if some_input.starts_with("movetime") {
-                if handle_movetime(some_input.clone(), &mut white_bot_move_time, &mut black_bot_move_time) {
+            if some_input.starts_with("movetime")
+                && handle_movetime(some_input.clone(), &mut white_bot_move_time, &mut black_bot_move_time) {
                     continue
                 }
-            }
 
-            if some_input.starts_with("strength") {
-                if handle_strength(some_input.clone(), &mut white_bot_strength, &mut black_bot_strength) {
+            if some_input.starts_with("strength")
+                && handle_strength(some_input.clone(), &mut white_bot_strength, &mut black_bot_strength) {
                     continue
                 }
-            }
 
-            if some_input.starts_with("depth") {
-                if handle_search_depth(some_input.clone(), &mut white_bot_search_depth, &mut black_bot_search_depth) {
+            if some_input.starts_with("depth")
+                && handle_search_depth(some_input.clone(), &mut white_bot_search_depth, &mut black_bot_search_depth) {
                     continue
                 }
-            }
 
             if some_input.eq_ignore_ascii_case("eval") {
                 let side = game.get_game_state().active_color();
@@ -158,11 +155,10 @@ pub fn run_cli() {
             }
 
             // assume the input is a move
-            if !move_is_bot_move && !some_input.is_empty() {
-                if !game.move_piece_san(some_input.as_str()) {
+            if !move_is_bot_move && !some_input.is_empty()
+                && !game.move_piece_san(some_input.as_str()) {
                     println!("Illegal or invalid move: '{}'. Try again.\n", some_input);
                 }
-            }
         }
 
         // handle the move
@@ -186,11 +182,10 @@ pub fn run_cli() {
         let history = game.get_history().clone();
         game.get_game_state().recompute_outcome(&history);
 
-        if let Some(outcome) = game.get_game_state().get_outcome() {
-            if outcome != OutcomeType::Ongoing && outcome != OutcomeType::InCheck {
+        if let Some(outcome) = game.get_game_state().get_outcome()
+            && outcome != OutcomeType::Ongoing && outcome != OutcomeType::InCheck {
                 mode = GameMode::PlayerVsPlayer;
             }
-        }
 
     }
 }
@@ -418,8 +413,8 @@ fn handle_pgn(game: &mut Chess, input: String) {
     }
 }
 
-fn print_user_prompt(mut game: &mut Chess) {
-    let prompt = get_user_prompt(&mut game);
+fn print_user_prompt(game: &mut Chess) {
+    let prompt = get_user_prompt(game);
     print!("{}", prompt);
     io::stdout().flush().unwrap();
 }
@@ -455,9 +450,7 @@ fn read_user_input(game: &mut Chess, mode: &mut GameMode) -> Option<String> {
 fn must_generate_move(game: &mut Chess, mode: &mut GameMode, move_is_bot_move : bool) -> bool {
     if game.active_color_is_white() {
         if matches!(mode, GameMode::BotVsPlayer | GameMode::BotVsBot) { return true }
-    } else {
-        if matches!(mode, GameMode::PlayerVsBot | GameMode::BotVsBot) { return true }
-    }
+    } else if matches!(mode, GameMode::PlayerVsBot | GameMode::BotVsBot) { return true }
     move_is_bot_move
 }
 

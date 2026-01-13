@@ -35,19 +35,17 @@ pub fn solve_ambiguous_rook_san_move(from_col: i8, from_row: i8, to_col: i8, to_
     for (dr, dc) in directions.iter() {
         let mut r = to_row + dr;
         let mut c = to_col + dc;
-        while r >= 0 && r <= 7 && c >= 0 && c <= 7 {
+        while (0..=7).contains(&r) && (0..=7).contains(&c) {
             let ru = r as usize;
             let cu = c as usize;
 
             if let Some(p) = board.get(ru, cu) {
                 // First piece on the ray determines if a candidate exists
-                if p.get_type() == PieceType::Rook && p.get_color() == active_color {
-                    if col_matches(c) && row_matches(r) {
-                        if !is_king_in_check_after_move(board, (ru, cu), (to_row_u, to_col_u), None) {
+                if p.get_type() == PieceType::Rook && p.get_color() == active_color
+                    && col_matches(c) && row_matches(r)
+                        && !is_king_in_check_after_move(board, (ru, cu), (to_row_u, to_col_u), None) {
                             candidates.push((ru, cu));
                         }
-                    }
-                }
                 break; // blocked beyond first piece
             }
 

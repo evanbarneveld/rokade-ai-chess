@@ -78,7 +78,7 @@ pub fn find_best_move(
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     init_rayon_pool_if_needed();
 
-    let mut gs = game_state.clone();
+    let mut gs = *game_state;
     let tt_mutex = get_tt_mutex();
 
     // Unified move loop - works for both maximizing (White) and minimizing (Black)
@@ -90,13 +90,11 @@ pub fn find_best_move(
     }
 
     // Opening book: if we have a book move in early game, play it immediately.
-    if get_order_book_enabled() {
-        if gs.full_move_number() <= 8 {
-            if let Some((bf, bt)) = book_pick(&gs) {
+    if get_order_book_enabled()
+        && gs.full_move_number() <= 8
+            && let Some((bf, bt)) = book_pick(&gs) {
                 return Some((bf, bt, None, 0, 0));
             }
-        }
-    }
 
     // if depth is 0, treat it as 1 ply (evaluate after making one move)
     let search_depth = if search_depth == 0 { 1 } else { search_depth };
@@ -113,8 +111,8 @@ pub fn find_best_move(
         // Heuristic ordering at root: prioritize checking moves, then captures by MVV, then others.
         base.sort_by(|&(f1,t1,p1_promo), &(f2,t2,p2_promo)| {
             use crate::piece::pieces::piece_value_cp;
-            let mut b1 = gs.board().clone();
-            let mut b2 = gs.board().clone();
+            let mut b1 = *gs.board();
+            let mut b2 = *gs.board();
             let p1 = gs.board().get(f1.0, f1.1);
             let p2 = gs.board().get(f2.0, f2.1);
             let cap1 = gs.board().get(t1.0, t1.1);
@@ -243,8 +241,8 @@ pub fn find_best_move(
     }
 
     // Final selection based on playing_strength from the last iteration
-    if let Some((_bf, _bt, _bpromo, sc, used_depth)) = chosen {
-        if playing_strength < MAX_PLAYING_STRENGTH {
+    if let Some((_bf, _bt, _bpromo, sc, used_depth)) = chosen
+        && playing_strength < MAX_PLAYING_STRENGTH {
             // Re-evaluate top K moves for stochastic selection at final depth
             let mut scored_with_promo: Vec<((usize, usize), (usize, usize), Option<char>, i32)> = Vec::new();
             for &(from, to, promo) in &root_moves {
@@ -286,7 +284,6 @@ pub fn find_best_move(
                 chosen = Some((from, to, promo_opt, sc_final, used_depth));
             }
         }
-    }
 
     if let Some((bf, bt, _bpromo, sc, used_depth)) = chosen {
         return Some((bf, bt, _bpromo, sc, used_depth));
@@ -301,7 +298,7 @@ pub fn debug_rank_root_moves(
     history: &History,
     depth: usize,
 ) -> Vec<(String, i32, i32)> {
-    let mut gs = game_state.clone();
+    let mut gs = *game_state;
     let active_color = gs.active_color();
     let gen_moves = find_all_valid_moves(&mut gs);
     let mut v = Vec::with_capacity(gen_moves.len());
