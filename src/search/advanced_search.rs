@@ -17,15 +17,12 @@ use crate::state::game_state::GameState;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 
 pub const SEARCH_ABORTED: i32 = MAX_EVAL_VALUE + 50000;
-use crate::book::book::book_pick;
+pub(crate) use crate::book::book::{book_pick, get_order_book_enabled};
 use crate::search::Search;
 use crate::board::san_move::convert_move_to_san;
 
 pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 pub const MAX_SEARCH_DEPTH: usize = 20;
-
-const ORDER_BOOK_ENABLED: bool = true;
-const STRENGTH_MODE_ENABLED: bool = true;
 
 // Global toggle to enable/disable Zobrist hashing across the engine.
 // When disabled, features relying on Zobrist keys (like TT and repetition checks)
@@ -85,7 +82,7 @@ pub fn find_best_move(
     let tt_mutex = get_tt_mutex();
 
     // Unified move loop - works for both maximizing (White) and minimizing (Black)
-    let mut gen_moves = find_all_valid_moves(&mut gs);
+    let gen_moves = find_all_valid_moves(&mut gs);
     let active_color = gs.active_color();
 
     if gen_moves.is_empty() {
@@ -93,7 +90,7 @@ pub fn find_best_move(
     }
 
     // Opening book: if we have a book move in early game, play it immediately.
-    if ORDER_BOOK_ENABLED {
+    if get_order_book_enabled() {
         if gs.full_move_number() <= 8 {
             if let Some((bf, bt)) = book_pick(&gs) {
                 return Some((bf, bt, None, 0, 0));
@@ -247,7 +244,7 @@ pub fn find_best_move(
 
     // Final selection based on playing_strength from the last iteration
     if let Some((_bf, _bt, _bpromo, sc, used_depth)) = chosen {
-        if STRENGTH_MODE_ENABLED && playing_strength < MAX_PLAYING_STRENGTH {
+        if playing_strength < MAX_PLAYING_STRENGTH {
             // Re-evaluate top K moves for stochastic selection at final depth
             let mut scored_with_promo: Vec<((usize, usize), (usize, usize), Option<char>, i32)> = Vec::new();
             for &(from, to, promo) in &root_moves {
@@ -340,7 +337,6 @@ pub fn debug_rank_root_moves(
             adj,
             &gs,
             history,
-            gs.board(),
             active_color,
             from,
             to,

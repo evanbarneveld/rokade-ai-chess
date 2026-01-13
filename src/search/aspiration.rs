@@ -36,7 +36,6 @@ pub(crate) fn probe_with_aspiration(
     game_state: &mut GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
-    let board = game_state.board();
     let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
 
     let mut tried = 0;

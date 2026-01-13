@@ -1,7 +1,18 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::piece::pieces::{PieceType};
 use crate::state::game_state::GameState;
 use crate::search::advanced_search::find_all_valid_moves;
 use rand::{rng, Rng};
+
+static ORDER_BOOK_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn get_order_book_enabled() -> bool {
+    ORDER_BOOK_ENABLED.load(Ordering::Relaxed)
+}
+
+pub fn set_order_book_enabled(enabled: bool) {
+    ORDER_BOOK_ENABLED.store(enabled, Ordering::Relaxed);
+}
 
 // A tiny in-code opening book keyed by truncated FEN (first 4 fields).
 // Values are (UCI move string, weight).

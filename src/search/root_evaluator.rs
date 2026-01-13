@@ -43,7 +43,6 @@ pub(crate) fn evaluate_root_for_bounds(
     game_state: &mut GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
-    let board = game_state.board();
     let mut best_from_to_promo: Option<((usize, usize), (usize, usize), Option<char>)> = None;
     let mut best_score_raw = if active_color == Color::White {
         MIN_EVAL_VALUE
@@ -160,7 +159,6 @@ pub(crate) fn evaluate_root_for_bounds(
                     adjusted,
                     &local_gs,
                     history,
-                    local_gs.board(),
                     side,
                     from,
                     to,
@@ -257,7 +255,6 @@ pub(crate) fn evaluate_root_for_bounds(
                 adjusted,
                 game_state,
                 history,
-                game_state.board(),
                 active_color,
                 from,
                 to,

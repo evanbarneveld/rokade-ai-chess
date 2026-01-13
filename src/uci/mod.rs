@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::exit;
 use std::thread;
 use chrono::Local;
+use crate::book::book::set_order_book_enabled;
 use crate::Chess;
 use crate::cli::{BUILD_NUMBER, VERSION};
 use crate::piece::as_move_str;
@@ -14,6 +15,7 @@ use crate::search::{
     find_best_move_with_mode, get_deterministic, is_parallel_search, set_deterministic,
     set_parallel_search, SearchMode,
 };
+use crate::search::advanced_search::get_order_book_enabled;
 use crate::search::telemetry::{get_nodes, reset_search_telemetry};
 use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
 use crate::search::uci_feedback::set_info_callback;
@@ -133,6 +135,15 @@ pub fn run_uci() -> io::Result<()> {
                         set_parallel_search(true);
                     } else if val == "false" {
                         set_parallel_search(false);
+                    }
+                }
+            } else if lower.contains("name order book") {
+                if let Some(idx) = lower.find("value ") {
+                    let val = line[(idx + 6)..].trim().to_ascii_lowercase();
+                    if val == "true" {
+                        set_order_book_enabled(true);
+                    } else if val == "false" {
+                        set_order_book_enabled(false);
                     }
                 }
             }
@@ -365,6 +376,9 @@ fn send_uci_response() {
 
     let opt_deterministic = format!("option name Deterministic type check default {}", get_deterministic());
     write_to_stdout_and_log_with_flush("OUT", &opt_deterministic);
+
+    let opt_order_book = format!("option name Order Book type check default {}", get_order_book_enabled());
+    write_to_stdout_and_log_with_flush("OUT", &opt_order_book);
 
     let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
     write_to_stdout_and_log_with_flush("OUT", &opt_searchmode);

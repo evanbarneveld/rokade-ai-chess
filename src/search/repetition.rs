@@ -1,4 +1,3 @@
-use crate::board::Board;
 use crate::history::history::History;
 use crate::piece::pieces::Color;
 use crate::state::fen::writer::game_state_to_fen_string;
@@ -12,7 +11,6 @@ pub(crate) fn apply_repetition_avoidance_bias(
     mut adjusted: i32,
     game_state: &GameState,
     history: &History,
-    board: &Board,
     active_color: Color,
     from: (usize, usize),
     to: (usize, usize),
@@ -20,7 +18,7 @@ pub(crate) fn apply_repetition_avoidance_bias(
     score_raw: i32,
 ) -> i32 {
     let mut gs = game_state.clone();
-    let u = gs.make_move_fast(from, to, promo);
+    gs.make_move_fast(from, to, promo);
     
     let fen = game_state_to_fen_string(gs);
     let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");

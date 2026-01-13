@@ -214,7 +214,7 @@ pub fn alphabeta(
 
     // Unified move loop - works for both maximizing (White) and minimizing (Black)
     let maximizing = to_move == Color::White;
-    let mut current_score = initial_value(maximizing);
+    let mut current_score;
     let mut current_value = initial_value(maximizing);
     let mut is_first_move = true;
     let mut move_index: i32 = 0;

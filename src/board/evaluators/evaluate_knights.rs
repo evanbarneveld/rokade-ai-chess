@@ -53,19 +53,3 @@ pub fn is_knight_outpost(board: &Board, row: usize, col: usize, color: Color) ->
     true
 }
 
-pub fn count_knight_targets(board: &Board, r: usize, c: usize, color: Color) -> usize {
-    let mut targets = 0;
-    let jumps = [(-2,-1),(-2,1),(-1,-2),(-1,2),(1,-2),(1,2),(2,-1),(2,1)];
-    for (dr, dc) in jumps {
-        let nr = r as i32 + dr;
-        let nc = c as i32 + dc;
-        if nr >= 0 && nr <= 7 && nc >= 0 && nc <= 7 {
-            if let Some(p) = board.get(nr as usize, nc as usize) {
-                if p.get_color() != color { targets += 1; }
-            } else {
-                targets += 1;
-            }
-        }
-    }
-    targets
-}
