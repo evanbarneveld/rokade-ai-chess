@@ -55,6 +55,7 @@ fn test_queen_save2() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
+
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_eq!(&san_move[0..1], "Q"); //the only good move is to move the queen
@@ -87,6 +88,7 @@ fn test_bad_bishop_move() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
+
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Bxf7+"); //bad move

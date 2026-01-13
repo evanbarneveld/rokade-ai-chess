@@ -275,11 +275,9 @@ pub fn adjusted_root_eval_for_move(
         } else {
             adj = adj.max(score_raw);
         }
-    }
-
-    // Don't drag draw scores down
-    if score_raw == 0 {
-        adj = adj.max(-10);
+    } else if score_raw == 0 {
+        // Don't drag draw scores down too much, but allow significant penalties (like suicidal checks)
+        adj = adj.max(-500);
     }
     adj
 }

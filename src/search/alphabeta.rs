@@ -8,7 +8,7 @@ use crate::state::game_state::GameState;
 use crate::search::telemetry::bump_node;
 use crate::search::time_control::time_is_up;
 use crate::search::tt::{decode_move, encode_move, from_tt_score, to_tt_score, Bound, TranspositionTable, MATE_VALUE};
-use crate::search::zobrist::compute_zobrist;
+use crate::search::zobrist::compute_zobrist_full;
 
 const HUNDRED_HALF_MOVES: u32 = 100;
 
@@ -62,7 +62,7 @@ pub fn alphabeta(
     }
 
     let key_here: u64 = if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
-        compute_zobrist(game_state.board(), to_move)
+        compute_zobrist_full(game_state.board(), to_move, &game_state.castling_rights(), game_state.en_passant_target())
     } else { 0 };
     let mut pushed_rep = false;
     if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {

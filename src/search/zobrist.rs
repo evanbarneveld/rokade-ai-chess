@@ -6,6 +6,8 @@ use crate::piece::pieces::{Color, PieceType};
 
 static mut Z_PIECE: [[u64; 64]; 12] = [[0; 64]; 12];
 static mut Z_SIDE: u64 = 0;
+static mut Z_CASTLING: [u64; 16] = [0; 16];
+static mut Z_EP: [u64; 8] = [0; 8];
 static INIT_FLAG: std::sync::Once = std::sync::Once::new();
 
 #[inline]
@@ -31,6 +33,12 @@ fn init_tables() {
             }
         }
         Z_SIDE = rng.next_u64();
+        for i in 0..16 {
+            Z_CASTLING[i] = rng.next_u64();
+        }
+        for i in 0..8 {
+            Z_EP[i] = rng.next_u64();
+        }
     }
 }
 
@@ -40,7 +48,47 @@ pub fn zobrist_init_once() {
 }
 
 #[inline]
+pub fn compute_zobrist_full(
+    board: &Board,
+    to_move: Color,
+    castling: &crate::state::castling::CastlingRights,
+    ep_target: Option<(usize, usize)>
+) -> u64 {
+    zobrist_init_once();
+    let mut key: u64 = 0;
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = board.get(r, c) {
+                let idx = piece_index(p.get_type(), p.get_color());
+                let sq = (r * 8 + c) as usize;
+                unsafe { key ^= Z_PIECE[idx][sq]; }
+            }
+        }
+    }
+    if to_move == Color::White {
+        unsafe { key ^= Z_SIDE; }
+    }
+    
+    // Castling
+    let mut c_idx = 0;
+    if castling.white_kingside() { c_idx |= 1; }
+    if castling.white_queenside() { c_idx |= 2; }
+    if castling.black_kingside() { c_idx |= 4; }
+    if castling.black_queenside() { c_idx |= 8; }
+    unsafe { key ^= Z_CASTLING[c_idx]; }
+
+    // En Passant
+    if let Some((_r, c)) = ep_target {
+        unsafe { key ^= Z_EP[c]; }
+    }
+
+    key
+}
+
+#[inline]
 pub fn compute_zobrist(board: &Board, to_move: Color) -> u64 {
+    // Legacy support or internal use where full state is not available
+    // For better results, use compute_zobrist_full
     zobrist_init_once();
     let mut key: u64 = 0;
     for r in 0..8 {
