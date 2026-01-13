@@ -15,8 +15,8 @@ use super::utils::{
 /// Calculate check mobility bonus based on opponent's available replies.
 #[inline]
 pub fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32 {
-    let opp_state = GameState::from_board_and_side(post_after.clone(), checked_side);
-    let replies = find_all_valid_moves(&opp_state).len() as i32;
+    let mut opp_state = GameState::from_board_and_side(post_after.clone(), checked_side);
+    let replies = find_all_valid_moves(&mut opp_state).len() as i32;
     match replies {
         0 => CHECK_MOBILITY_BONUS_0,
         1..=2 => CHECK_MOBILITY_BONUS_1_2,

@@ -1,5 +1,4 @@
 use std::sync::{Mutex, OnceLock};
-use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
 use crate::search::heuristics::SearchHeuristics;
 use crate::search::prune_null_moves::prune_null_moves;
@@ -45,16 +44,15 @@ fn opponent(color: Color) -> Color {
 
 // Alpha-beta pruning Search. Returns evaluation in centipawns (positive is better for White).
 pub fn alphabeta(
-    board: &mut Board,
-    to_move: Color,
+    game_state: &mut GameState,
     depth: usize,
     mut alpha: i32,
     mut beta: i32,
     ply: i32,
     tt: &mut TranspositionTable,
-    half_move_clock: u32,
     rep_stack: &mut Vec<u64>,
 ) -> i32 {
+    let to_move = game_state.active_color();
     // Count every node we enter
     bump_node();
 
@@ -63,27 +61,29 @@ pub fn alphabeta(
         return SEARCH_ABORTED;
     }
 
-    // Repetition/50-move draw checks at node entry (only if Zobrist hashing is enabled)
     let key_here: u64 = if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
-        compute_zobrist(&*board, to_move)
+        compute_zobrist(game_state.board(), to_move)
     } else { 0 };
+    let mut pushed_rep = false;
     if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
         // If this key already exists in the current line, it's a repetition -> draw
         if rep_stack.iter().any(|&k| k == key_here) {
             return 0;
         }
+        rep_stack.push(key_here);
+        pushed_rep = true;
     }
     // 50-move rule
-    if half_move_clock >= HUNDRED_HALF_MOVES {
+    if game_state.half_move_clock() >= HUNDRED_HALF_MOVES {
         return 0;
     }
 
     if depth == 0 {
         // At leaf: switch to quiescence to avoid horizon effects
-        return qsearch(board, to_move, alpha, beta, half_move_clock, rep_stack);
+        return qsearch(game_state, alpha, beta, rep_stack);
     }
 
-    if let Some(value) = prune_null_moves(board, to_move, depth, alpha, beta, ply, tt, half_move_clock, rep_stack) {
+    if let Some(value) = prune_null_moves(game_state, depth, alpha, beta, ply, tt, rep_stack) {
         return value;
     }
 
@@ -110,8 +110,7 @@ pub fn alphabeta(
         }
     }
 
-    let gs = GameState::from_board_and_side((*board).clone(), to_move);
-    let mut moves: Vec<((usize, usize), (usize, usize), Option<char>)> = find_all_valid_moves(&gs);
+    let mut moves: Vec<((usize, usize), (usize, usize), Option<char>)> = find_all_valid_moves(game_state);
     // If TT has the best move, try it first
     if let Some(entry) = tt.probe(key) {
         let bm = decode_move(entry.best_from, entry.best_to);
@@ -122,16 +121,30 @@ pub fn alphabeta(
     }
     // Basic move ordering with heuristics: after TT move, sort by composite key
     if moves.len() > 1 {
-        let (head, tail) = moves.split_at_mut(1);
-        let board_ref = &*board;
-        let hmc = half_move_clock;
+        let hmc = game_state.half_move_clock();
+        // Extract pieces before sorting to avoid holding board borrow
+        let mut piece_info = Vec::with_capacity(moves.len());
+        {
+            let b = game_state.board();
+            for &(from, to, _promo) in &moves {
+                piece_info.push((
+                    b.get(from.0, from.1).map(|p| p.get_type()),
+                    b.get(to.0, to.1).is_some(),
+                    if crate::search::advanced_search::MVV_LVA_ENABLED {
+                        b.move_score_mvv_lva(from, to)
+                    } else { 0 }
+                ));
+            }
+        }
+
         thread_local! {
             static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
         }
-        tail.sort_by_key(|&(from, to, promo)| {
-            let mut key = if crate::search::advanced_search::MVV_LVA_ENABLED {
-                board_ref.move_score_mvv_lva(from, to)
-            } else { 0 };
+        
+        let mut moves_with_scores: Vec<(((usize, usize), (usize, usize), Option<char>), i32)> = moves.into_iter().enumerate().map(|(i, m)| {
+            let (from, to, promo) = m;
+            let (moved_type, is_cap, mvv_lva) = piece_info[i];
+            let mut key = mvv_lva;
 
             if let Some(p) = promo {
                 key += match p {
@@ -143,17 +156,13 @@ pub fn alphabeta(
                 };
             }
 
-            let moved_is_pawn = board_ref
-                .get(from.0, from.1)
-                .map(|p| p.get_type() == PieceType::Pawn)
-                .unwrap_or(false);
-            let is_capture = board_ref.get(to.0, to.1).is_some();
+            let is_pawn_moved = moved_type == Some(PieceType::Pawn);
             if hmc >= 80 {
-                if moved_is_pawn || is_capture {
+                if is_pawn_moved || is_cap {
                     key += 100_000;
                 }
             }
-            if !is_capture && !moved_is_pawn {
+            if !is_cap && !is_pawn_moved {
                 let is_killer = HEUR.with(|h| {
                     let m = h
                         .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
@@ -173,26 +182,31 @@ pub fn alphabeta(
                 });
                 key += (hist / 32).clamp(-200_000, 200_000);
             }
-            -key
-        });
-        let _ = head;
+            (m, key)
+        }).collect();
+
+        // Sort everything after the first move (TT move)
+        if moves_with_scores.len() > 1 {
+            let (_, tail) = moves_with_scores.split_at_mut(1);
+            tail.sort_by_key(|&(_, score)| -score);
+        }
+        
+        moves = moves_with_scores.into_iter().map(|(m, _)| m).collect();
     }
+
     if moves.is_empty() {
-        let in_check = board.is_side_in_check(to_move);
+        let in_check = game_state.mutable_board().is_side_in_check(to_move);
+        if pushed_rep { let _ = rep_stack.pop(); }
         return if in_check {
             -MATE_VALUE + depth as i32
         } else {
             0
-        }
+        };
     }
 
     let original_alpha = alpha;
     let original_beta = beta;
     let mut best_from_to: Option<((usize, usize), (usize, usize))> = None;
-    let pushed_rep = if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
-        rep_stack.push(key_here);
-        true
-    } else { false };
 
     thread_local! {
         static HEUR: OnceLock<Mutex<SearchHeuristics>> = OnceLock::new();
@@ -200,165 +214,153 @@ pub fn alphabeta(
 
     // Unified move loop - works for both maximizing (White) and minimizing (Black)
     let maximizing = to_move == Color::White;
-    let opp = opponent(to_move);
-    let mut value = initial_value(maximizing);
+    let mut current_score = initial_value(maximizing);
+    let mut current_value = initial_value(maximizing);
     let mut is_first_move = true;
     let mut move_index: i32 = 0;
 
     for (from, to, promo) in moves.into_iter() {
-        let moved_piece = board.get(from.0, from.1);
-        let target_piece = board.get(to.0, to.1);
-        let u = board.make_move_simple(from, to, promo);
+        let u = game_state.make_move_fast(from, to, promo);
 
         // Passed-pawn push extension
         let mut child_depth = depth.saturating_sub(1);
-        let mut child_hmc = half_move_clock + 1;
-        if let Some(p) = moved_piece {
-            if p.get_type() == PieceType::Pawn {
-                child_hmc = 0;
-                let color = p.get_color();
-                let r = to.0;
-                let c = to.1;
-                if board.game_phase_light() <= 8 && board.is_passed_pawn_simple(r, c, color) {
-                    let adv: i32 = match color {
-                        Color::White => r as i32,
-                        Color::Black => (7 - r) as i32,
-                    };
-                    if adv >= 5 {
-                        child_depth = child_depth.saturating_add(1);
-                    }
-                }
-            }
-        }
-        if target_piece.is_some() {
-            child_hmc = 0;
-        }
-
-        let is_capture = target_piece.is_some();
-        let is_pawn_move = moved_piece
-            .map(|p| p.get_type() == PieceType::Pawn)
-            .unwrap_or(false);
-        let quiet = !is_capture && !is_pawn_move;
-
-        // Principal Variation Search (PVS) + Late Move Reductions (LMR)
-        let score;
-        if is_first_move {
-            // Full window on the first move
-            score = alphabeta(
-                board,
-                opp,
-                child_depth,
-                alpha,
-                beta,
-                ply + 1,
-                tt,
-                child_hmc,
-                rep_stack,
-            );
-            is_first_move = false;
-        } else {
-            // Late Move Reduction
-            let mut reduced_depth = child_depth;
-            let gives_check = board.is_side_in_check(opp);
-            let allow_reduce = !(gives_check && child_depth <= 5);
-
-            if crate::search::advanced_search::LMR_ENABLED {
-                if quiet && child_depth >= 3 && move_index >= 4 && allow_reduce {
-                    let hist = HEUR.with(|h| {
-                        let m = h
-                            .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
-                            .lock()
-                            .unwrap();
-                        m.history_score(to_move, from, to)
-                    });
-                    let hist_good = is_good_history(hist, maximizing);
-                    let mut r = 1 + ((move_index as usize) / 6).min(1);
-                    if child_depth >= 8 {
-                        r += 1;
-                    }
-                    if hist_good {
-                        r = r.saturating_sub(1);
-                    }
-                    // Extra reduction for quiet queen moves in opening
-                    if let Some(mp) = moved_piece {
-                        if mp.get_type() == PieceType::Queen {
-                            let phase = board.game_phase_light();
-                            if phase >= 12 {
-                                let back_r = if to_move == Color::White { 0usize } else { 7usize };
-                                let mut undeveloped = 0;
-                                for fc in 0..8 {
-                                    if let Some(p) = board.get(back_r, fc) {
-                                        if p.get_color() == to_move {
-                                            match p.get_type() {
-                                                PieceType::Knight | PieceType::Bishop => { undeveloped += 1; },
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                }
-                                let king_home_r = back_r;
-                                let mut king_file: Option<usize> = None;
-                                for fc in 0..8 {
-                                    if let Some(kp) = board.get(king_home_r, fc) {
-                                        if kp.get_color() == to_move && kp.get_type() == PieceType::King {
-                                            king_file = Some(fc);
-                                            break;
-                                        }
-                                    }
-                                }
-                                let uncastled = match king_file { Some(kf) => !(kf == 2 || kf == 6), None => true };
-                                if undeveloped >= 3 { r += 2; }
-                                else if undeveloped >= 2 { r += 1; }
-                                if uncastled { r += 1; }
-                            }
+        let gives_check;
+        let is_capture = u.ep_captured_piece.is_some() || u.board_undo.captured.is_some();
+        let quiet;
+        let r_sq = to.0;
+        let c_sq = to.1;
+        {
+            let b = game_state.board();
+            if let Some(p) = b.get(r_sq, c_sq) {
+                if p.get_type() == PieceType::Pawn {
+                    let color = p.get_color();
+                    if b.game_phase_light() <= 8 && b.is_passed_pawn_simple(r_sq, c_sq, color) {
+                        let adv: i32 = match color {
+                            Color::White => r_sq as i32,
+                            Color::Black => (7 - r_sq) as i32,
+                        };
+                        if adv >= 5 {
+                            child_depth = child_depth.saturating_add(1);
                         }
                     }
-                    r = r.min(3);
-                    reduced_depth = reduced_depth.saturating_sub(r);
                 }
             }
+            quiet = !is_capture && b.get(r_sq, c_sq).map_or(false, |p| p.get_type() != PieceType::Pawn);
+            gives_check = game_state.mutable_board().is_side_in_check(opponent(to_move));
+        }
 
-            // Null-window Search for subsequent moves (PVS)
-            let (nw_alpha, nw_beta) = null_window(alpha, beta, maximizing);
-            let mut sc = alphabeta(
-                board,
-                opp,
-                reduced_depth,
-                nw_alpha,
-                nw_beta,
-                ply + 1,
-                tt,
-                child_hmc,
-                rep_stack,
-            );
+        // Late Move Reduction
+        let mut reduced_depth = child_depth;
+        let allow_reduce = !(gives_check && child_depth <= 5);
 
-            // Re-search with full window if score falls within (alpha, beta)
-            if sc > alpha && sc < beta {
-                sc = alphabeta(
-                    board,
-                    opp,
+            // Principal Variation Search (PVS) + Late Move Reductions (LMR)
+            if is_first_move {
+                // Full window on the first move
+                current_score = alphabeta(
+                    game_state,
                     child_depth,
                     alpha,
                     beta,
                     ply + 1,
                     tt,
-                    child_hmc,
                     rep_stack,
                 );
+                is_first_move = false;
+            } else {
+                if crate::search::advanced_search::LMR_ENABLED {
+                    if quiet && child_depth >= 3 && move_index >= 4 && allow_reduce {
+                        let hist = HEUR.with(|h| {
+                            let m = h.get_or_init(|| Mutex::new(SearchHeuristics::new(128))).lock().unwrap();
+                            m.history_score(to_move, from, to)
+                        });
+                        let is_maximizing = to_move == Color::White;
+                        let hist_good = is_good_history(hist, is_maximizing);
+                        let mut r = 1 + ((move_index as usize) / 6).min(1);
+                        if child_depth >= 8 {
+                            r += 1;
+                        }
+                        if hist_good {
+                            r = r.saturating_sub(1);
+                        }
+            // Extra reduction for quiet queen moves in opening
+            {
+                let board_tmp = game_state.board();
+                if let Some(mp) = board_tmp.get(r_sq, c_sq) {
+                    if mp.get_type() == PieceType::Queen {
+                        let phase = board_tmp.game_phase_light();
+                        if phase >= 12 {
+                            let back_r = if to_move == Color::White { 0usize } else { 7usize };
+                            let mut undeveloped = 0;
+                            for fc in 0..8 {
+                                if let Some(p) = board_tmp.get(back_r, fc) {
+                                    if p.get_color() == to_move {
+                                        match p.get_type() {
+                                            PieceType::Knight | PieceType::Bishop => { undeveloped += 1; },
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            let king_home_r = back_r;
+                            let mut king_file: Option<usize> = None;
+                            for fc in 0..8 {
+                                if let Some(kp) = board_tmp.get(king_home_r, fc) {
+                                    if kp.get_color() == to_move && kp.get_type() == PieceType::King {
+                                        king_file = Some(fc);
+                                        break;
+                                    }
+                                }
+                            }
+                            let uncastled = match king_file { Some(kf) => !(kf == 2 || kf == 6), None => true };
+                            if undeveloped >= 3 { r += 2; }
+                            else if undeveloped >= 2 { r += 1; }
+                            if uncastled { r += 1; }
+                        }
+                    }
+                }
             }
-            score = sc;
-        }
-        board.unmake_move_simple(u);
+                        r = r.min(3);
+                        reduced_depth = reduced_depth.saturating_sub(r);
+                    }
+                }
+
+                // Null-window Search for subsequent moves (PVS)
+                let (nw_alpha, nw_beta) = null_window(alpha, beta, maximizing);
+                let mut sc2 = alphabeta(
+                    game_state,
+                    reduced_depth,
+                    nw_alpha,
+                    nw_beta,
+                    ply + 1,
+                    tt,
+                    rep_stack,
+                );
+
+                // Re-search with full window if score falls within (alpha, beta)
+                if is_better(sc2, alpha, maximizing) && (reduced_depth < child_depth || is_better(beta, sc2, maximizing)) {
+                    sc2 = alphabeta(
+                        game_state,
+                        child_depth,
+                        alpha,
+                        beta,
+                        ply + 1,
+                        tt,
+                        rep_stack,
+                    );
+                }
+                current_score = sc2;
+            }
+        game_state.unmake_move_fast(u);
 
         // Update best value
-        if is_better(score, value, maximizing) {
-            value = score;
+        if is_better(current_score, current_value, maximizing) {
+            current_value = current_score;
         }
 
         // Update alpha/beta bound and best move
         if maximizing {
-            if value > alpha {
-                alpha = value;
+            if current_value > alpha {
+                alpha = current_value;
                 best_from_to = Some((from, to));
                 if quiet {
                     HEUR.with(|h| {
@@ -369,7 +371,7 @@ pub fn alphabeta(
                         m.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
-            } else if quiet && score >= beta {
+            } else if quiet && current_score >= beta {
                 HEUR.with(|h| {
                     let mut m = h
                         .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
@@ -379,8 +381,8 @@ pub fn alphabeta(
                 });
             }
         } else {
-            if value < beta {
-                beta = value;
+            if current_value < beta {
+                beta = current_value;
                 best_from_to = Some((from, to));
                 if quiet {
                     HEUR.with(|h| {
@@ -391,7 +393,7 @@ pub fn alphabeta(
                         m.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
-            } else if quiet && score <= alpha {
+            } else if quiet && current_score <= alpha {
                 HEUR.with(|h| {
                     let mut m = h
                         .get_or_init(|| Mutex::new(SearchHeuristics::new(128)))
@@ -403,7 +405,10 @@ pub fn alphabeta(
         }
 
         // Cutoff check
-        if alpha >= beta {
+        if current_value >= beta && maximizing {
+            break;
+        }
+        if current_value <= alpha && !maximizing {
             break;
         }
         move_index += 1;
@@ -413,9 +418,9 @@ pub fn alphabeta(
     if pushed_rep { let _ = rep_stack.pop(); }
 
     // Store to TT
-    let bound = if value <= original_alpha {
+    let bound = if current_value <= original_alpha {
         Bound::Upper
-    } else if value >= original_beta {
+    } else if current_value >= original_beta {
         Bound::Lower
     } else {
         Bound::Exact
@@ -426,7 +431,7 @@ pub fn alphabeta(
     } else {
         (None, None)
     };
-    let tt_score = to_tt_score(value, ply);
+    let tt_score = to_tt_score(current_value, ply);
     tt.store(key, depth as i16, bound, tt_score, bf, bt);
-    value
+    current_value
 }

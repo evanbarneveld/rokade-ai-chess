@@ -1,16 +1,27 @@
-use crate::board::Board;
-use crate::piece::pieces::{opposite_color, Color, PieceType};
+use crate::piece::pieces::{Color, PieceType};
 use crate::search::alphabeta::alphabeta;
 use crate::search::tt::TranspositionTable;
 use crate::search::advanced_search::NULL_MOVE_PRUNING_ENABLED;
+use crate::state::game_state::GameState;
 
 const NULL_MOVE_PRUNING_START_DEPTH: usize = 4;
 
 #[inline]
-pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, alpha: i32, beta: i32, ply: i32, tt: &mut TranspositionTable, halfmove_clock: u32, rep_stack: &mut Vec<u64>) -> Option<i32> {
+pub fn prune_null_moves(
+    game_state: &mut GameState,
+    depth: usize,
+    alpha: i32,
+    beta: i32,
+    ply: i32,
+    tt: &mut TranspositionTable,
+    rep_stack: &mut Vec<u64>,
+) -> Option<i32> {
     if !NULL_MOVE_PRUNING_ENABLED {
         return None;
     }
+    let to_move = game_state.active_color();
+    let halfmove_clock = game_state.half_move_clock();
+
     // -----------------
     // Null-move pruning
     // -----------------
@@ -21,13 +32,13 @@ pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, alpha: 
     // - Avoid in likely zugzwang scenarios (very low material) — here we approximate by requiring some non-pawn material
     // Null-move pruning (safer settings): require a bit more depth and cap reduction
     if depth >= NULL_MOVE_PRUNING_START_DEPTH {
-        let in_check = board.is_side_in_check(to_move);
+        let in_check = game_state.mutable_board().is_side_in_check(to_move);
         if !in_check && halfmove_clock < 100 {
             // Quick material heuristic: require presence of any piece other than kings/pawns
             let mut has_non_pawn_minor = false;
             'scan: for r in 0..8 {
                 for c in 0..8 {
-                    if let Some(p) = board.get(r, c) {
+                    if let Some(p) = game_state.board().get(r, c) {
                         if p.get_color() == to_move {
                             match p.get_type() {
                                 PieceType::Knight | PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
@@ -49,18 +60,25 @@ pub fn prune_null_moves(board: &mut Board, to_move: Color, depth: usize, alpha: 
                 } else {
                     (alpha, alpha + 1)
                 };
+
+                // Null move: switch side and reduce depth
+                game_state.switch_player_turn();
+                let old_hmc = game_state.half_move_clock();
+                game_state.increment_half_move_clock();
                 
                 let score = alphabeta(
-                    board,
-                    opposite_color(to_move),
+                    game_state,
                     depth.saturating_sub(1 + r),
                     null_alpha,
                     null_beta,
                     ply + 1,
                     tt,
-                    halfmove_clock.saturating_add(1),
                     rep_stack,
                 );
+
+                // Unmake null move
+                game_state.switch_player_turn();
+                game_state.set_half_move_clock(old_hmc);
                 
                 if to_move == Color::White {
                     if score >= beta {

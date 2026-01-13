@@ -1,4 +1,3 @@
-use crate::board::Board;
 use crate::history::history::History;
 use crate::piece::pieces::Color;
 use crate::search::root_evaluator::evaluate_root_for_bounds;
@@ -28,17 +27,16 @@ pub(crate) fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, win
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn probe_with_aspiration(
-    board: &Board,
     active_color: Color,
     root_moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
     depth_now: usize,
     last_score: i32,
     window: &mut i32,
     tt: &mut TranspositionTable,
-    base_hmc: u32,
-    game_state: &GameState,
+    game_state: &mut GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
+    let board = game_state.board();
     let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
 
     let mut tried = 0;
@@ -46,14 +44,12 @@ pub(crate) fn probe_with_aspiration(
         tried += 1;
 
         let (_mv, _best_adj, best_raw) = evaluate_root_for_bounds(
-            board,
             active_color,
             root_moves,
             depth_now,
             a,
             b,
             tt,
-            base_hmc,
             game_state,
             history,
         );
@@ -83,14 +79,12 @@ pub(crate) fn probe_with_aspiration(
             *window = (*window).max(ASP_WINDOW_INIT_CP);
             let (fa, fb) = (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1);
             let (mv2, best_adj2, best_raw2) = evaluate_root_for_bounds(
-                board,
                 active_color,
                 root_moves,
                 depth_now,
                 fa,
                 fb,
                 tt,
-                base_hmc,
                 game_state,
                 history,
             );

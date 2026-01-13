@@ -34,17 +34,16 @@ pub(crate) fn reorder_with_tt_hint(
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn evaluate_root_for_bounds(
-    board: &Board,
     active_color: Color,
     root_moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
     depth_now: usize,
     a: i32,
     b: i32,
     tt: &mut TranspositionTable,
-    base_hmc: u32,
-    game_state: &GameState,
+    game_state: &mut GameState,
     history: &History,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
+    let board = game_state.board();
     let mut best_from_to_promo: Option<((usize, usize), (usize, usize), Option<char>)> = None;
     let mut best_score_raw = if active_color == Color::White {
         MIN_EVAL_VALUE
@@ -55,7 +54,7 @@ pub(crate) fn evaluate_root_for_bounds(
 
     // Order: if TT has a move at root, try to place it first, then apply light opening-aware tie-breakers
     let mut ordered: Vec<((usize, usize), (usize, usize), Option<char>)> = root_moves.iter().copied().collect();
-    reorder_with_tt_hint(&mut ordered, tt, board, active_color);
+    reorder_with_tt_hint(&mut ordered, tt, game_state.board(), active_color);
 
     // Opening-aware tiny reordering: demote quiet queen moves; promote minor development and castling
     // Keep this extremely small so as not to override tactical ordering.
@@ -63,15 +62,17 @@ pub(crate) fn evaluate_root_for_bounds(
     let phase_for_scale = {
         // Phase proxy: count heavy/minors on board similar to evaluator's game_phase; fallback small constant
         let mut phase = 0i32;
-        for r in 0..8 { for c in 0..8 { if let Some(p)=board.get(r,c) {
+        let b = game_state.board();
+        for r in 0..8 { for c in 0..8 { if let Some(p)=b.get(r,c) {
             phase += match p.get_type() { PieceType::Knight|PieceType::Bishop => 1, PieceType::Rook => 2, PieceType::Queen => 4, _ => 0 };
         }}}
         if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
     } as i32;
     if depth_now >= 1 {
+        let b = game_state.board();
         ordered.sort_by(|&(f1,t1, _), &(f2,t2, _)| {
-            let score1 = root_move_order_bias(board, active_color, f1, t1, phase_for_scale);
-            let score2 = root_move_order_bias(board, active_color, f2, t2, phase_for_scale);
+            let score1 = root_move_order_bias(b, active_color, f1, t1, phase_for_scale);
+            let score2 = root_move_order_bias(b, active_color, f2, t2, phase_for_scale);
             score2.cmp(&score1) // higher bias first
         });
     }
@@ -84,8 +85,7 @@ pub(crate) fn evaluate_root_for_bounds(
         let &(pv_from, pv_to, pv_promo) = ordered.first().unwrap();
         {
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                board,
-                active_color,
+                game_state,
                 pv_from,
                 pv_to,
                 pv_promo,
@@ -93,7 +93,6 @@ pub(crate) fn evaluate_root_for_bounds(
                 a,
                 b,
                 tt,
-                base_hmc,
                 history,
             );
 
@@ -102,11 +101,11 @@ pub(crate) fn evaluate_root_for_bounds(
             }
 
             let adjusted = adjusted_root_eval_for_move(
-                board,
+                game_state.board(),
                 active_color,
                 pv_from,
                 pv_to,
-                base_hmc,
+                game_state.half_move_clock(),
                 score_raw,
                 is_capture,
                 moved_is_pawn,
@@ -119,7 +118,6 @@ pub(crate) fn evaluate_root_for_bounds(
 
         // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
         // reuse shared board reference in parallel (read-only access)
-        let base_hmc_loc = base_hmc;
         let a_loc = a;
         let b_loc = b;
         let side = active_color;
@@ -128,9 +126,10 @@ pub(crate) fn evaluate_root_for_bounds(
             .map(|&(from, to, promo)| {
                 // local TT per task
                 let mut local_tt = TranspositionTable::new_with_default_size();
+                // WE MUST CLONE game_state for parallel tasks
+                let mut local_gs = game_state.clone();
                 let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                    board,
-                    side,
+                    &mut local_gs,
                     from,
                     to,
                     promo,
@@ -138,7 +137,6 @@ pub(crate) fn evaluate_root_for_bounds(
                     a_loc,
                     b_loc,
                     &mut local_tt,
-                    base_hmc_loc,
                     history,
                 );
 
@@ -148,11 +146,11 @@ pub(crate) fn evaluate_root_for_bounds(
 
                 // Root adjustments
                 let mut adjusted = adjusted_root_eval_for_move(
-                    board,
+                    local_gs.board(),
                     side,
                     from,
                     to,
-                    base_hmc_loc,
+                    local_gs.half_move_clock(),
                     score_raw,
                     is_capture,
                     moved_is_pawn,
@@ -160,9 +158,9 @@ pub(crate) fn evaluate_root_for_bounds(
                 // Apply repetition-avoidance bias at root for parallel moves
                 adjusted = apply_repetition_avoidance_bias(
                     adjusted,
-                    game_state,
+                    &local_gs,
                     history,
-                    board,
+                    local_gs.board(),
                     side,
                     from,
                     to,
@@ -228,8 +226,7 @@ pub(crate) fn evaluate_root_for_bounds(
         // Search sequentially over root moves
         for &(from, to, promo) in &ordered {
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                board,
-                active_color,
+                game_state,
                 from,
                 to,
                 promo,
@@ -237,7 +234,6 @@ pub(crate) fn evaluate_root_for_bounds(
                 a,
                 b,
                 tt,
-                base_hmc,
                 history,
             );
 
@@ -247,11 +243,11 @@ pub(crate) fn evaluate_root_for_bounds(
 
             // Adjust score for root-only heuristics
             let mut adjusted = adjusted_root_eval_for_move(
-                board,
+                game_state.board(),
                 active_color,
                 from,
                 to,
-                base_hmc,
+                game_state.half_move_clock(),
                 score_raw,
                 is_capture,
                 moved_is_pawn,
@@ -261,7 +257,7 @@ pub(crate) fn evaluate_root_for_bounds(
                 adjusted,
                 game_state,
                 history,
-                board,
+                game_state.board(),
                 active_color,
                 from,
                 to,

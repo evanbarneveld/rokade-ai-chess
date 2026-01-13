@@ -55,8 +55,8 @@ pub fn build_pv_for_root(
         let (bf, bt) = (entry.best_from, entry.best_to);
         let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
 
-        let gs = GameState::from_board_and_side(tmp.clone(), side);
-        let legals = find_all_valid_moves(&gs);
+        let mut gs = GameState::from_board_and_side(tmp.clone(), side);
+        let legals = find_all_valid_moves(&mut gs);
         let found_move = legals.iter().find(|(f, t, _)| (*f, *t) == ((nfr, nfc), (ntr, ntc)));
 
         if let Some(&(f, t, p)) = found_move {
@@ -72,13 +72,13 @@ pub fn build_pv_for_root(
 
 /// Collect root moves from a move list.
 pub fn get_root_moves(
-    _game_state: &GameState,
+    _game_state: &mut GameState,
     _history: &History,
-    _board: &Board,
     _active_color: Color,
     moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
     v: &mut Vec<((usize, usize), (usize, usize), Option<char>)>,
 ) {
+    let _board = _game_state.board();
     for &(from, to, promo) in moves {
         v.push((from, to, promo));
     }
@@ -208,8 +208,7 @@ pub fn adjust_root_score(
 /// Evaluate a position after making a root move.
 #[inline]
 pub fn evaluate_after_root_move(
-    base_board: &Board,
-    side: Color,
+    game_state: &mut GameState,
     from: (usize, usize),
     to: (usize, usize),
     promo: Option<char>,
@@ -217,50 +216,40 @@ pub fn evaluate_after_root_move(
     a: i32,
     b: i32,
     tt: &mut TranspositionTable,
-    base_hmc: u32,
     history: &History,
 ) -> (i32, bool, bool) {
-    let mut tmp = base_board.clone();
-    let u = tmp.make_move_simple(from, to, promo);
-    let moved_is_pawn = base_board
-        .get(from.0, from.1)
+    let side = game_state.active_color();
+    let is_capture = game_state.board().get(to.0, to.1).is_some();
+    let moved_is_pawn = game_state.board().get(from.0, from.1)
         .map(|p| p.get_type() == PieceType::Pawn)
         .unwrap_or(false);
-    let is_capture = base_board.get(to.0, to.1).is_some();
-    let child_hmc: u32 = if is_capture || moved_is_pawn {
-        0
-    } else {
-        base_hmc.saturating_add(1)
-    };
 
-    let gives_check = tmp.is_side_in_check(opposite_color(side));
+    let u = game_state.make_move_fast(from, to, promo);
+
     let score_raw = if depth_now <= 1 {
         // Shallow depth: use qsearch to avoid horizon blunders
         crate::search::qsearch::qsearch(
-            &mut tmp,
-            opposite_color(side),
+            game_state,
             crate::search::advanced_search::MIN_EVAL_VALUE + 1,
             crate::search::advanced_search::MAX_EVAL_VALUE - 1,
-            child_hmc,
             &mut history.get_rep_stack(),
         )
     } else {
         let mut rep_stack = history.get_rep_stack();
+        let gives_check = game_state.mutable_board().is_side_in_check(opposite_color(side));
         let ext = if gives_check { 2 } else { 0 };
         alphabeta(
-            &mut tmp,
-            opposite_color(side),
+            game_state,
             depth_now - 1 + ext,
             a,
             b,
             1,
             tt,
-            child_hmc,
             &mut rep_stack,
         )
     };
-    tmp.unmake_move_simple(u);
-    (score_raw, is_capture, moved_is_pawn)
+    game_state.unmake_move_fast(u);
+    (score_raw, is_capture || u.ep_captured_piece.is_some(), moved_is_pawn)
 }
 
 /// Get adjusted evaluation for a root move, with safety clamping.

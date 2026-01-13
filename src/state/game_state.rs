@@ -127,6 +127,10 @@ impl GameState {
         self.half_move_clock = 0;
     }
 
+    pub fn set_half_move_clock(&mut self, val: u32) {
+        self.half_move_clock = val;
+    }
+
     pub fn revoke_castling_rights_for_color(&mut self, color: Color) {
         match color {
             Color::White => self.castling_rights.revoke_white_castling(),
@@ -176,15 +180,15 @@ impl GameState {
 // Applies a move on the current GameState and returns an undo snapshot for perfect restoration.
 #[derive(Clone, Copy)]
 pub struct UndoGameState {
-    board_undo: UndoMove,
-    prev_active_color: Color,
-    prev_castling_rights: CastlingRights,
-    prev_en_passant_target: Option<(usize, usize)>,
-    prev_half_move_clock: u32,
-    prev_full_move_number: u32,
+    pub(crate) board_undo: UndoMove,
+    pub(crate) prev_active_color: Color,
+    pub(crate) prev_castling_rights: CastlingRights,
+    pub(crate) prev_en_passant_target: Option<(usize, usize)>,
+    pub(crate) prev_half_move_clock: u32,
+    pub(crate) prev_full_move_number: u32,
     // En passant captured pawn (if any)
-    ep_captured_sq: Option<(usize, usize)>,
-    ep_captured_piece: Option<Piece>,
+    pub(crate) ep_captured_sq: Option<(usize, usize)>,
+    pub(crate) ep_captured_piece: Option<Piece>,
 }
 
 impl GameState {
@@ -224,6 +228,8 @@ impl GameState {
         }
 
         // Handle promotion: replace pawn at destination with promoted piece if requested
+        // NOTE: make_move_simple already handles this, so this is redundant but we keep it
+        // for safety, ensuring it doesn't corrupt state.
         if let (Some(p), Some(pc)) = (moving_piece, promo) {
             if p.get_type() == PieceType::Pawn {
                 let promote_to = match pc {
@@ -233,7 +239,11 @@ impl GameState {
                     'n' | 'N' => PieceType::Knight,
                     _ => PieceType::Queen,
                 };
-                self.board.set(to.0, to.1, Some(Piece::new(promote_to, p.get_color())));
+                let promoted_piece = Piece::new(promote_to, p.get_color());
+                self.board.set(to.0, to.1, Some(promoted_piece));
+                if promoted_piece.get_type() == PieceType::King {
+                     self.board.set_king_location(promoted_piece.get_color(), to);
+                }
             }
         }
 
@@ -332,6 +342,9 @@ impl GameState {
         // If an en-passant capture occurred, restore the captured pawn
         if let (Some(sq), Some(pc)) = (u.ep_captured_sq, u.ep_captured_piece) {
             self.board.set(sq.0, sq.1, Some(pc));
+            if pc.get_type() == PieceType::King {
+                self.board.set_king_location(pc.get_color(), sq);
+            }
         }
         // Restore metadata
         self.active_color = u.prev_active_color;
@@ -340,7 +353,6 @@ impl GameState {
         self.half_move_clock = u.prev_half_move_clock;
         self.full_move_number = u.prev_full_move_number;
 
-        // Debug-only consistency checks to ensure full restoration
         #[cfg(debug_assertions)]
         {
             // King locations should match the snapshot stored in the board undo
