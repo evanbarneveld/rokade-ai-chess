@@ -32,7 +32,5 @@ pub fn is_valid_bishop_move(board: &mut Board, from: (usize, usize), to: (usize,
         return false;
     }
 
-    //println!("bishop move: {}", as_square_str(from,to));
-
     true
 }

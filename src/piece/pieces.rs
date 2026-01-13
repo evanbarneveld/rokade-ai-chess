@@ -80,50 +80,50 @@ impl Piece {
     pub fn symbol(&self) -> char {
         // Use the white piece Unicode characters for both colors; colorization is handled in Board display
         match self.piece_type {
-            PieceType::King => '♚',
-            PieceType::Queen => '♛',
-            PieceType::Rook => '♜',
-            PieceType::Bishop => '♝',
-            PieceType::Knight => '♞',
-            PieceType::Pawn => '\u{2659}', // works well but is not filled in
-            // PieceType::Pawn => '\u{1FA05}', // doesn't work
-            //PieceType::Pawn => '♟', // works not it terminal: pawn gets purple color!
-            //PieceType::Pawn => '\u{265F}', // works not it terminal: pawn gets purple color!
+            King => '♚',
+            Queen => '♛',
+            Rook => '♜',
+            Bishop => '♝',
+            Knight => '♞',
+            Pawn => '\u{2659}', // works well but is not filled in
+            // Pawn => '\u{1FA05}', // doesn't work
+            //Pawn => '♟', // works not it terminal: pawn gets purple color!
+            //Pawn => '\u{265F}', // works not it terminal: pawn gets purple color!
         }
     }
 
     pub fn from_fen_char(c: char) -> Option<Piece> {
         match c {
-            'K' => Some(Piece::new(PieceType::King, Color::White)),
-            'Q' => Some(Piece::new(PieceType::Queen, Color::White)),
-            'R' => Some(Piece::new(PieceType::Rook, Color::White)),
-            'B' => Some(Piece::new(PieceType::Bishop, Color::White)),
-            'N' => Some(Piece::new(PieceType::Knight, Color::White)),
-            'P' => Some(Piece::new(PieceType::Pawn, Color::White)),
-            'k' => Some(Piece::new(PieceType::King, Color::Black)),
-            'q' => Some(Piece::new(PieceType::Queen, Color::Black)),
-            'r' => Some(Piece::new(PieceType::Rook, Color::Black)),
-            'b' => Some(Piece::new(PieceType::Bishop, Color::Black)),
-            'n' => Some(Piece::new(PieceType::Knight, Color::Black)),
-            'p' => Some(Piece::new(PieceType::Pawn, Color::Black)),
+            'K' => Some(Piece::new(King, Color::White)),
+            'Q' => Some(Piece::new(Queen, Color::White)),
+            'R' => Some(Piece::new(Rook, Color::White)),
+            'B' => Some(Piece::new(Bishop, Color::White)),
+            'N' => Some(Piece::new(Knight, Color::White)),
+            'P' => Some(Piece::new(Pawn, Color::White)),
+            'k' => Some(Piece::new(King, Color::Black)),
+            'q' => Some(Piece::new(Queen, Color::Black)),
+            'r' => Some(Piece::new(Rook, Color::Black)),
+            'b' => Some(Piece::new(Bishop, Color::Black)),
+            'n' => Some(Piece::new(Knight, Color::Black)),
+            'p' => Some(Piece::new(Pawn, Color::Black)),
             _ => None,
         }
     }
 
     pub fn to_fen_char(&self) -> char {
         match (self.color, self.piece_type) {
-            (Color::White, PieceType::King) => 'K',
-            (Color::White, PieceType::Queen) => 'Q',
-            (Color::White, PieceType::Rook) => 'R',
-            (Color::White, PieceType::Bishop) => 'B',
-            (Color::White, PieceType::Knight) => 'N',
-            (Color::White, PieceType::Pawn) => 'P',
-            (Color::Black, PieceType::King) => 'k',
-            (Color::Black, PieceType::Queen) => 'q',
-            (Color::Black, PieceType::Rook) => 'r',
-            (Color::Black, PieceType::Bishop) => 'b',
-            (Color::Black, PieceType::Knight) => 'n',
-            (Color::Black, PieceType::Pawn) => 'p',
+            (Color::White, King) => 'K',
+            (Color::White, Queen) => 'Q',
+            (Color::White, Rook) => 'R',
+            (Color::White, Bishop) => 'B',
+            (Color::White, Knight) => 'N',
+            (Color::White, Pawn) => 'P',
+            (Color::Black, King) => 'k',
+            (Color::Black, Queen) => 'q',
+            (Color::Black, Rook) => 'r',
+            (Color::Black, Bishop) => 'b',
+            (Color::Black, Knight) => 'n',
+            (Color::Black, Pawn) => 'p',
         }
     }
 }

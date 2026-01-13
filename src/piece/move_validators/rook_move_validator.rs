@@ -31,7 +31,5 @@ pub fn is_valid_rook_move(board: &mut Board, from: (usize, usize), to: (usize, u
         return false;
     }
 
-    //println!("valid rook move: {}", as_square_str(from, to));
-
     true
 }

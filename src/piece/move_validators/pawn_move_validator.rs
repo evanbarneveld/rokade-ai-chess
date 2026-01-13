@@ -58,7 +58,6 @@ pub fn is_valid_pawn_move(board: &mut Board, from: (usize, usize), to: (usize, u
     if do_pin_check && is_king_in_check_after_move(board, (from.0, from.1), (to.0, to.1), en_passant_target) {
         return false;
     }
-
-    //println!("pawn move: {:?} is valid", as_square_str(from, to));
+    
     true
 }

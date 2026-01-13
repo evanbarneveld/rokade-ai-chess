@@ -13,10 +13,6 @@ pub fn is_valid_knight_move(board: &mut Board, from: (usize, usize), to: (usize,
     if ok && do_pin_check && is_king_in_check_after_move(board, from, to, None) {
         return false;
     }
-
-    if ok {
-        //println!("valid knight move: {}", as_square_str(from, to));
-    }
-
+    
     ok
 }
