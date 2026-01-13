@@ -106,7 +106,7 @@ fn test_bad_knight_check_move() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 1000, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Ne6+"); //bad move
 }
@@ -158,7 +158,7 @@ fn test_bad_rook_move3() {
     set_deterministic(true);
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 1000, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Rxb3+"); //bad move
 }
