@@ -86,7 +86,7 @@ pub enum OutcomeType {
                             let is_capture = target.is_some() && target.unwrap().get_color() != color ||
                                 (p.get_type() == PieceType::Pawn && game_state.en_passant_target().is_some() && game_state.en_passant_target().unwrap() == to);
 
-                            if !game_state.board().move_from_and_to_validation_check(from, to, color, is_capture, p.get_type() == PieceType::Pawn, game_state.en_passant_target()) {
+                            if !game_state.move_from_and_to_validation_check(from, to, is_capture, p.get_type() == PieceType::Pawn) {
                                 continue;
                             }
 

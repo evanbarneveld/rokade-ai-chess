@@ -186,19 +186,49 @@ impl GameState {
         self.outcome = Some(recompute_outcome(self, history));
     }
 
-    #[deprecated(note = "Use game_state.mutable_board() with manual promotion handling instead")]
-    pub fn move_pawn(&mut self, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {
-        let mut piece = self.board.get(from.0, from.1);
-        if piece.is_none() {
-            return false;
-        }
 
-        if promotion_piece.is_some() {
-            piece = promotion_piece;
-        }
+    /// Basic check to see if a move is invalid, regardless of the type of the piece.
+    /// A move is invalid when:
+    ///
+    /// - the source and target squares are the same
+    /// - the coordinates are out of range
+    /// - the source square is empty, there is nothing to move
+    /// - the source square is occupied by a piece of the other player
+    /// - the target square is occupied by a piece of the other player, but the move is not a capture move
+    /// - the target square is occupied by a piece of the current player
+    /// - the target square is occupied but the move is not a capture
+    /// - the target square is empty (use the en-passant target if needed)
+    pub fn move_from_and_to_validation_check(&self, from: (usize, usize), to: (usize, usize), is_capture: bool, is_pawn_move: bool) -> bool {
+        if from == to { return false; }
 
-        self.board.set(to.0, to.1, piece);
-        self.board.set(from.0, from.1, None);
+        if from.0 > 7 || from.1 > 7 || to.0 > 7 || to.1 > 7 { return false; }
+
+        // is there a piece on the 'from' square that has the same color as the active player?
+        let source_piece = self.board.get(from.0, from.1);
+        if source_piece.is_none() { return false; }
+        if source_piece.unwrap().get_color() != self.active_color { return false; }
+
+        let target_piece = self.board.get(to.0, to.1);
+
+        if target_piece.is_some() {
+            // there is a piece on the 'to' square
+            // if the move is a capture move, then the target square must be empty
+            if !is_capture { return false; }
+
+            // the target square must be occupied by a piece of the other player if it is a capture move
+            if is_capture && target_piece.unwrap().get_color() == self.active_color { return false; }
+        } else {
+            // no piece on 'to' square
+            if is_capture {
+                // if the move is an en-passant capture, then check the en-passant target square
+                if is_pawn_move && self.en_passant_target.is_some() {
+                    // is the to square the en-passant target square? that square must be empty for a valid en-passant capture
+                    let ep_target = self.en_passant_target.unwrap();
+                    if to == ep_target { return true; }
+                }
+                return false;
+            }
+        }
         true
     }
 }

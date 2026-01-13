@@ -1,3 +1,4 @@
+use crate::board::Board;
 use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
 
@@ -17,12 +18,30 @@ pub fn move_pawn(game_state: &mut GameState, piece: Piece, from: (usize, usize),
     if promotion_piece.is_none() {
         if game_state.active_color() == Color::White && to.0 == 7 ||
             game_state.active_color() == Color::Black && to.0 == 0 {
+            // provide a default promotion piece is none provided
             promotion_piece_to_use = Some(Piece::new(PieceType::Queen, game_state.active_color()));
         }
+    } else {
+        // there is a promotion piece provided, this must be a promotion move or a false move
+        if game_state.active_color() == Color::White && to.0 != 7 ||
+            game_state.active_color() == Color::Black && to.0 != 0 {
+            return false;
+        }
     }
-    let move_ok = game_state.move_pawn(from, to, promotion_piece_to_use);
 
-    if !move_ok { return false; }
+    let mutable_board = game_state.mutable_board();
+    let mut piece = mutable_board.get(from.0, from.1);
+
+    if piece.is_none() {
+        return false;
+    }
+
+    if promotion_piece_to_use.is_some() {
+        piece = promotion_piece_to_use;
+    }
+
+    mutable_board.set(to.0, to.1, piece);
+    mutable_board.set(from.0, from.1, None);
 
     if from.0 == 1 && to.0 == 3 && from.1 == to.1 {
         game_state.set_en_passant_target(Option::from((2, from.1)));
@@ -36,3 +55,19 @@ pub fn move_pawn(game_state: &mut GameState, piece: Piece, from: (usize, usize),
 
     return true
 }
+
+pub fn move_pawn_promotion2(board : &mut Board, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {
+    let mut piece = board.get(from.0, from.1);
+    if piece.is_none() {
+        return false;
+    }
+
+    if promotion_piece.is_some() {
+        piece = promotion_piece;
+    }
+
+    board.set(to.0, to.1, piece);
+    board.set(from.0, from.1, None);
+    true
+}
+

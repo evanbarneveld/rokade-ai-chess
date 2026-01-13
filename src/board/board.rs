@@ -413,12 +413,4 @@ impl Board {
         false
     }
 
-    /// Legacy validation method with confusing parameter list.
-    /// Consider moving this logic to GameState where it has access to game rules.
-    #[allow(deprecated)]
-    pub fn move_from_and_to_validation_check(&self, from: (usize, usize), to: (usize, usize), active_color: Color, is_capture: bool, is_pawn_move: bool, en_passant_target: Option<(usize, usize)>) -> bool {
-        use crate::board::checks::move_squares_validity::move_from_and_to_validation_check;
-        move_from_and_to_validation_check(self, from, to, active_color, is_capture, is_pawn_move, en_passant_target)
-    }
-
 }
