@@ -6,10 +6,10 @@ Expect rough edges, active iteration, and frequent improvements.
 Disclaimer: the code in this project does not reflect what I (evanbarneveld) consider clean code.
 A lot of refactoring (by AI) is required to clean up the code and make it more readable/maintainable.
 
-<img src="https://github.com/evanbarneveld/rokade-ai-chess/blob/main/rokade-ai-chess.png?raw=true" alt="Rusty Chess" style="width:30%; height:auto;">
+<img src="https://github.com/evanbarneveld/rokade-ai-chess/blob/main/rokade-ai-chess.png?raw=true" alt="Rokade-Ai Chess" style="width:30%; height:auto;">
 
 This engine is a single executable and has a command line interface. 
-Start the engine 'rusty-chess' and try the 'help' command for a list of commands.
+Start the engine 'rokade-ai-chess' and try the 'help' command for a list of commands.
 
 (When used as an UCI engine by a chess GUI, the GUI will send the 'uci' command to the engine)
 
@@ -41,15 +41,10 @@ Build
 cargo build
 ```
 
-Run (CLI)
 The default binary runs a simple CLI:
 ```
 cargo run --release
 ```
-This delegates to `cli::run_cli()` (see `src/main.rs`).
-
-UCI
-There is a `src/uci` module in the project. UCI support is a work in progress; once wired into a binary, you’ll be able to connect the engine to UCI GUIs. For now, the main entry point is the CLI described above.
 
 Tests
 - Run the full test suite:
@@ -77,7 +72,7 @@ Roadmap
 - Make the engine play a decent endgame.
 
 Contributing
-This is primarily a learning project, but suggestions, bug reports, and small PRs are welcome. Please keep the learning spirit and AI-assisted approach in mind when proposing changes.
+This is primarily a learning project, but suggestions, bug reports, and PRs are welcome. Please keep the learning spirit and AI-assisted approach in mind when proposing changes.
 
 License
 This project is licensed under the MIT License. You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software under the terms of the MIT license. See the LICENSE file for the full text.
