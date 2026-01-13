@@ -6,15 +6,15 @@
 use crate::board::Board;
 use crate::history::history::History;
 use crate::piece::pieces::{capture_value_cp, opposite_color, Color, PieceType};
-use crate::search::alphabeta::alphabeta;
+use crate::search::core::alphabeta::alphabeta;
 use crate::search::advanced_search::find_all_valid_moves;
-use crate::search::see::apply_destination_see_penalties;
-use crate::search::tt::{decode_move, TranspositionTable};
-use crate::search::zobrist::compute_zobrist;
+use crate::search::management::see::apply_destination_see_penalties;
+use crate::search::state::tt::{decode_move, TranspositionTable};
+use crate::search::state::zobrist::compute_zobrist;
 use crate::state::game_state::GameState;
 
 // Import heuristics from sub-modules
-use crate::search::root_heuristics::{
+use crate::search::evaluation::root_heuristics::{
     simulate_move,
     knight_evacuations_priority,
     threat_resolution_and_evacuation,
@@ -23,7 +23,7 @@ use crate::search::root_heuristics::{
     self_hang_or_check_mobility,
     queen_kingside_pressure_bonus,
 };
-use crate::search::root_heuristics::utils::ROOT_CAPTURE_BONUS_DIV;
+use crate::search::evaluation::root_heuristics::utils::ROOT_CAPTURE_BONUS_DIV;
 
 // ============================================================
 // PUBLIC API: ROOT MOVE BONUSES & SCORING
@@ -228,7 +228,7 @@ pub fn evaluate_after_root_move(
 
     let score_raw = if depth_now <= 1 {
         // Shallow depth: use qsearch to avoid horizon blunders
-        crate::search::qsearch::qsearch(
+        crate::search::core::qsearch::qsearch(
             game_state,
             crate::search::advanced_search::MIN_EVAL_VALUE + 1,
             crate::search::advanced_search::MAX_EVAL_VALUE - 1,

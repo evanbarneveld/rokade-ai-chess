@@ -1,11 +1,11 @@
 use serial_test::serial;
 use chess::Chess;
-use chess::search::advanced_search::{find_all_valid_moves, _dump_all_valid_moves};
+use chess::search::core::advanced_search::{find_all_valid_moves, _dump_all_valid_moves};
 use chess::board::san_move::convert_move_to_san;
 use chess::search::set_deterministic;
 use chess::piece::pieces::Color;
 use chess::piece::move_validators::knight_move_validator::is_valid_knight_move;
-use chess::search::advanced_search::debug_rank_root_moves;
+use chess::search::core::advanced_search::debug_rank_root_moves;
 
 // Diagnostic test to enumerate legal moves for the mate-in-2 FEN and assert Nf6+ is present (official SAN)
 #[test]

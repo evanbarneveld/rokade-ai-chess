@@ -1,10 +1,10 @@
 use crate::history::history::History;
 use crate::piece::pieces::Color;
-use crate::search::root_evaluator::evaluate_root_for_bounds;
-use crate::search::tt::TranspositionTable;
+use crate::search::evaluation::root_evaluator::evaluate_root_for_bounds;
+use crate::search::state::tt::TranspositionTable;
 use crate::state::game_state::GameState;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
-use crate::search::advanced_search::SEARCH_ABORTED;
+use crate::search::core::advanced_search::SEARCH_ABORTED;
 
 // Iterative deepening aspiration window (in centipawns)
 // With a stronger, more stable evaluator we can start tighter and cap lower.

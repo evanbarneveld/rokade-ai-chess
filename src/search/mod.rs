@@ -1,60 +1,17 @@
-pub mod advanced_search;
-pub mod move_generator;
-pub(crate) mod aspiration;
-pub(crate) mod root_evaluator;
-pub(crate) mod repetition;
-pub(crate) mod tt;
-pub(crate) mod zobrist;
-pub(crate) mod heuristics;
-pub mod playing_strength;
-pub mod time_control;
-pub mod uci_feedback;
-pub(crate) mod threading;
-pub(crate) mod telemetry;
-pub(crate) mod locking;
-pub(crate) mod prune_null_moves;
-pub(crate) mod qsearch;
-pub(crate) mod see;
-pub(crate) mod root_heuristics;
-mod alphabeta;
-mod root_moves;
-mod simple_search;
+pub mod core;
+mod management;
+mod evaluation;
+pub(crate) mod state;
+pub mod integration;
 
-// Determinism toggle for search/engine behavior
+use core::simple_search;
 use std::sync::atomic::{AtomicBool, Ordering};
+use crate::search::core::advanced_search;
 
 static DETERMINISTIC: AtomicBool = AtomicBool::new(false);
 static PARALLEL_SEARCH: AtomicBool = AtomicBool::new(true);
 
-/// Enable or disable deterministic behavior across the engine.
-/// When enabled, all random choices and evaluation noise are suppressed,
-/// and components should pick the most stable/best option instead of sampling.
-pub fn set_deterministic(on: bool) {
-    DETERMINISTIC.store(on, Ordering::Relaxed);
-}
 
-/// Returns true when deterministic behavior is enabled.
-#[inline]
-pub fn is_deterministic() -> bool {
-    DETERMINISTIC.load(Ordering::Relaxed)
-}
-
-pub fn get_deterministic() -> bool {
-    is_deterministic()
-}
-
-pub fn set_parallel_search(on: bool) {
-    PARALLEL_SEARCH.store(on, Ordering::Relaxed);
-}
-
-#[inline]
-pub fn is_parallel_search() -> bool {
-    PARALLEL_SEARCH.load(Ordering::Relaxed)
-}
-
-// Trait interface for Search implementations
-// Note: The method is an associated function (no &self) to match the existing API.
-// Implementors can forward to their internal logic.
 pub trait Search {
     fn find_best_move(
         game_state: &crate::state::game_state::GameState,
@@ -98,3 +55,33 @@ pub fn find_best_move_with_mode(
         ),
     }
 }
+
+/// Enable or disable deterministic behavior across the engine.
+/// When enabled, all random choices and evaluation noise are suppressed,
+/// and components should pick the most stable/best option instead of sampling.
+#[inline]
+pub fn set_deterministic(on: bool) {
+    DETERMINISTIC.store(on, Ordering::Relaxed);
+}
+
+/// Returns true when deterministic behavior is enabled.
+#[inline]
+pub fn is_deterministic() -> bool {
+    DETERMINISTIC.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn get_deterministic() -> bool {
+    is_deterministic()
+}
+
+#[inline]
+pub fn set_parallel_search(on: bool) {
+    PARALLEL_SEARCH.store(on, Ordering::Relaxed);
+}
+
+#[inline]
+pub fn is_parallel_search() -> bool {
+    PARALLEL_SEARCH.load(Ordering::Relaxed)
+}
+

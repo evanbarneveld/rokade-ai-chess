@@ -1,14 +1,14 @@
 use std::sync::{Mutex, OnceLock};
 use crate::piece::pieces::{Color, PieceType};
-use crate::search::heuristics::SearchHeuristics;
-use crate::search::prune_null_moves::prune_null_moves;
-use crate::search::qsearch::qsearch;
-use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, SEARCH_ABORTED};
+use crate::search::evaluation::heuristics::SearchHeuristics;
+use crate::search::management::prune_null_moves::prune_null_moves;
+use crate::search::core::qsearch::qsearch;
+use crate::search::core::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, SEARCH_ABORTED};
 use crate::state::game_state::GameState;
-use crate::search::telemetry::bump_node;
-use crate::search::time_control::time_is_up;
-use crate::search::tt::{decode_move, encode_move, from_tt_score, to_tt_score, Bound, TranspositionTable, MATE_VALUE};
-use crate::search::zobrist::compute_zobrist_full;
+use crate::search::integration::telemetry::bump_node;
+use crate::search::integration::time_control::time_is_up;
+use crate::search::state::tt::{decode_move, encode_move, from_tt_score, to_tt_score, Bound, TranspositionTable, MATE_VALUE};
+use crate::search::state::zobrist::compute_zobrist_full;
 
 const HUNDRED_HALF_MOVES: u32 = 100;
 
@@ -37,7 +37,7 @@ pub fn alphabeta(
     }
 
     // Zobrist key for repetition detection and TT
-    let key = if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
+    let key = if crate::search::core::advanced_search::ZOBRIST_HASHING_ENABLED {
         compute_zobrist_full(
             game_state.board(),
             to_move,
@@ -50,7 +50,7 @@ pub fn alphabeta(
 
     // Repetition detection
     let mut pushed_rep = false;
-    if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
+    if crate::search::core::advanced_search::ZOBRIST_HASHING_ENABLED {
         if rep_stack.contains(&key) {
             return 0; // Draw by repetition
         }
@@ -402,7 +402,7 @@ fn order_moves(
                 (
                     b.get(from.0, from.1).map(|p| p.get_type()),
                     b.get(to.0, to.1).is_some(),
-                    if crate::search::advanced_search::MVV_LVA_ENABLED {
+                    if crate::search::core::advanced_search::MVV_LVA_ENABLED {
                         b.move_score_mvv_lva(from, to)
                     } else {
                         0
@@ -452,7 +452,7 @@ fn calculate_lmr_reduction(
     board: &crate::board::Board,
     phase: i32,
 ) -> usize {
-    if !crate::search::advanced_search::LMR_ENABLED {
+    if !crate::search::core::advanced_search::LMR_ENABLED {
         return 0;
     }
 

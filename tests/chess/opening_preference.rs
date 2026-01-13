@@ -3,7 +3,7 @@ use chess::generator::move_generator::generate_move_as_san;
 use chess::search::{set_deterministic, SearchMode};
 use chess::state::fen::reader::reset_from_fen;
 use chess::history::history::History;
-use chess::search::playing_strength::PLAYING_STRENGTH_MAX;
+use chess::search::integration::playing_strength::PLAYING_STRENGTH_MAX;
 
 // Guard: from the initial position at shallow depth, the engine should not choose a quiet queen move
 // This is a regression test against early queen wandering.

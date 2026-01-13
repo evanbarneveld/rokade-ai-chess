@@ -1,5 +1,5 @@
 use chess::Chess;
-use chess::search::advanced_search::{debug_rank_root_moves};
+use chess::search::core::advanced_search::{debug_rank_root_moves};
 use chess::search::set_deterministic;
 use serial_test::serial;
 

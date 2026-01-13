@@ -5,7 +5,7 @@ use crate::Chess;
 use crate::generator::move_generator::generate_move_as_san;
 use crate::search::SearchMode;
 use crate::pgn_player::pgn_player::PgnPlayer;
-use crate::search::advanced_search::DEFAULT_SEARCH_DEPTH;
+use crate::search::core::advanced_search::DEFAULT_SEARCH_DEPTH;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 

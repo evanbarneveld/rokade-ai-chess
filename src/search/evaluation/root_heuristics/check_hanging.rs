@@ -3,8 +3,8 @@
 use crate::board::Board;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::piece::pieces::{Color, PieceType};
-use crate::search::advanced_search::find_all_valid_moves;
-use crate::search::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
+use crate::search::core::advanced_search::find_all_valid_moves;
+use crate::search::management::see::{see_dest_estimate, SEE_PENALTY_MAX_CP, SEE_PENALTY_MIN_CP};
 use crate::state::game_state::GameState;
 
 use super::utils::{

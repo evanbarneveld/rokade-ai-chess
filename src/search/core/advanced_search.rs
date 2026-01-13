@@ -1,18 +1,18 @@
 use crate::history::history::History;
 use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
-use crate::search::aspiration::{probe_with_aspiration, ASP_WINDOW_INIT_CP};
-use crate::search::locking::get_tt_mutex;
-use crate::search::playing_strength::select_move_based_using_strength_promo;
+use crate::search::management::aspiration::{probe_with_aspiration, ASP_WINDOW_INIT_CP};
+use crate::search::state::locking::get_tt_mutex;
+use crate::search::integration::playing_strength::select_move_based_using_strength_promo;
 
 // Re-export find_all_valid_moves for backward compatibility
-pub use crate::search::move_generator::find_all_valid_moves;
-use crate::search::repetition::apply_repetition_avoidance_bias;
-use crate::search::root_evaluator::evaluate_root_for_bounds;
-use crate::search::root_moves::{
+pub use crate::search::management::move_generator::find_all_valid_moves;
+use crate::search::evaluation::repetition::apply_repetition_avoidance_bias;
+use crate::search::evaluation::root_evaluator::evaluate_root_for_bounds;
+use crate::search::management::root_moves::{
     adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves,
 };
-use crate::search::threading::init_rayon_pool_if_needed;
-use crate::search::uci_feedback::emit_info;
+use crate::search::integration::threading::init_rayon_pool_if_needed;
+use crate::search::integration::uci_feedback::emit_info;
 use crate::state::game_state::GameState;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 
@@ -45,7 +45,7 @@ pub const MAX_PLAYING_STRENGTH: usize = 1000;
 pub const DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY: usize = 3000usize;
 
 // Re-export move generator types for backward compatibility
-pub use crate::search::move_generator::{find_all_valid_moves_into_perft, PerftMove, _dump_all_valid_moves};
+pub use crate::search::management::move_generator::{find_all_valid_moves_into_perft, PerftMove, _dump_all_valid_moves};
 
 // Provide a simple implementor of the `Search` trait that forwards to this module's function.
 // This keeps existing callers of the free function intact while enabling trait-based use.

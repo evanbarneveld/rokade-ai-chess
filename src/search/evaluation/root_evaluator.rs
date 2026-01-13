@@ -1,15 +1,15 @@
 use crate::board::Board;
 use crate::history::history::History;
 use crate::piece::pieces::{Color, PieceType};
-use crate::search::repetition::apply_repetition_avoidance_bias;
-use crate::search::root_moves::{adjusted_root_eval_for_move, evaluate_after_root_move};
-use crate::search::tt::{decode_move, TranspositionTable};
-use crate::search::zobrist::compute_zobrist;
+use crate::search::evaluation::repetition::apply_repetition_avoidance_bias;
+use crate::search::management::root_moves::{adjusted_root_eval_for_move, evaluate_after_root_move};
+use crate::search::state::tt::{decode_move, TranspositionTable};
+use crate::search::state::zobrist::compute_zobrist;
 use crate::search::{is_parallel_search};
 use crate::state::game_state::GameState;
 use rayon::prelude::*;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
-use crate::search::advanced_search::SEARCH_ABORTED;
+use crate::search::core::advanced_search::SEARCH_ABORTED;
 
 // Root parallelization settings
 const ROOT_PARALLEL_MIN_DEPTH: usize = 6;
@@ -289,7 +289,7 @@ pub(crate) fn evaluate_root_for_bounds(
 
 // Tiny heuristic score for root ordering; positive favors earlier search
 #[inline]
-pub(crate) fn root_move_order_bias(board: &Board, side: Color, from: (usize,usize), to: (usize,usize), phase: i32) -> i32 {
+pub(crate) fn root_move_order_bias(board: &Board, side: Color, from: (usize, usize), to: (usize, usize), phase: i32) -> i32 {
     // scale 0..24 -> 0..24
     let scale = phase.clamp(0,24);
     let mut bias: i32 = 0;

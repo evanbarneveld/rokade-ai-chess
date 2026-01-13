@@ -1,5 +1,5 @@
 use std::sync::{Mutex, OnceLock};
-use crate::search::tt::TranspositionTable;
+use crate::search::state::tt::TranspositionTable;
 
 pub static TT_CELL: OnceLock<Mutex<TranspositionTable>> = OnceLock::new();
 

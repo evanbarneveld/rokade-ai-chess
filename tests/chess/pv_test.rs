@@ -2,7 +2,7 @@ use std::sync::Arc;
 use serial_test::serial;
 use chess::generator::move_generator::generate_move_as_san;
 use chess::search::{set_deterministic, SearchMode};
-use chess::search::uci_feedback::set_info_callback;
+use chess::search::integration::uci_feedback::set_info_callback;
 
 #[test]
 #[serial]

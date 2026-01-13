@@ -8,7 +8,7 @@ use crate::piece::as_square_str;
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::search::SearchMode;
-use crate::search::zobrist::compute_zobrist;
+use crate::search::state::zobrist::compute_zobrist;
 
 #[derive(Debug)]
 pub struct Chess<> {

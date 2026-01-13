@@ -1,7 +1,7 @@
 use chess::Chess;
 use chess::generator::move_generator::generate_move_as_san;
 use serial_test::serial;
-use chess::search::advanced_search::{debug_rank_root_moves, DEFAULT_SEARCH_DEPTH};
+use chess::search::core::advanced_search::{debug_rank_root_moves, DEFAULT_SEARCH_DEPTH};
 use chess::search::set_deterministic;
 
 const TEST_MOVE_TIME: usize = 500;

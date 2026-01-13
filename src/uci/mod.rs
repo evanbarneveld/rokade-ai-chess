@@ -10,15 +10,15 @@ use crate::book::book::set_order_book_enabled;
 use crate::Chess;
 use crate::cli::{BUILD_NUMBER, VERSION};
 use crate::piece::as_move_str;
-use crate::search::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
+use crate::search::core::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
 use crate::search::{
     find_best_move_with_mode, get_deterministic, is_parallel_search, set_deterministic,
     set_parallel_search, SearchMode,
 };
-use crate::search::advanced_search::get_order_book_enabled;
-use crate::search::telemetry::{get_nodes, reset_search_telemetry};
-use crate::search::time_control::{clear_time_budget, set_time_budget_ms};
-use crate::search::uci_feedback::set_info_callback;
+use crate::search::core::advanced_search::get_order_book_enabled;
+use crate::search::integration::telemetry::{get_nodes, reset_search_telemetry};
+use crate::search::integration::time_control::{clear_time_budget, set_time_budget_ms};
+use crate::search::integration::uci_feedback::set_info_callback;
 
 // Minimal UCI interface implementation.
 // Supported commands:

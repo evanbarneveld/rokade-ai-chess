@@ -4,7 +4,7 @@ use chess::search::SearchMode;
 use chess::search::set_deterministic;
 use chess::state::fen::reader::reset_from_fen;
 use chess::history::history::History;
-use chess::search::playing_strength::PLAYING_STRENGTH_MAX;
+use chess::search::integration::playing_strength::PLAYING_STRENGTH_MAX;
 use chess::piece::piece_mover::PieceMover;
 use chess::board::san_move::convert_move_to_san;
 use chess::state::game_state::GameState;

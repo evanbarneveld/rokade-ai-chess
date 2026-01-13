@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::piece::pieces::{PieceType};
 use crate::state::game_state::GameState;
-use crate::search::advanced_search::find_all_valid_moves;
+use crate::search::core::advanced_search::find_all_valid_moves;
 use rand::{rng, Rng};
 
 static ORDER_BOOK_ENABLED: AtomicBool = AtomicBool::new(true);

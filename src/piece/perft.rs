@@ -1,5 +1,5 @@
-use crate::search::advanced_search::{find_all_valid_moves, find_all_valid_moves_into_perft, PerftMove};
-use crate::search::zobrist::compute_zobrist;
+use crate::search::core::advanced_search::{find_all_valid_moves, find_all_valid_moves_into_perft, PerftMove};
+use crate::search::state::zobrist::compute_zobrist;
 use crate::state::game_state::GameState;
 use std::cell::RefCell;
 use std::collections::HashMap;

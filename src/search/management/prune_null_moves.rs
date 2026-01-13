@@ -1,7 +1,7 @@
 use crate::piece::pieces::{Color, PieceType};
-use crate::search::alphabeta::alphabeta;
-use crate::search::tt::TranspositionTable;
-use crate::search::advanced_search::NULL_MOVE_PRUNING_ENABLED;
+use crate::search::core::alphabeta::alphabeta;
+use crate::search::state::tt::TranspositionTable;
+use crate::search::core::advanced_search::NULL_MOVE_PRUNING_ENABLED;
 use crate::state::game_state::GameState;
 
 const NULL_MOVE_PRUNING_START_DEPTH: usize = 4;

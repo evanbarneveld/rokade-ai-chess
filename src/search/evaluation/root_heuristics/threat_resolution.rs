@@ -3,7 +3,7 @@
 use crate::board::Board;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::piece::pieces::{opposite_color, Color, PieceType};
-use crate::search::see::{attacked_by_pawn, see_dest_estimate};
+use crate::search::management::see::{attacked_by_pawn, see_dest_estimate};
 
 use super::utils::{
     apply_for_side, center_score,

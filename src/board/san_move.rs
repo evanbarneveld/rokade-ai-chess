@@ -1,7 +1,7 @@
 use crate::board::Board;
 use crate::piece::as_square_str;
 use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
-use crate::search::advanced_search::find_all_valid_moves;
+use crate::search::core::advanced_search::find_all_valid_moves;
 use crate::state::game_state::GameState;
 
 pub fn convert_move_to_san(

@@ -1,10 +1,10 @@
 use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{piece_value_cp, Color, PieceType};
-use crate::search::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED, SEARCH_ABORTED};
+use crate::search::core::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED, SEARCH_ABORTED};
 use crate::state::game_state::GameState;
-use crate::search::see::see_dest_estimate;
-use crate::search::time_control::time_is_up;
-use crate::search::zobrist::compute_zobrist;
+use crate::search::management::see::see_dest_estimate;
+use crate::search::integration::time_control::time_is_up;
+use crate::search::state::zobrist::compute_zobrist;
 
 // Tighter margins with a stronger static evaluator
 const FUT_MARGIN: i32 = 40;
@@ -28,7 +28,7 @@ pub fn qsearch(
         return SEARCH_ABORTED;
     }
     // Draw checks in quiescence as well (only if Zobrist hashing is enabled)
-    if crate::search::advanced_search::ZOBRIST_HASHING_ENABLED {
+    if crate::search::core::advanced_search::ZOBRIST_HASHING_ENABLED {
         let key_here = compute_zobrist(game_state.board(), to_move);
         if rep_stack.contains(&key_here) {
             return 0;
