@@ -33,7 +33,7 @@ pub fn is_knight_outpost(board: &Board, row: usize, col: usize, color: Color) ->
     if let Some(br) = br_opt {
         for dc in [-1, 1] {
             let nc = col as i32 + dc;
-            if nc >= 0 && nc <= 7 && is_piece(board, br, nc as usize, color, PieceType::Pawn) { protected = true; break; }
+            if (0..=7).contains(&nc) && is_piece(board, br, nc as usize, color, PieceType::Pawn) { protected = true; break; }
         }
     }
     if !protected { return false; }

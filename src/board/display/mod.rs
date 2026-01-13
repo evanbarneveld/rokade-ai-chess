@@ -19,11 +19,10 @@ impl Board {
 
         let mut last_move = None;
 
-        if history.is_some() {
-            let h = history.unwrap();
-            if h.len() > 0 {
-               last_move = h.get_move(h.len() - 1)
-            }
+        if let Some(h) = history
+            && h.len() > 0
+        {
+            last_move = h.get_move(h.len() - 1)
         }
 
         // File labels (top), spaced to match 3-character wide squares
@@ -43,15 +42,14 @@ impl Board {
 
                 let mut is_last_move = false;
 
-                if last_move.is_some() {
-                    let lmv = last_move.unwrap();
+                if let Some(lmv) = last_move {
                     if col == lmv.1.0.1 && row == lmv.1.0.0 {
                         is_last_move = true;
                     }
                     if col == lmv.1.1.1 && row == lmv.1.1.0 {
                         is_last_move = true;
                     }
-                };
+                }
 
                 let bg = if is_dark {
                     if is_last_move {
@@ -59,12 +57,10 @@ impl Board {
                     } else {
                         BG_DARK
                     }
+                } else if is_last_move {
+                    BG_LAST_LIGHT
                 } else {
-                    if is_last_move {
-                        BG_LAST_LIGHT
-                    } else {
-                        BG_LIGHT
-                    }
+                    BG_LIGHT
                 };
 
                 if let Some(piece) = self.squares()[row][col] {

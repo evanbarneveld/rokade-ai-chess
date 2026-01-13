@@ -49,7 +49,7 @@ fn add_knight_attacks(r: usize, c: usize, color: Color, w: &mut [[bool; 8]; 8], 
     for (dr, dc) in KNIGHT_MOVES {
         let nr = r as i32 + dr;
         let nc = c as i32 + dc;
-        if nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+        if (0..8).contains(&nr) && (0..8).contains(&nc) {
             match color {
                 Color::White => w[nr as usize][nc as usize] = true,
                 Color::Black => b[nr as usize][nc as usize] = true,
@@ -71,7 +71,7 @@ fn add_slider_attacks(
     for (dr, dc) in dirs.iter() {
         let mut nr = r as i32 + dr;
         let mut nc = c as i32 + dc;
-        while nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+        while (0..8).contains(&nr) && (0..8).contains(&nc) {
             match color {
                 Color::White => w[nr as usize][nc as usize] = true,
                 Color::Black => b[nr as usize][nc as usize] = true,
@@ -94,7 +94,7 @@ fn add_king_attacks(r: usize, c: usize, color: Color, w: &mut [[bool; 8]; 8], b:
             }
             let nr = r as i32 + dr;
             let nc = c as i32 + dc;
-            if nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+            if (0..8).contains(&nr) && (0..8).contains(&nc) {
                 match color {
                     Color::White => w[nr as usize][nc as usize] = true,
                     Color::Black => b[nr as usize][nc as usize] = true,

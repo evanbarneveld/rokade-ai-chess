@@ -28,6 +28,12 @@ pub struct GameState {
     outcome: Option<OutcomeType>
 }
 
+impl Default for GameState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GameState {
     // ============================================================
     // CONSTRUCTION
@@ -208,23 +214,22 @@ impl GameState {
         if source_piece.is_none() { return false; }
         if source_piece.unwrap().get_color() != self.active_color { return false; }
 
-        let target_piece = self.board.get(to.0, to.1);
-
-        if target_piece.is_some() {
+        if let Some(target) = self.board.get(to.0, to.1) {
             // there is a piece on the 'to' square
             // if the move is a capture move, then the target square must be empty
             if !is_capture { return false; }
 
             // the target square must be occupied by a piece of the other player if it is a capture move
-            if is_capture && target_piece.unwrap().get_color() == self.active_color { return false; }
+            if is_capture && target.get_color() == self.active_color { return false; }
         } else {
             // no piece on 'to' square
             if is_capture {
                 // if the move is an en-passant capture, then check the en-passant target square
-                if is_pawn_move && self.en_passant_target.is_some() {
-                    // is the to square the en-passant target square? that square must be empty for a valid en-passant capture
-                    let ep_target = self.en_passant_target.unwrap();
-                    if to == ep_target { return true; }
+                if is_pawn_move
+                    && let Some(ep_target) = self.en_passant_target
+                    && to == ep_target
+                {
+                    return true;
                 }
                 return false;
             }
@@ -265,16 +270,14 @@ impl GameState {
         let mut ep_captured_sq: Option<(usize, usize)> = None;
         let mut ep_captured_piece: Option<Piece> = None;
 
-        if let Some(p) = moving_piece {
-            if p.get_type() == PieceType::Pawn {
-                if let Some(ep) = self.en_passant_target {
-                    if ep == to && self.board.get(to.0, to.1).is_none() && from.1 != to.1 {
-                        let cap_row = if p.get_color() == Color::White { to.0 - 1 } else { to.0 + 1 };
-                        ep_captured_sq = Some((cap_row, to.1));
-                        ep_captured_piece = self.board.get(cap_row, to.1);
-                    }
-                }
-            }
+        if let Some(p) = moving_piece
+            && p.get_type() == PieceType::Pawn
+            && let Some(ep) = self.en_passant_target
+            && ep == to && self.board.get(to.0, to.1).is_none() && from.1 != to.1
+        {
+            let cap_row = if p.get_color() == Color::White { to.0 - 1 } else { to.0 + 1 };
+            ep_captured_sq = Some((cap_row, to.1));
+            ep_captured_piece = self.board.get(cap_row, to.1);
         }
 
         // Apply board move (handles castling and normal captures)
@@ -286,21 +289,21 @@ impl GameState {
         }
 
         // Handle promotion (make_move_simple already does this, but ensure correctness)
-        if let (Some(p), Some(pc)) = (moving_piece, promo) {
-            if p.get_type() == PieceType::Pawn {
-                let promote_to = match pc {
-                    'q' | 'Q' => PieceType::Queen,
-                    'r' | 'R' => PieceType::Rook,
-                    'b' | 'B' => PieceType::Bishop,
-                    'n' | 'N' => PieceType::Knight,
-                    _ => PieceType::Queen,
-                };
-                let promoted_piece = Piece::new(promote_to, p.get_color());
-                self.board.set(to.0, to.1, Some(promoted_piece));
+        if let (Some(p), Some(pc)) = (moving_piece, promo)
+            && p.get_type() == PieceType::Pawn
+        {
+            let promote_to = match pc {
+                'q' | 'Q' => PieceType::Queen,
+                'r' | 'R' => PieceType::Rook,
+                'b' | 'B' => PieceType::Bishop,
+                'n' | 'N' => PieceType::Knight,
+                _ => PieceType::Queen,
+            };
+            let promoted_piece = Piece::new(promote_to, p.get_color());
+            self.board.set(to.0, to.1, Some(promoted_piece));
 
-                if promoted_piece.get_type() == PieceType::King {
-                    self.board.set_king_location(promoted_piece.get_color(), to);
-                }
+            if promoted_piece.get_type() == PieceType::King {
+                self.board.set_king_location(promoted_piece.get_color(), to);
             }
         }
 

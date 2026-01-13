@@ -131,8 +131,11 @@ pub(crate) fn square_attacked_by_enemy_pawn(board: &Board, r: usize, c: usize, e
 pub(crate) fn find_king(board: &Board, color: Color) -> Option<(usize, usize)> {
     for r in 0..8 {
         for c in 0..8 {
-            if let Some(p) = board.get(r, c) {
-                if p.get_color() == color && p.get_type() == PieceType::King { return Some((r, c)); }
+            if let Some(p) = board.get(r, c)
+                && p.get_color() == color
+                && p.get_type() == PieceType::King
+            {
+                return Some((r, c));
             }
         }
     }
@@ -443,11 +446,11 @@ impl<'a> EvalContext<'a> {
                 score -= (CENTER_CTRL_CP * self.phase()) / 24;
             }
 
-            if let Some(p) = self.board.get(r, c) {
-                if matches!(p.get_type(), PieceType::Pawn | PieceType::Knight | PieceType::Bishop) {
-                    let bonus = (CENTER_OCC_EXTRA_CP * self.phase()) / 24;
-                    score += apply_color_score(bonus, p.get_color());
-                }
+            if let Some(p) = self.board.get(r, c)
+                && matches!(p.get_type(), PieceType::Pawn | PieceType::Knight | PieceType::Bishop)
+            {
+                let bonus = (CENTER_OCC_EXTRA_CP * self.phase()) / 24;
+                score += apply_color_score(bonus, p.get_color());
             }
         }
         score
@@ -563,7 +566,7 @@ fn mobility_activity(board: &Board) -> (i32, i32) {
                     PieceType::Knight => count_knight_targets(board, r, c, color) as i32 * 2,
                     PieceType::Bishop => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)]) as i32 * 3,
                     PieceType::Rook => count_slider_targets(board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 3,
-                    PieceType::Queen => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 1,
+                    PieceType::Queen => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)]) as i32,
                     _ => 0,
                 };
                 if matches!(color, Color::White) {
@@ -584,7 +587,7 @@ fn count_knight_targets(board: &Board, r: usize, c: usize, color: Color) -> usiz
     for (dr,dc) in K {
         let nr = r as i32 + dr;
         let nc = c as i32 + dc;
-        if nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+        if (0..8).contains(&nr) && (0..8).contains(&nc) {
             match board.get(nr as usize, nc as usize) {
                 None => n += 1,
                 Some(tp) if tp.get_color() != color => n += 1,
@@ -601,7 +604,7 @@ fn count_slider_targets(board: &Board, r: usize, c: usize, color: Color, dirs: &
     for (dr,dc) in dirs.iter() {
         let mut nr = r as i32 + dr;
         let mut nc = c as i32 + dc;
-        while nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+        while (0..8).contains(&nr) && (0..8).contains(&nc) {
             if let Some(tp) = board.get(nr as usize, nc as usize) {
                 if tp.get_color() != color {
                     n += 1;

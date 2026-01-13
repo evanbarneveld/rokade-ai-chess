@@ -32,11 +32,17 @@ pub fn evaluate_rook(
 
         // Cut-off king
         if let Some((ek_r, ek_c)) = find_king(board, opponent(color)) {
-            if col == ek_c && file_clear_between(board, row, ek_r, col) {
-                if (row as i32 - ek_r as i32).abs() >= 2 { val += (10 * eg) / 24; }
+            if col == ek_c
+                && file_clear_between(board, row, ek_r, col)
+                && (row as i32 - ek_r as i32).abs() >= 2
+            {
+                val += (10 * eg) / 24;
             }
-            if row == ek_r && rank_clear_between(board, col, ek_c, row) {
-                if (col as i32 - ek_c as i32).abs() >= 2 { val += (10 * eg) / 24; }
+            if row == ek_r
+                && rank_clear_between(board, col, ek_c, row)
+                && (col as i32 - ek_c as i32).abs() >= 2
+            {
+                val += (10 * eg) / 24;
             }
         }
     }

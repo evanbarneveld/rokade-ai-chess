@@ -53,8 +53,8 @@ pub fn is_square_attacked_by_opponent(board: &mut Board, square: (usize, usize),
                         }
                     }
                     PieceType::King => {
-                        let dr = if r > square.0 { r - square.0 } else { square.0 - r };
-                        let dc = if c > square.1 { c - square.1 } else { square.1 - c };
+                        let dr = r.abs_diff(square.0);
+                        let dc = c.abs_diff(square.1);
                         if dr <= 1 && dc <= 1 && !(dr == 0 && dc == 0) {
                             return true;
                         }

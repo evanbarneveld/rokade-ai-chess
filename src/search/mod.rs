@@ -72,7 +72,6 @@ pub enum SearchMode {
 }
 
 /// Returns some move if the best move was found or none if no move was available.
-
 /// Format of some move is
 ///  ((usize, usize), (usize, usize), i32, usize)
 ///

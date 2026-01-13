@@ -65,7 +65,7 @@ pub fn reset_from_fen(fen: &str) -> Result<GameState, String> {
         let row = (bytes[1] as char).to_digit(10);
 
         match (col, row) {
-            (Some(c), Some(r)) if c < 8 && r >= 1 && r <= 8 => Some((r as usize - 1, c as usize)),
+            (Some(c), Some(r)) if c < 8 && (1..=8).contains(&r) => Some((r as usize - 1, c as usize)),
             _ => return Err(format!("Invalid FEN: invalid en passant square '{}'", parts[3])),
         }
     };

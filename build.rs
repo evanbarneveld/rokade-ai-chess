@@ -16,12 +16,12 @@ fn main() {
 
     // Read current counter (if present)
     let mut current: u64 = 0;
-    if counter_path.exists() {
-        if let Ok(mut f) = OpenOptions::new().read(true).open(&counter_path) {
-            let mut s = String::new();
-            if f.read_to_string(&mut s).is_ok() {
-                current = s.trim().parse().unwrap_or(0);
-            }
+    if counter_path.exists()
+        && let Ok(mut f) = OpenOptions::new().read(true).open(&counter_path)
+    {
+        let mut s = String::new();
+        if f.read_to_string(&mut s).is_ok() {
+            current = s.trim().parse().unwrap_or(0);
         }
     }
 
@@ -34,7 +34,7 @@ fn main() {
     let mut tmp_path = counter_path.clone();
     tmp_path.set_extension("build_number.tmp");
     if let Ok(mut tmp) = OpenOptions::new().write(true).create(true).truncate(true).open(&tmp_path) {
-        let _ = write!(tmp, "{}\n", next);
+        let _ = writeln!(tmp, "{}", next);
         let _ = tmp.flush();
         // Best-effort replace (fallback to direct write if rename fails)
         if fs::rename(&tmp_path, &counter_path).is_err() {

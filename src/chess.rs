@@ -19,6 +19,12 @@ pub struct Chess<> {
     search_mode: SearchMode,
     playing_strength: usize,
 }
+impl Default for Chess {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Chess {
     pub const DEFAULT_CHESS_STARTING_FEN: &'static str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     pub fn new() -> Self {
@@ -63,13 +69,10 @@ impl Chess {
 
     pub fn reset(&mut self) -> Result<(), String> {
         self.history.reset();
-        match reset_from_fen(&self.starting_fen) {
-            Ok(mut state) => {
-                state.recompute_outcome(&self.history);
-                Ok(self.game_state = state)
-            },
-            Err(e) => Err(e)
-        }
+        let mut state = reset_from_fen(&self.starting_fen)?;
+        state.recompute_outcome(&self.history);
+        self.game_state = state;
+        Ok(())
     }
 
     pub fn set_starting_fen(&mut self, fen: &str) -> Result<(), String> {
@@ -84,25 +87,24 @@ impl Chess {
 
     pub fn reset_board_to_fen(&mut self, fen: &str) -> Result<(), String> {
         match reset_from_fen(fen) {
-            Ok(state) => Ok({
+            Ok(state) => {
                 self.game_state = state;
                 self.game_state.recompute_outcome(&self.history);
-            })
-            ,
-            Err(e) => Err(
-                {
-                  println!("{}", e); String::from("Error parsing FEN")
-                }
-            )
+                Ok(())
+            }
+            Err(e) => {
+                println!("{}", e);
+                Err(String::from("Error parsing FEN"))
+            }
         }
     }
 
     pub fn board(&mut self) -> &Board {
-        &self.game_state.board()
+        self.game_state.board()
     }
 
     pub fn to_fen(&self) -> String {
-        game_state_to_fen_string(self.game_state.clone())
+        game_state_to_fen_string(self.game_state)
     }
 
     pub fn active_color_is_white(&self) -> bool {
@@ -115,20 +117,13 @@ impl Chess {
 
     pub fn undo_move(&mut self) -> Option<String> {
         // Pop the last move from history
-        let undone = self.history.undo_move();
-        if undone.is_none() {
-            return None;
-        }
-
-        // Reset the game to the starting position
-        let removed_move = undone.unwrap();
+        let removed_move = self.history.undo_move()?;
 
         if self.history.len() > 0 {
             let last_index = self.history.len() - 1;
             let last_move = self.history.get_move(last_index);
-            let last_fen = last_move.map(|mv| mv.2.clone());
-            if last_fen.is_none() { return None; }
-            self.reset_board_to_fen(&last_fen.unwrap()).unwrap();
+            let last_fen = last_move.map(|mv| mv.2.clone())?;
+            self.reset_board_to_fen(&last_fen).unwrap();
         } else {
             self.reset().unwrap();
         }
@@ -166,7 +161,7 @@ impl Chess {
             }
 
             let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
-            self.history.add_move(mv.to_string(), (from, to), game_state_to_fen_string(self.game_state.clone()), zobrist);
+            self.history.add_move(mv.to_string(), (from, to), game_state_to_fen_string(self.game_state), zobrist);
             true
         } else {
             false
@@ -184,7 +179,7 @@ impl Chess {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
                     let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
-                    self.history.add_move(mv.to_string(), (v.from, v.to), game_state_to_fen_string(self.game_state.clone()), zobrist);
+                    self.history.add_move(mv.to_string(), (v.from, v.to), game_state_to_fen_string(self.game_state), zobrist);
                     true
                 } else {
                     false

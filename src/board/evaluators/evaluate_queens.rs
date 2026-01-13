@@ -47,10 +47,11 @@ pub fn early_queen_penalty(board: &Board, color: Color, counts: &PawnFileCounts)
             let mut minor_pieces_at_home = 0;
             let minors = match color { Color::White => [(0, 1), (0, 2), (0, 5), (0, 6)], Color::Black => [(7, 1), (7, 2), (7, 5), (7, 6)] };
             for &(mr, mc) in &minors {
-                if let Some(p) = board.get(mr, mc) {
-                    if p.get_color() == color && (p.get_type() == PieceType::Knight || p.get_type() == PieceType::Bishop) {
-                        minor_pieces_at_home += 1;
-                    }
+                if let Some(p) = board.get(mr, mc)
+                    && p.get_color() == color
+                    && (p.get_type() == PieceType::Knight || p.get_type() == PieceType::Bishop)
+                {
+                    minor_pieces_at_home += 1;
                 }
             }
             if minor_pieces_at_home >= 2 {
@@ -68,7 +69,7 @@ pub fn early_queen_penalty(board: &Board, color: Color, counts: &PawnFileCounts)
                     let mut exposed = false;
                     for dc in -1..=1 {
                         let nc = c as i32 + dc;
-                        if nc >= 0 && nc <= 7 {
+                        if (0..=7).contains(&nc) {
                             let nc = nc as usize;
                             if opp_pawns[nc] > 0 { exposed = true; break; }
                         }

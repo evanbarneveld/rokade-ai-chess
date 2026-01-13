@@ -19,7 +19,7 @@ pub fn king_safety(board: &Board, color: Color) -> i32 {
         let shield_row = match color { Color::White => 1, Color::Black => 6 };
         for dc in [-1, 0, 1] {
             let nc = c as i32 + dc;
-            if nc >= 0 && nc <= 7 && is_piece(board, shield_row, nc as usize, color, PieceType::Pawn) { shield += 1; }
+            if (0..=7).contains(&nc) && is_piece(board, shield_row, nc as usize, color, PieceType::Pawn) { shield += 1; }
         }
         let phase = game_phase(board);
         score += (shield * 12 * phase) / 24;
@@ -30,17 +30,17 @@ pub fn king_safety(board: &Board, color: Color) -> i32 {
             for dc in -2..=2 {
                 let nr = r as i32 + dr;
                 let nc = c as i32 + dc;
-                if nr >= 0 && nr <= 7 && nc >= 0 && nc <= 7 {
-                    if let Some(p) = board.get(nr as usize, nc as usize) {
-                        if p.get_color() == enemy {
-                            danger += match p.get_type() {
-                                PieceType::Queen => 15,
-                                PieceType::Rook => 10,
-                                PieceType::Knight | PieceType::Bishop => 6,
-                                _ => 0,
-                            };
-                        }
-                    }
+                if (0..=7).contains(&nr)
+                    && (0..=7).contains(&nc)
+                    && let Some(p) = board.get(nr as usize, nc as usize)
+                    && p.get_color() == enemy
+                {
+                    danger += match p.get_type() {
+                        PieceType::Queen => 15,
+                        PieceType::Rook => 10,
+                        PieceType::Knight | PieceType::Bishop => 6,
+                        _ => 0,
+                    };
                 }
             }
         }
@@ -52,8 +52,8 @@ pub fn king_safety(board: &Board, color: Color) -> i32 {
 pub fn king_activity_endgame(board: &Board, color: Color) -> i32 {
     let k_pos = find_king(board, color);
     if let Some((r, c)) = k_pos {
-        let centers = [(3,3),(3,4),(4,3),(4,4)];
-        let mut best = 99; for (cr,cc) in centers { let dr = (r as i32 - cr as i32).abs(); let dc = (c as i32 - cc as i32).abs(); let d = dr+dc; if d < best { best = d; } }
+        let centers: [(i32, i32); 4] = [(3,3),(3,4),(4,3),(4,4)];
+        let mut best = 99; for (cr,cc) in centers { let dr = (r as i32 - cr).abs(); let dc = (c as i32 - cc).abs(); let d = dr+dc; if d < best { best = d; } }
         return 12 - 3 * best;
     }
     0

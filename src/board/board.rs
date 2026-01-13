@@ -32,6 +32,12 @@ pub struct UndoMove {
     pub(crate) castle_rook_to: Option<(usize, usize)>,
 }
 
+impl Default for Board {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Board {
     // ============================================================
     // CONSTRUCTION
@@ -145,10 +151,11 @@ impl Board {
     pub fn find_king_location(&self, color: Color) -> Option<(usize, usize)> {
         for row in 0..8 {
             for col in 0..8 {
-                if let Some(piece) = self.get(row, col) {
-                    if piece.get_type() == PieceType::King && piece.get_color() == color {
-                        return Some((row, col));
-                    }
+                if let Some(piece) = self.get(row, col)
+                    && piece.get_type() == PieceType::King
+                    && piece.get_color() == color
+                {
+                    return Some((row, col));
                 }
             }
         }
@@ -218,37 +225,37 @@ impl Board {
         let mut castle_rook_to: Option<(usize, usize)> = None;
 
         // Handle castling
-        if let Some(p) = moved {
-            if p.get_type() == PieceType::King {
-                let dr = if from.0 > to.0 { from.0 - to.0 } else { to.0 - from.0 };
-                let dc = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
+        if let Some(p) = moved
+            && p.get_type() == PieceType::King
+        {
+            let dr = from.0.abs_diff(to.0);
+            let dc = from.1.abs_diff(to.1);
 
-                if dr == 0 && dc == 2 && from.1 == 4 {
-                    // Kingside castling
-                    if to.1 == 6 {
-                        let rf = (from.0, 7);
-                        let rt = (from.0, 5);
-                        if let Some(rook) = self.get(rf.0, rf.1) {
-                            if rook.get_type() == PieceType::Rook {
-                                self.set(rt.0, rt.1, Some(rook));
-                                self.set(rf.0, rf.1, None);
-                                castle_rook_from = Some(rf);
-                                castle_rook_to = Some(rt);
-                            }
-                        }
+            if dr == 0 && dc == 2 && from.1 == 4 {
+                // Kingside castling
+                if to.1 == 6 {
+                    let rf = (from.0, 7);
+                    let rt = (from.0, 5);
+                    if let Some(rook) = self.get(rf.0, rf.1)
+                        && rook.get_type() == PieceType::Rook
+                    {
+                        self.set(rt.0, rt.1, Some(rook));
+                        self.set(rf.0, rf.1, None);
+                        castle_rook_from = Some(rf);
+                        castle_rook_to = Some(rt);
                     }
-                    // Queenside castling
-                    else if to.1 == 2 {
-                        let rf = (from.0, 0);
-                        let rt = (from.0, 3);
-                        if let Some(rook) = self.get(rf.0, rf.1) {
-                            if rook.get_type() == PieceType::Rook {
-                                self.set(rt.0, rt.1, Some(rook));
-                                self.set(rf.0, rf.1, None);
-                                castle_rook_from = Some(rf);
-                                castle_rook_to = Some(rt);
-                            }
-                        }
+                }
+                // Queenside castling
+                else if to.1 == 2 {
+                    let rf = (from.0, 0);
+                    let rt = (from.0, 3);
+                    if let Some(rook) = self.get(rf.0, rf.1)
+                        && rook.get_type() == PieceType::Rook
+                    {
+                        self.set(rt.0, rt.1, Some(rook));
+                        self.set(rf.0, rf.1, None);
+                        castle_rook_from = Some(rf);
+                        castle_rook_to = Some(rt);
                     }
                 }
             }
@@ -299,13 +306,12 @@ impl Board {
         self.set(undo.to.0, undo.to.1, undo.captured);
 
         // Restore castling rook if needed
-        if let (Some(rf), Some(rt)) = (undo.castle_rook_from, undo.castle_rook_to) {
-            if let Some(rook) = self.get(rt.0, rt.1) {
-                if rook.get_type() == PieceType::Rook {
-                    self.set(rf.0, rf.1, Some(rook));
-                    self.set(rt.0, rt.1, None);
-                }
-            }
+        if let (Some(rf), Some(rt)) = (undo.castle_rook_from, undo.castle_rook_to)
+            && let Some(rook) = self.get(rt.0, rt.1)
+            && rook.get_type() == PieceType::Rook
+        {
+            self.set(rf.0, rf.1, Some(rook));
+            self.set(rt.0, rt.1, None);
         }
 
         // Restore king locations
@@ -341,15 +347,15 @@ impl Board {
         let dir: i32 = if color == Color::White { 1 } else { -1 };
         let mut r = row as i32 + dir;
 
-        while r >= 0 && r < 8 {
+        while (0..8).contains(&r) {
             for dc in [-1, 0, 1] {
                 let nc = col as i32 + dc;
-                if nc >= 0 && nc < 8 {
-                    if let Some(p) = self.get(r as usize, nc as usize) {
-                        if p.get_color() != color && p.get_type() == PieceType::Pawn {
-                            return false;
-                        }
-                    }
+                if (0..8).contains(&nc)
+                    && let Some(p) = self.get(r as usize, nc as usize)
+                    && p.get_color() != color
+                    && p.get_type() == PieceType::Pawn
+                {
+                    return false;
                 }
             }
             r += dir;
@@ -377,37 +383,35 @@ impl Board {
 
         if attacker == Color::White {
             if r >= 1 {
-                if c >= 1 {
-                    if let Some(p) = self.get(r - 1, c - 1) {
-                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                            return true;
-                        }
-                    }
+                if c >= 1
+                    && let Some(p) = self.get(r - 1, c - 1)
+                    && p.get_color() == attacker
+                    && p.get_type() == PieceType::Pawn
+                {
+                    return true;
                 }
-                if c + 1 < 8 {
-                    if let Some(p) = self.get(r - 1, c + 1) {
-                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                            return true;
-                        }
-                    }
+                if c + 1 < 8
+                    && let Some(p) = self.get(r - 1, c + 1)
+                    && p.get_color() == attacker
+                    && p.get_type() == PieceType::Pawn
+                {
+                    return true;
                 }
             }
-        } else {
-            if r + 1 < 8 {
-                if c >= 1 {
-                    if let Some(p) = self.get(r + 1, c - 1) {
-                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                            return true;
-                        }
-                    }
-                }
-                if c + 1 < 8 {
-                    if let Some(p) = self.get(r + 1, c + 1) {
-                        if p.get_color() == attacker && p.get_type() == PieceType::Pawn {
-                            return true;
-                        }
-                    }
-                }
+        } else if r + 1 < 8 {
+            if c >= 1
+                && let Some(p) = self.get(r + 1, c - 1)
+                && p.get_color() == attacker
+                && p.get_type() == PieceType::Pawn
+            {
+                return true;
+            }
+            if c + 1 < 8
+                && let Some(p) = self.get(r + 1, c + 1)
+                && p.get_color() == attacker
+                && p.get_type() == PieceType::Pawn
+            {
+                return true;
             }
         }
         false

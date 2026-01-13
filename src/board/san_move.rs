@@ -17,9 +17,8 @@ pub fn convert_move_to_san(
 
     // 1) Castling detection (O-O / O-O-O)
     if pt == PieceType::King && from.0 == to.0 {
-        let dr = 0usize;
-        let dc = if from.1 > to.1 { from.1 - to.1 } else { to.1 - from.1 };
-        if dr == 0 && dc == 2 {
+        let dc = from.1.abs_diff(to.1);
+        if dc == 2 {
             // King side vs queen side
             let san = if to.1 == from.1 + 2 { "O-O" } else { "O-O-O" };
             // Determine +/#
@@ -90,7 +89,7 @@ fn rank_char(row: usize) -> char {
 
 // Determine if the position after (from->to) is checked or mate, and return "", "+" or "#"
 fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize), promo: Option<char>, side: Color) -> String {
-    let mut tmp = board.clone();
+    let mut tmp = *board;
     let _u = tmp.make_move_simple(from, to, promo);
     let opp = opposite_color(side);
     let in_check = tmp.is_side_in_check(opp);
@@ -121,7 +120,7 @@ fn disambiguation_string(
             if (r, c) == from { continue; }
             if let Some(p) = board.get(r, c) {
                 if p.get_color() != side || p.get_type() != pt { continue; }
-                if can_piece_move_to(board.clone(), pt, (r, c), to) {
+                if can_piece_move_to(*board, pt, (r, c), to) {
                     any_conflict = true;
                     if c == from.1 { same_file_conflict = true; }
                     if r == from.0 { same_rank_conflict = true; }

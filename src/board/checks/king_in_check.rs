@@ -22,17 +22,19 @@ pub fn is_king_in_check_after_move(board: &mut Board, move_from:(usize, usize), 
 
     let mut is_en_passant_capture = false;
 
-    if from_piece.unwrap().get_type() == PieceType::Pawn && en_passant_target.is_some() {
+    if from_piece.unwrap().get_type() == PieceType::Pawn
+        && let Some(ep_target) = en_passant_target
+        && move_to.0 == ep_target.0
+        && move_to.1 == ep_target.1
+    {
         //is this an en-passant capture move?
-        if move_to.0 == en_passant_target.unwrap().0 && move_to.1 == en_passant_target.unwrap().1 {
-            is_en_passant_capture = true;
-            if from_piece.unwrap().get_color() == Color::White {
-                //adjust the board to simulate the en-passant capture
-                //board.set(move_to.0, move_to.1, None);
-                board.set(move_to.0 - 1, move_to.1, None); //remove the black pawn that was captured e.p.
-            } else {
-                board.set(move_to.0 + 1, move_to.1, None); //remove the white pawn that was captured e.p.
-            }
+        is_en_passant_capture = true;
+        if from_piece.unwrap().get_color() == Color::White {
+            //adjust the board to simulate the en-passant capture
+            //board.set(move_to.0, move_to.1, None);
+            board.set(move_to.0 - 1, move_to.1, None); //remove the black pawn that was captured e.p.
+        } else {
+            board.set(move_to.0 + 1, move_to.1, None); //remove the white pawn that was captured e.p.
         }
     }
     let king_in_check = is_square_attacked_by_opponent(board, board.get_king_location(piece_color), piece_color);
