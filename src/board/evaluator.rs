@@ -50,6 +50,10 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     score += ctx.evaluate_space();
     score += ctx.evaluate_global_features();
 
+    // Unstoppable passer detection (endgame only)
+    if ctx.eg > 12 {
+        score += ctx.evaluate_unstoppable_passers(side_to_move);
+    }
     apply_drawish_tweaks(&ctx.stats, score)
 }
 
@@ -177,6 +181,8 @@ struct BoardStats {
     black_bishops: i32,
     white_bishop_on_dark: bool,
     black_bishop_on_dark: bool,
+    white_material: i32,
+    black_material: i32,
     drawish_material: MaterialDrawishness,
 }
 
@@ -199,6 +205,8 @@ impl BoardStats {
         let mut black_bishops = 0;
         let mut white_bishop_on_dark = false;
         let mut black_bishop_on_dark = false;
+        let mut white_material = 0;
+        let mut black_material = 0;
         let mut drawish = MaterialDrawishness::default();
 
         const PHASE_KNIGHT: i32 = 1;
@@ -211,6 +219,14 @@ impl BoardStats {
                 if let Some(p) = board.get(r, c) {
                     let pt = p.get_type();
                     let color = p.get_color();
+
+                    // Track material
+                    let mat = material_value(pt);
+                    if color == Color::White {
+                        white_material += mat;
+                    } else {
+                        black_material += mat;
+                    }
 
                     // Phase
                     phase += match pt {
@@ -270,6 +286,8 @@ impl BoardStats {
             black_bishops,
             white_bishop_on_dark,
             black_bishop_on_dark,
+            white_material,
+            black_material,
             drawish_material: drawish,
         }
     }
@@ -384,12 +402,20 @@ impl<'a> EvalContext<'a> {
 
     fn evaluate_mobility(&self) -> i32 {
         let (mob_w, mob_b) = mobility_activity(self.board);
-        let mut score = (mob_w * self.phase()) / 24;
-        score -= (mob_b * self.phase()) / 24;
+        // Mobility is important in BOTH phases, but slightly more in endgame
+        // Use a base + endgame scaling: base 50% always, +50% scaled by endgame
+        let base_w = mob_w / 2;
+        let base_b = mob_b / 2;
+        let eg_bonus_w = (mob_w * self.eg) / 48;
+        let eg_bonus_b = (mob_b * self.eg) / 48;
 
-        if self.phase() > 12 {
-            let damp_w = (mob_w / 20) * (self.phase() - 12) / 12;
-            let damp_b = (mob_b / 20) * (self.phase() - 12) / 12;
+        let mut score = base_w + eg_bonus_w;
+        score -= base_b + eg_bonus_b;
+
+        // Dampen excessive mobility in early middlegame (piece swarming)
+        if self.phase() > 16 {
+            let damp_w = (mob_w / 25) * (self.phase() - 16) / 8;
+            let damp_b = (mob_b / 25) * (self.phase() - 16) / 8;
             score -= damp_w;
             score += damp_b;
         }
@@ -541,12 +567,67 @@ impl<'a> EvalContext<'a> {
             score += apply_color_score(-(pen * self.phase()) / 24, color);
         }
 
+        // Endgame: Enemy king cornering bonus when one side has significant material advantage
+        // This helps the engine push the enemy king to the edge/corner for mating
+        if self.eg > 8 {
+            let mat_diff = self.stats.white_material - self.stats.black_material;
+            const WINNING_THRESHOLD: i32 = 300; // ~1 minor piece advantage
+
+            if mat_diff >= WINNING_THRESHOLD {
+                // White is winning - reward cornering black king
+                let corner_bonus = crate::board::evaluators::evaluate_king::enemy_king_cornering_bonus(
+                    self.board, Color::White
+                );
+                score += (corner_bonus * self.eg) / 24;
+            } else if mat_diff <= -WINNING_THRESHOLD {
+                // Black is winning - reward cornering white king
+                let corner_bonus = crate::board::evaluators::evaluate_king::enemy_king_cornering_bonus(
+                    self.board, Color::Black
+                );
+                score -= (corner_bonus * self.eg) / 24;
+            }
+        }
+
         score
     }
 
     #[inline]
     fn taper(&self, mg: i32, eg: i32) -> i32 {
         taper_general(self.phase(), mg, eg)
+    }
+
+    fn evaluate_unstoppable_passers(&self, side_to_move: Color) -> i32 {
+        let mut score = 0;
+
+        // Check all pawns for unstoppable passers
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = self.board.get(row, col)
+                    && piece.get_type() == PieceType::Pawn
+                {
+                    let color = piece.get_color();
+                    let enemy_king = match color {
+                        Color::White => self.king_b,
+                        Color::Black => self.king_w,
+                    };
+                    let pawn_side_to_move = color == side_to_move;
+
+                    let bonus = crate::board::evaluators::evaluate_pawns::unstoppable_passer_bonus(
+                        self.board,
+                        row,
+                        col,
+                        color,
+                        enemy_king,
+                        pawn_side_to_move,
+                        self.eg,
+                    );
+
+                    score += apply_color_score(bonus, color);
+                }
+            }
+        }
+
+        score
     }
 }
 

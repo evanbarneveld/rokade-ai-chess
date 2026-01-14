@@ -1,5 +1,10 @@
+TODO's
+======
+
 - create a test that tests the bestmove using UCI commands, whereby the best move as a pawn promotion to a piece that is not a queen
 
-Questions:
+QUESTIONS
+=========
+
 
 - is there a fen that shows that a better move can only be found if the engine looks deeper than say 5?

@@ -238,8 +238,16 @@ pub fn evaluate_passed_pawn(
         }
     }
 
-    let cap: i32 = 90;
-    if score > cap { cap } else { score }
+    // Dynamic cap based on advancement: more advanced = higher cap
+    // adv 6 (7th rank) = cap 350, adv 5 = 250, adv 4 = 180, etc.
+    let cap: i32 = match adv {
+        6 => 350,  // About to promote - nearly queen value
+        5 => 250,  // Very close
+        4 => 180,  // Strong passed pawn
+        3 => 130,
+        _ => 100,  // Early passed pawn
+    };
+    score.min(cap)
 }
 
 pub fn has_clear_promotion_path(board: &Board, row: usize, col: usize, color: Color) -> bool {
@@ -350,4 +358,85 @@ pub fn is_hole_square_limited(board: &Board, row: usize, col: usize, color: Colo
         }
     }
     true
+}
+
+/// Check if a passed pawn is unstoppable (rule of the square).
+/// Returns true if the enemy king cannot catch the pawn before it promotes.
+/// This is a simplified check that doesn't account for blocking pieces.
+pub fn is_unstoppable_passer(
+    board: &Board,
+    pawn_row: usize,
+    pawn_col: usize,
+    color: Color,
+    enemy_king: Option<(usize, usize)>,
+    pawn_side_to_move: bool,
+) -> bool {
+    // Must be a passed pawn first
+    if !is_passed_pawn(board, pawn_row, pawn_col, color) {
+        return false;
+    }
+
+    // Must have clear path to promotion
+    if !has_clear_promotion_path(board, pawn_row, pawn_col, color) {
+        return false;
+    }
+
+    let Some((ek_r, ek_c)) = enemy_king else {
+        return true; // No enemy king means unstoppable
+    };
+
+    // Calculate distance to promotion
+    let promotion_row = match color {
+        Color::White => 7,
+        Color::Black => 0,
+    };
+    let pawn_dist = (promotion_row as i32 - pawn_row as i32).abs();
+
+    // Calculate enemy king distance to the promotion square
+    // Use Chebyshev distance (king moves diagonally)
+    let king_dist_to_promo = chebyshev_dist(
+        (ek_r as i32, ek_c as i32),
+        (promotion_row as i32, pawn_col as i32)
+    );
+
+    // Rule of the square: if pawn is closer (accounting for tempo), it's unstoppable
+    // If it's the pawn's side to move, pawn gets a tempo advantage
+    let effective_pawn_dist = if pawn_side_to_move {
+        pawn_dist - 1  // Pawn moves first
+    } else {
+        pawn_dist
+    };
+
+    effective_pawn_dist < king_dist_to_promo
+}
+
+/// Calculate bonus for unstoppable passed pawns.
+/// Returns a large bonus if the pawn cannot be stopped from promoting.
+pub fn unstoppable_passer_bonus(
+    board: &Board,
+    pawn_row: usize,
+    pawn_col: usize,
+    color: Color,
+    enemy_king: Option<(usize, usize)>,
+    pawn_side_to_move: bool,
+    eg: i32,
+) -> i32 {
+    if !is_unstoppable_passer(board, pawn_row, pawn_col, color, enemy_king, pawn_side_to_move) {
+        return 0;
+    }
+
+    // Massive bonus for unstoppable passer - scales with how close to promotion
+    let promotion_row = match color {
+        Color::White => 7,
+        Color::Black => 0,
+    };
+    let dist = (promotion_row as i32 - pawn_row as i32).abs();
+
+    // Base bonus: 500cp (half a queen) for unstoppable passer
+    // Additional bonus for being closer to promotion
+    let base = 500;
+    let proximity_bonus = (7 - dist) * 50; // Up to 300 extra for 7th rank
+
+    // Scale by endgame factor
+    ((base + proximity_bonus) * eg) / 24
 }

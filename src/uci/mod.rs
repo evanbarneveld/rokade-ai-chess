@@ -90,28 +90,28 @@ pub fn run_uci() -> io::Result<()> {
                 }
             } else if lower.contains("name strength") {
                 if let Some(idx) = lower.find("value ") {
-                    // value is one of: Strength Max, Strength 9..1
+                    // value is one of: Strengt-10 .. 1
                     let val = line[(idx + 6)..].trim();
                     let val_lower = val.to_ascii_lowercase();
-                    let s = if val_lower == "strength max" {
+                    let s = if val_lower == "strength-10" {
                         1000usize
-                    } else if val_lower == "strength 9" {
+                    } else if val_lower == "strength-9" {
                         950usize
-                    } else if val_lower == "strength 8" {
+                    } else if val_lower == "strength-8" {
                         850usize
-                    } else if val_lower == "strength 7" {
+                    } else if val_lower == "strength-7" {
                         750usize
-                    } else if val_lower == "strength 6" {
+                    } else if val_lower == "strength-6" {
                         650usize
-                    } else if val_lower == "strength 5" {
+                    } else if val_lower == "strength-5" {
                         550usize
-                    } else if val_lower == "strength 4" {
+                    } else if val_lower == "strength-4" {
                         450usize
-                    } else if val_lower == "strength 3" {
+                    } else if val_lower == "strength-3" {
                         350usize
-                    } else if val_lower == "strength 2" {
+                    } else if val_lower == "strength-2" {
                         250usize
-                    } else if val_lower == "strength 1" {
+                    } else if val_lower == "strength-1" {
                         150usize
                     } else {
                         // Unknown value, ignore
@@ -367,7 +367,7 @@ fn send_uci_response() {
     write_to_stdout_and_log_with_flush("OUT", &m2);
 
     // Strength levels as combo
-    let opt_strenghth = "option name Strength type combo default Strength Max var Strength Max var Strength 9 var Strength 8 var Strength 7 var Strength 6 var Strength 5 var Strength 4 var Strength 3 var Strength 2 var Strength 1".to_string();
+    let opt_strenghth = "option name Strength type combo default Strength-10 var Strength-10 var Strength-9 var Strength-8 var Strength-7 var Strength-6 var Strength-5 var Strength-4 var Strength-3 var Strength-2 var Strength-1".to_string();
     write_to_stdout_and_log_with_flush("OUT", &opt_strenghth);
 
     let opt_parallel = format!("option name parallel search type check default {}", is_parallel_search());
@@ -463,16 +463,6 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time_in_ms: us
     let history_clone = { engine.get_history().clone() };
     // Use the configured playing strength; time control will be enforced by Search budget.
     let playing_strength = engine.get_playing_strength();
-
-    /* TODO: find a better way to set the stength: use an UCI option!
-    //if move_time is set a value below 1000mS. Then the user clearly wants to use low strength.
-    //So in this case, pass use the move_time as 'strength' and override the move_time to some default
-    //value that is reasonable for low strength.
-
-    if move_time_in_ms < MAX_PLAYING_STRENGTH {
-        playing_strength = move_time_in_ms;
-        move_time_in_ms = DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY;
-    }*/
 
     // Apply a time budget for this Search
     set_time_budget_ms(move_time_in_ms);

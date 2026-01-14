@@ -52,9 +52,55 @@ pub fn king_safety(board: &Board, color: Color) -> i32 {
 pub fn king_activity_endgame(board: &Board, color: Color) -> i32 {
     let k_pos = find_king(board, color);
     if let Some((r, c)) = k_pos {
+        // Chebyshev distance to center (more accurate than Manhattan)
         let centers: [(i32, i32); 4] = [(3,3),(3,4),(4,3),(4,4)];
-        let mut best = 99; for (cr,cc) in centers { let dr = (r as i32 - cr).abs(); let dc = (c as i32 - cc).abs(); let d = dr+dc; if d < best { best = d; } }
-        return 12 - 3 * best;
+        let mut best = 99;
+        for (cr, cc) in centers {
+            let d = (r as i32 - cr).abs().max((c as i32 - cc).abs());
+            if d < best { best = d; }
+        }
+        // Increased weight: max 40cp for center, -10cp per square away
+        return 40 - 10 * best;
+    }
+    0
+}
+
+/// Bonus for pushing the enemy king toward edges/corners in winning positions.
+/// Returns a positive bonus when the enemy king is restricted to edges/corners.
+pub fn enemy_king_cornering_bonus(board: &Board, winning_color: Color) -> i32 {
+    let enemy = opponent(winning_color);
+    let enemy_king = find_king(board, enemy);
+    let own_king = find_king(board, winning_color);
+
+    if let Some((ek_r, ek_c)) = enemy_king {
+        let mut bonus = 0i32;
+
+        // Reward enemy king being on edge (row/col 0 or 7)
+        let on_edge_r = ek_r == 0 || ek_r == 7;
+        let on_edge_c = ek_c == 0 || ek_c == 7;
+
+        if on_edge_r && on_edge_c {
+            // Corner: best position for mating
+            bonus += 50;
+        } else if on_edge_r || on_edge_c {
+            // Edge: good progress
+            bonus += 30;
+        }
+
+        // Penalize enemy king centralization (Chebyshev distance from center)
+        let center_dist = (ek_r as i32 - 3).abs().min((ek_r as i32 - 4).abs())
+            .max((ek_c as i32 - 3).abs().min((ek_c as i32 - 4).abs()));
+        // center_dist: 0 = center, 3 = corner
+        bonus += center_dist * 12;
+
+        // Reward own king being close to enemy king (for mating net)
+        if let Some((ok_r, ok_c)) = own_king {
+            let king_dist = (ok_r as i32 - ek_r as i32).abs().max((ok_c as i32 - ek_c as i32).abs());
+            // Closer is better: dist 1 = +30, dist 2 = +20, etc.
+            bonus += (7 - king_dist).max(0) * 5;
+        }
+
+        return bonus;
     }
     0
 }
