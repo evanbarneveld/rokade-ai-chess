@@ -5,6 +5,16 @@ TODO's
 
 QUESTIONS
 =========
-
-
 - is there a fen that shows that a better move can only be found if the engine looks deeper than say 5?
+
+
+POSITIONS
+=========
+Positions in which the engine makes bad or unexpected moves:
+
+r1q1kb2/1n1n1pp1/2p4r/p2pp2p/N1Q1P2B/P4N2/1P3PPP/2RR2K1 w q - 0 40      white queen must be saved
+r3kb2/3n1pp1/1q1n3r/p1pPp2p/7B/P1N2N2/1P3PPP/1QRR2K1 w q - 14 48        why trading knights?
+
+r3kb2/5pp1/1q1n3r/p1pPn2p/7B/P1N5/1P3PPP/Q1RR2K1 w q - 10 54        white should attack!
+r3kb2/1q3pp1/3n3r/p1pPn2p/7B/P1N5/1P3PPP/Q1RR2K1 b q - 21 59        nothing happens really, why not attacking?
+
