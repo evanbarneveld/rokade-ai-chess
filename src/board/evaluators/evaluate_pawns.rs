@@ -390,13 +390,13 @@ pub fn is_unstoppable_passer(
         Color::White => 7,
         Color::Black => 0,
     };
-    let pawn_dist = (promotion_row as i32 - pawn_row as i32).abs();
+    let pawn_dist = (promotion_row - pawn_row as i32).abs();
 
     // Calculate enemy king distance to the promotion square
     // Use Chebyshev distance (king moves diagonally)
     let king_dist_to_promo = chebyshev_dist(
         (ek_r as i32, ek_c as i32),
-        (promotion_row as i32, pawn_col as i32)
+        (promotion_row, pawn_col as i32)
     );
 
     // Rule of the square: if pawn is closer (accounting for tempo), it's unstoppable
@@ -430,7 +430,7 @@ pub fn unstoppable_passer_bonus(
         Color::White => 7,
         Color::Black => 0,
     };
-    let dist = (promotion_row as i32 - pawn_row as i32).abs();
+    let dist = (promotion_row - pawn_row as i32).abs();
 
     // Base bonus: 500cp (half a queen) for unstoppable passer
     // Additional bonus for being closer to promotion
