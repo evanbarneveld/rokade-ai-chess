@@ -10,7 +10,7 @@ use crate::search::core::alphabeta::alphabeta;
 use crate::search::advanced_search::find_all_valid_moves;
 use crate::search::management::see::apply_destination_see_penalties;
 use crate::search::state::tt::{decode_move, TranspositionTable};
-use crate::search::state::zobrist::compute_zobrist;
+use crate::search::state::zobrist::compute_zobrist_full;
 use crate::state::game_state::GameState;
 
 // Import heuristics from sub-modules
@@ -32,8 +32,7 @@ use crate::search::evaluation::root_heuristics::utils::ROOT_CAPTURE_BONUS_DIV;
 /// Build the principal variation line from transposition table.
 #[inline]
 pub fn build_pv_for_root(
-    board: &Board,
-    root_side: Color,
+    game_state: &GameState,
     from: (usize, usize),
     to: (usize, usize),
     root_promo: Option<char>,
@@ -43,26 +42,29 @@ pub fn build_pv_for_root(
     let mut pv: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::with_capacity(max_len.max(1));
     pv.push((from, to, root_promo));
 
-    let mut tmp = *board;
-    let _undo = tmp.make_move_simple(from, to, root_promo);
-    let mut side = opposite_color(root_side);
+    // Clone game state to track castling/EP properly during PV traversal
+    let mut gs = *game_state;
+    let _undo = gs.make_move_fast(from, to, root_promo);
 
     for _ in 1..max_len {
-        let key = compute_zobrist(&tmp, side);
+        let key = compute_zobrist_full(
+            gs.board(),
+            gs.active_color(),
+            &gs.castling_rights(),
+            gs.en_passant_target(),
+        );
         let Some(entry) = tt.probe(key) else {
             break;
         };
         let (bf, bt) = (entry.best_from, entry.best_to);
         let ((nfr, nfc), (ntr, ntc)) = decode_move(bf, bt);
 
-        let mut gs = GameState::from_board_and_side(tmp, side);
         let legals = find_all_valid_moves(&mut gs);
         let found_move = legals.iter().find(|(f, t, _)| (*f, *t) == ((nfr, nfc), (ntr, ntc)));
 
         if let Some(&(f, t, p)) = found_move {
             pv.push((f, t, p));
-            let _u = tmp.make_move_simple(f, t, p);
-            side = opposite_color(side);
+            let _u = gs.make_move_fast(f, t, p);
         } else {
             break;
         }

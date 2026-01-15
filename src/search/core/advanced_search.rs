@@ -205,7 +205,7 @@ pub fn find_best_move(
             _last_score = best_raw;
             // Emit PV/info for this iteration, including TT hashfull permille
             let hf = tt.hashfull_permille();
-            let pv = build_pv_for_root(gs.board(), active_color, bf, bt, bpromo, &tt, depth_now);
+            let pv = build_pv_for_root(&gs, bf, bt, bpromo, &tt, depth_now);
             let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
             emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
             chosen = Some((bf, bt, bpromo, best_adj, depth_now));
@@ -243,7 +243,7 @@ pub fn find_best_move(
             chosen = Some((bf, bt, bpromo, 0, 1));
         } else {
             let hf = tt.hashfull_permille();
-            let pv = build_pv_for_root(gs.board(), active_color, bf, bt, bpromo, &tt, depth_now);
+            let pv = build_pv_for_root(&gs, bf, bt, bpromo, &tt, depth_now);
             let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
             emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
             chosen = Some((bf, bt, bpromo, best_adj, depth_now));

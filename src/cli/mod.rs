@@ -6,6 +6,8 @@ use crate::generator::move_generator::generate_move_as_san;
 use crate::search::SearchMode;
 use crate::pgn_player::pgn_player::PgnPlayer;
 use crate::search::core::advanced_search::DEFAULT_SEARCH_DEPTH;
+use crate::search::core::alphabeta::with_heuristics;
+use crate::search::state::locking::get_tt_mutex;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 
@@ -109,15 +111,25 @@ pub fn run_cli() {
                 println!("{}\n", game.to_fen());
                 continue;
             }
-            if some_input.eq_ignore_ascii_case("undo") {
+            if some_input.eq_ignore_ascii_case("undo") || some_input.eq_ignore_ascii_case("u") {
                 game.undo_move();
                 continue;
             }
-            if some_input.eq_ignore_ascii_case("list") {
+            if some_input.eq_ignore_ascii_case("list") || some_input.eq_ignore_ascii_case("l") {
                 game.list();
                 continue;
             }
-
+            if some_input.eq_ignore_ascii_case("deterministic") {
+                crate::search::set_deterministic(!crate::search::is_deterministic());
+                println!("Deterministic search is now {}", crate::search::is_deterministic());
+                continue;
+            }
+            if some_input.eq_ignore_ascii_case("clearcache") {
+                get_tt_mutex().lock().unwrap().clear();
+                with_heuristics(|h| h.clear());
+                println!("Cleared transposition table and search heuristics.");
+                continue;
+            }
             if some_input.starts_with("reset") {
                 handle_reset(&mut game, some_input);
                 continue;
@@ -484,6 +496,7 @@ fn print_help() {
     println!("searchmode                - get search mode (advanced or simple)");
     println!("searchmode advanced       - set search mode to advanced");
     println!("searchmode simple         - set search mode to simple");
+    println!("clearcache                - clear transposition table and search heuristics");
     println!("uci                       - switch to UCI mode (use 'cli' to return)");
 }
 

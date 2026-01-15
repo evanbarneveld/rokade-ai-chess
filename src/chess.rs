@@ -8,7 +8,7 @@ use crate::piece::as_square_str;
 use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::search::SearchMode;
-use crate::search::state::zobrist::compute_zobrist;
+use crate::search::state::zobrist::compute_zobrist_full;
 
 #[derive(Debug)]
 pub struct Chess<> {
@@ -40,7 +40,12 @@ impl Chess {
             search_mode: SearchMode::Normal,
             playing_strength: 1000,
         };
-        let zobrist = compute_zobrist(chess.game_state.board(), chess.game_state.active_color());
+        let zobrist = compute_zobrist_full(
+            chess.game_state.board(),
+            chess.game_state.active_color(),
+            &chess.game_state.castling_rights(),
+            chess.game_state.en_passant_target(),
+        );
         chess.history.set_starting_position(Chess::DEFAULT_CHESS_STARTING_FEN.to_string(), zobrist);
         chess
     }
@@ -79,7 +84,12 @@ impl Chess {
         self.starting_fen = String::from(fen);
         self.game_state = reset_from_fen(&self.starting_fen)?;
         self.history.reset();
-        let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
+        let zobrist = compute_zobrist_full(
+            self.game_state.board(),
+            self.game_state.active_color(),
+            &self.game_state.castling_rights(),
+            self.game_state.en_passant_target(),
+        );
         self.history.set_starting_position(fen.to_string(), zobrist);
         self.game_state.recompute_outcome(&self.history);
         Ok(())
@@ -160,7 +170,12 @@ impl Chess {
                 mv = format!("{}x{}", mv, as_square_str(to));
             }
 
-            let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
+            let zobrist = compute_zobrist_full(
+                self.game_state.board(),
+                self.game_state.active_color(),
+                &self.game_state.castling_rights(),
+                self.game_state.en_passant_target(),
+            );
             self.history.add_move(mv.to_string(), (from, to), game_state_to_fen_string(self.game_state), zobrist);
             true
         } else {
@@ -178,7 +193,12 @@ impl Chess {
             Ok(v) => {
                 if PieceMover::move_piece(&mut self.game_state, v.from, v.to, v.is_capture, v.promotion_piece) {
                     self.game_state.switch_player_turn();
-                    let zobrist = compute_zobrist(self.game_state.board(), self.game_state.active_color());
+                    let zobrist = compute_zobrist_full(
+                        self.game_state.board(),
+                        self.game_state.active_color(),
+                        &self.game_state.castling_rights(),
+                        self.game_state.en_passant_target(),
+                    );
                     self.history.add_move(mv.to_string(), (v.from, v.to), game_state_to_fen_string(self.game_state), zobrist);
                     true
                 } else {

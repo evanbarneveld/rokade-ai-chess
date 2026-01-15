@@ -60,11 +60,13 @@ pub fn prune_null_moves(
                     (alpha, alpha + 1)
                 };
 
-                // Null move: switch side and reduce depth
+                // Null move: switch side, clear en passant (it expires after skipping a turn)
                 game_state.switch_player_turn();
                 let old_hmc = game_state.half_move_clock();
+                let old_ep = game_state.en_passant_target();
                 game_state.increment_half_move_clock();
-                
+                game_state.set_en_passant_target(None);
+
                 let score = alphabeta(
                     game_state,
                     depth.saturating_sub(1 + r),
@@ -78,6 +80,7 @@ pub fn prune_null_moves(
                 // Unmake null move
                 game_state.switch_player_turn();
                 game_state.set_half_move_clock(old_hmc);
+                game_state.set_en_passant_target(old_ep);
                 
                 if to_move == Color::White {
                     if score >= beta {

@@ -4,7 +4,7 @@ use crate::search::core::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE,
 use crate::state::game_state::GameState;
 use crate::search::management::see::see_dest_estimate;
 use crate::search::integration::time_control::time_is_up;
-use crate::search::state::zobrist::compute_zobrist;
+use crate::search::state::zobrist::compute_zobrist_full;
 
 // Tighter margins with a stronger static evaluator
 const FUT_MARGIN: i32 = 40;
@@ -29,7 +29,12 @@ pub fn qsearch(
     }
     // Draw checks in quiescence as well (only if Zobrist hashing is enabled)
     if crate::search::core::advanced_search::ZOBRIST_HASHING_ENABLED {
-        let key_here = compute_zobrist(game_state.board(), to_move);
+        let key_here = compute_zobrist_full(
+            game_state.board(),
+            to_move,
+            &game_state.castling_rights(),
+            game_state.en_passant_target(),
+        );
         if rep_stack.contains(&key_here) {
             return 0;
         }

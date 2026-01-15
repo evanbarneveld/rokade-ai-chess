@@ -1,5 +1,5 @@
 use crate::search::core::advanced_search::{find_all_valid_moves, find_all_valid_moves_into_perft, PerftMove};
-use crate::search::state::zobrist::compute_zobrist;
+use crate::search::state::zobrist::compute_zobrist_full;
 use crate::state::game_state::GameState;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -12,25 +12,13 @@ thread_local! {
 
 #[inline]
 fn perft_state_key(gs: &GameState) -> u64 {
-    // Base Zobrist from board + side to move
-    let key = compute_zobrist(gs.board(), gs.active_color());
-
-    // Mix in castling rights (4 bits) and en-passant file (0..8; 0 = none, 1..8 = file a..h)
-    let cr = gs.castling_rights();
-    let mut cr_bits: u8 = 0;
-    // Order: KQkq -> bits 0..3
-    // Accessors are exposed on CastlingRights
-    if cr.white_kingside() { cr_bits |= 1 << 0; }
-    if cr.white_queenside() { cr_bits |= 1 << 1; }
-    if cr.black_kingside() { cr_bits |= 1 << 2; }
-    if cr.black_queenside() { cr_bits |= 1 << 3; }
-
-    let ep_file: u64 = if let Some((_, file)) = gs.en_passant_target() { (file as u64) + 1 } else { 0 };
-
-    // Simple mix (SplitMix-inspired constants) to reduce collisions
-    let mix1 = (cr_bits as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    let mix2 = ep_file.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    key ^ mix1 ^ mix2
+    // Full Zobrist including castling rights and en-passant target
+    compute_zobrist_full(
+        gs.board(),
+        gs.active_color(),
+        &gs.castling_rights(),
+        gs.en_passant_target(),
+    )
 }
 
 #[inline]

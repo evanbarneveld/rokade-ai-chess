@@ -4,7 +4,8 @@ use crate::piece::pieces::{Color, PieceType};
 use crate::search::evaluation::repetition::apply_repetition_avoidance_bias;
 use crate::search::management::root_moves::{adjusted_root_eval_for_move, evaluate_after_root_move};
 use crate::search::state::tt::{decode_move, TranspositionTable};
-use crate::search::state::zobrist::compute_zobrist;
+use crate::search::state::zobrist::compute_zobrist_full;
+use crate::state::castling::CastlingRights;
 use crate::search::{is_parallel_search};
 use crate::state::game_state::GameState;
 use rayon::prelude::*;
@@ -21,8 +22,10 @@ pub(crate) fn reorder_with_tt_hint(
     tt: &TranspositionTable,
     board: &Board,
     side: Color,
+    castling: &CastlingRights,
+    ep_target: Option<(usize, usize)>,
 ) {
-    if let Some(entry) = tt.probe(compute_zobrist(board, side)) {
+    if let Some(entry) = tt.probe(compute_zobrist_full(board, side, castling, ep_target)) {
         let bm = decode_move(entry.best_from, entry.best_to);
         if let Some(pos) = ordered.iter().position(|&(f, t, _)| (f, t) == bm) {
             let first = ordered.remove(pos);
@@ -53,7 +56,14 @@ pub(crate) fn evaluate_root_for_bounds(
 
     // Order: if TT has a move at root, try to place it first, then apply light opening-aware tie-breakers
     let mut ordered: Vec<((usize, usize), (usize, usize), Option<char>)> = root_moves.to_vec();
-    reorder_with_tt_hint(&mut ordered, tt, game_state.board(), active_color);
+    reorder_with_tt_hint(
+        &mut ordered,
+        tt,
+        game_state.board(),
+        active_color,
+        &game_state.castling_rights(),
+        game_state.en_passant_target(),
+    );
 
     // Opening-aware tiny reordering: demote quiet queen moves; promote minor development and castling
     // Keep this extremely small so as not to override tactical ordering.

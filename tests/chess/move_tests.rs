@@ -195,6 +195,26 @@ fn test_bad_queen_offer() {
     assert_ne!(san_move, "Qe5+"); //bad move
 }
 
+#[test]
+#[serial]
+fn test_bad_queen_move() {
+    // in this position the white queen on c4 is attached by the black pawn on d5.
+    // white should move its queen to safety or capture the attaching black pawn exd5
+    let fen = "r1q1kb2/1n1n1pp1/2p4r/p2pp2p/N1Q1P2B/P4N2/1P3PPP/2RR2K1 w q - 0 40";
+    let mut game = Chess::new();
+    set_deterministic(true);
+
+    for _ in 0..10 {
+        game.set_starting_fen(fen).expect("bad fen");
+
+        //get the best move
+        let history = game.get_history().clone();
+        let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, 1, 200, 1000).unwrap();
+        println!("Selected move: {:?}", san_move);
+        assert!(san_move[0..1].eq("Q") || san_move.eq("exd5")); //good moves
+        game.undo_move();
+    }
+}
 
 #[test]
 #[serial]

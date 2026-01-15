@@ -84,24 +84,3 @@ pub fn compute_zobrist_full(
 
     key
 }
-
-#[inline]
-pub fn compute_zobrist(board: &Board, to_move: Color) -> u64 {
-    // Legacy support or internal use where full state is not available
-    // For better results, use compute_zobrist_full
-    zobrist_init_once();
-    let mut key: u64 = 0;
-    for r in 0..8 {
-        for c in 0..8 {
-            if let Some(p) = board.get(r, c) {
-                let idx = piece_index(p.get_type(), p.get_color());
-                let sq = r * 8 + c;
-                unsafe { key ^= Z_PIECE[idx][sq]; }
-            }
-        }
-    }
-    if to_move == Color::White {
-        unsafe { key ^= Z_SIDE; }
-    }
-    key
-}
