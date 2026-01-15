@@ -124,7 +124,7 @@ pub fn alphabeta(
             rep_stack.pop();
         }
         return if in_check {
-            -MATE_VALUE + depth as i32
+            -MATE_VALUE + ply  // Use ply (distance from root) so shorter mates score better
         } else {
             0
         };
