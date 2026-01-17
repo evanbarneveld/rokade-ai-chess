@@ -2,6 +2,106 @@ use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
 
+/// Generate target squares for a piece based on its type and position.
+/// Returns a vector of potential destination squares (not validated yet).
+#[inline]
+fn generate_piece_targets(piece_type: PieceType, from: (usize, usize), color: Color) -> Vec<(usize, usize)> {
+    let (r, c) = from;
+    let mut targets = Vec::with_capacity(32);
+
+    match piece_type {
+        PieceType::Knight => {
+            // Knight: exactly 8 possible moves
+            const KNIGHT_MOVES: [(isize, isize); 8] = [
+                (2, 1), (2, -1), (-2, 1), (-2, -1),
+                (1, 2), (1, -2), (-1, 2), (-1, -2)
+            ];
+            for (dr, dc) in KNIGHT_MOVES {
+                let nr = r as isize + dr;
+                let nc = c as isize + dc;
+                if (0..8).contains(&nr) && (0..8).contains(&nc) {
+                    targets.push((nr as usize, nc as usize));
+                }
+            }
+        }
+        PieceType::King => {
+            // King: up to 8 adjacent squares
+            for dr in -1..=1 {
+                for dc in -1..=1 {
+                    if dr == 0 && dc == 0 { continue; }
+                    let nr = r as isize + dr;
+                    let nc = c as isize + dc;
+                    if (0..8).contains(&nr) && (0..8).contains(&nc) {
+                        targets.push((nr as usize, nc as usize));
+                    }
+                }
+            }
+
+            // Castling: king moves 2 squares left or right from starting position
+            let start_row = if color == Color::White { 0 } else { 7 };
+            let start_col = 4;
+            if from == (start_row, start_col) {
+                // Kingside castling (move to column 6)
+                targets.push((start_row, 6));
+                // Queenside castling (move to column 2)
+                targets.push((start_row, 2));
+            }
+        }
+        PieceType::Pawn => {
+            // Pawn: forward moves and captures
+            let forward = if color == Color::White { 1 } else { -1 };
+            let start_rank = if color == Color::White { 1 } else { 6 };
+
+            // Single push
+            let nr = r as isize + forward;
+            if (0..8).contains(&nr) {
+                targets.push((nr as usize, c));
+
+                // Double push from starting position
+                if r == start_rank {
+                    let nr2 = r as isize + 2 * forward;
+                    if (0..8).contains(&nr2) {
+                        targets.push((nr2 as usize, c));
+                    }
+                }
+            }
+
+            // Captures (diagonal)
+            for dc in [-1, 1] {
+                let nr = r as isize + forward;
+                let nc = c as isize + dc;
+                if (0..8).contains(&nr) && (0..8).contains(&nc) {
+                    targets.push((nr as usize, nc as usize));
+                }
+            }
+        }
+        PieceType::Rook | PieceType::Bishop | PieceType::Queen => {
+            // Sliding pieces: generate rays
+            let directions = match piece_type {
+                PieceType::Rook => vec![(0, 1), (0, -1), (1, 0), (-1, 0)],
+                PieceType::Bishop => vec![(1, 1), (1, -1), (-1, 1), (-1, -1)],
+                PieceType::Queen => vec![
+                    (0, 1), (0, -1), (1, 0), (-1, 0),
+                    (1, 1), (1, -1), (-1, 1), (-1, -1)
+                ],
+                _ => vec![],
+            };
+
+            for (dr, dc) in directions {
+                let mut nr = r as isize + dr;
+                let mut nc = c as isize + dc;
+                while (0..8).contains(&nr) && (0..8).contains(&nc) {
+                    targets.push((nr as usize, nc as usize));
+                    nr += dr;
+                    nc += dc;
+                }
+            }
+        }
+    }
+
+    targets
+}
+
 pub fn find_all_valid_moves(
     game_state: &mut GameState,
 ) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
@@ -21,55 +121,51 @@ pub fn find_all_valid_moves(
     let en_passant_target = game_state.en_passant_target();
 
     for (from, piece_type) in pieces_to_move {
-        for tr in 0..8 {
-            for tc in 0..8 {
-                let to = (tr, tc);
-                if from == to {
-                    continue;
-                }
+        // Generate piece-specific target squares instead of checking all 64 squares
+        let targets = generate_piece_targets(piece_type, from, active_color);
 
-                let target_piece = game_state.board().get(tr, tc);
-                let is_capture = target_piece.is_some()
-                    || (piece_type == PieceType::Pawn
-                        && en_passant_target.is_some()
-                        && to == en_passant_target.unwrap());
+        for to in targets {
+            let target_piece = game_state.board().get(to.0, to.1);
+            let is_capture = target_piece.is_some()
+                || (piece_type == PieceType::Pawn
+                    && en_passant_target.is_some()
+                    && to == en_passant_target.unwrap());
 
-                if !game_state.move_from_and_to_validation_check(
-                    from,
-                    to,
-                    is_capture,
-                    piece_type == PieceType::Pawn,
-                ) {
-                    continue;
-                }
+            if !game_state.move_from_and_to_validation_check(
+                from,
+                to,
+                is_capture,
+                piece_type == PieceType::Pawn,
+            ) {
+                continue;
+            }
 
-                let is_pawn_promotion = piece_type == PieceType::Pawn
-                    && ((active_color == Color::White && tr == 7)
-                        || (active_color == Color::Black && tr == 0));
+            let is_pawn_promotion = piece_type == PieceType::Pawn
+                && ((active_color == Color::White && to.0 == 7)
+                    || (active_color == Color::Black && to.0 == 0));
 
-                if is_pawn_promotion {
-                    let promo_chars = ['q', 'r', 'b', 'n'];
-                    for &pc in promo_chars.iter() {
-                        let mut gs_var = *game_state;
-                        let promo_piece = Some(Piece::new(match pc {
-                            'q' => PieceType::Queen,
-                            'r' => PieceType::Rook,
-                            'b' => PieceType::Bishop,
-                            'n' => PieceType::Knight,
-                            _ => PieceType::Queen,
-                        }, active_color));
-                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
-                             && !gs_var.mutable_board().is_side_in_check(active_color) {
-                                 result.push((from, to, Some(pc)));
-                             }
-                    }
-                } else {
+            if is_pawn_promotion {
+                let promo_chars = ['q', 'r', 'b', 'n'];
+                for &pc in promo_chars.iter() {
                     let mut gs_var = *game_state;
-                    if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
-                        && !gs_var.mutable_board().is_side_in_check(active_color) {
-                            result.push((from, to, None));
-                        }
+                    let promo_piece = Some(Piece::new(match pc {
+                        'q' => PieceType::Queen,
+                        'r' => PieceType::Rook,
+                        'b' => PieceType::Bishop,
+                        'n' => PieceType::Knight,
+                        _ => PieceType::Queen,
+                    }, active_color));
+                    if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
+                         && !gs_var.mutable_board().is_side_in_check(active_color) {
+                             result.push((from, to, Some(pc)));
+                         }
                 }
+            } else {
+                let mut gs_var = *game_state;
+                if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
+                    && !gs_var.mutable_board().is_side_in_check(active_color) {
+                        result.push((from, to, None));
+                    }
             }
         }
     }
@@ -97,55 +193,55 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
             let piece = match board.get(r, c) { Some(p) => p, None => continue };
             if piece.get_color() != active_color { continue; }
 
-            for tr in 0..8 {
-                for tc in 0..8 {
-                    let from = (r, c);
-                    let to = (tr, tc);
-                    if from == to { continue; }
+            let from = (r, c);
+            let piece_type = piece.get_type();
 
-                    let target_piece_is_some = board.get(tr, tc).is_some();
-                    let is_capture = target_piece_is_some
-                        || (piece.get_type() == PieceType::Pawn
-                            && game_state.en_passant_target().is_some()
-                            && to == game_state.en_passant_target().unwrap());
-                    let is_pawn_move = piece.get_type() == PieceType::Pawn;
-                    if !game_state.move_from_and_to_validation_check(
-                        from, to, is_capture, is_pawn_move,
-                    ) { continue; }
+            // Generate piece-specific target squares instead of checking all 64 squares
+            let targets = generate_piece_targets(piece_type, from, active_color);
 
-                    let is_pawn_promotion = piece.get_type() == PieceType::Pawn
-                        && ((active_color == Color::White && tr == 7)
-                            || (active_color == Color::Black && tr == 0));
+            for to in targets {
+                let target_piece_is_some = board.get(to.0, to.1).is_some();
+                let is_capture = target_piece_is_some
+                    || (piece_type == PieceType::Pawn
+                        && game_state.en_passant_target().is_some()
+                        && to == game_state.en_passant_target().unwrap());
+                let is_pawn_move = piece_type == PieceType::Pawn;
+                if !game_state.move_from_and_to_validation_check(
+                    from, to, is_capture, is_pawn_move,
+                ) { continue; }
 
-                    if is_pawn_promotion {
-                        let promo_types = [
-                            PieceType::Queen,
-                            PieceType::Rook,
-                            PieceType::Bishop,
-                            PieceType::Knight,
-                        ];
-                        for pt in promo_types.iter() {
-                            let mut gs_var = *game_state;
-                            let promo_piece = Some(Piece::new(*pt, active_color));
-                            if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
-                                && !gs_var.mutable_board().is_side_in_check(active_color) {
-                                    let ch = match pt {
-                                        PieceType::Queen => Some('q'),
-                                        PieceType::Rook => Some('r'),
-                                        PieceType::Bishop => Some('b'),
-                                        PieceType::Knight => Some('n'),
-                                        _ => None,
-                                    };
-                                    out.push(PerftMove { from, to, is_capture, promo: ch });
-                                }
-                        }
-                    } else {
+                let is_pawn_promotion = piece_type == PieceType::Pawn
+                    && ((active_color == Color::White && to.0 == 7)
+                        || (active_color == Color::Black && to.0 == 0));
+
+                if is_pawn_promotion {
+                    let promo_types = [
+                        PieceType::Queen,
+                        PieceType::Rook,
+                        PieceType::Bishop,
+                        PieceType::Knight,
+                    ];
+                    for pt in promo_types.iter() {
                         let mut gs_var = *game_state;
-                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
+                        let promo_piece = Some(Piece::new(*pt, active_color));
+                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
                             && !gs_var.mutable_board().is_side_in_check(active_color) {
-                                out.push(PerftMove { from, to, is_capture, promo: None });
+                                let ch = match pt {
+                                    PieceType::Queen => Some('q'),
+                                    PieceType::Rook => Some('r'),
+                                    PieceType::Bishop => Some('b'),
+                                    PieceType::Knight => Some('n'),
+                                    _ => None,
+                                };
+                                out.push(PerftMove { from, to, is_capture, promo: ch });
                             }
                     }
+                } else {
+                    let mut gs_var = *game_state;
+                    if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
+                        && !gs_var.mutable_board().is_side_in_check(active_color) {
+                            out.push(PerftMove { from, to, is_capture, promo: None });
+                        }
                 }
             }
         }
