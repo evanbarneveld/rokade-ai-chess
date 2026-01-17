@@ -63,6 +63,24 @@ fn test_queen_save2() {
 
 #[test]
 #[serial]
+fn test_bad_bishop_move2() {
+    // in this position the engine generates a white bishop move Bf4, but then it can be captured
+    // immediately by the black pawn on e5. A very bad move.
+    // Why does this happen?
+    let fen = "rnbqkb1r/pppn1ppp/8/3Pp1B1/3Np3/2N5/PPP2PPP/R2QKB1R w KQkq e6 0 11";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Bf4"); //bad move, losing either bishop or knight
+}
+
+#[test]
+#[serial]
 fn test_bad_rook_move() {
     // in this position the engine generates a rook move Rf1d1+
     // but now the rook can immediately be captured by the white king on d2.
