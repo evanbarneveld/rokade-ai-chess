@@ -11,6 +11,33 @@ use super::utils::{
 };
 use super::knight_evacuation::knight_safe_squares;
 
+/// Calculate knight-specific evacuation bonus
+#[inline]
+fn knight_evacuation_bonus(
+    to: (usize, usize),
+    knight_safe: &[(usize, usize)],
+    by_pawn: bool,
+) -> i32 {
+    let mut bonus = 0;
+
+    // Center bonus
+    let mut cb = center_score(to);
+    if to == (3, 3) {
+        cb += 80;
+    }
+    if !knight_safe.is_empty() && knight_safe.contains(&to) {
+        cb += 80;
+    }
+    bonus += cb.max(0);
+
+    // Safe square bonus
+    if by_pawn && !knight_safe.is_empty() && knight_safe.contains(&to) {
+        bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD;
+    }
+
+    bonus
+}
+
 /// Handle threat resolution and piece evacuation heuristics.
 #[inline]
 pub fn threat_resolution_and_evacuation(
@@ -70,7 +97,6 @@ pub fn threat_resolution_and_evacuation(
 
         if (tr, tc) == from {
             // We moved the threatened piece - calculate evacuation bonus
-            let mut evac_bonus = 0;
             let see_new = see_dest_estimate(post_after, side, to, 0);
 
             // ALWAYS give evacuation bonus for moving an attacked piece
@@ -84,38 +110,30 @@ pub fn threat_resolution_and_evacuation(
             };
 
             // Moving to safety gets full bonus; moving to another attacked square gets half bonus
-            if !still_attacked || see_new >= 0 {
-                evac_bonus += base_evac;
+            let mut evac_bonus = if !still_attacked || see_new >= 0 {
+                base_evac
             } else {
                 // Even moving to an attacked square is better than leaving it hanging
-                evac_bonus += base_evac / 2;
-            }
+                base_evac / 2
+            };
 
-
-            // Knight-specific center bonus
+            // Add knight-specific bonuses
             if pt == PieceType::Knight {
-                let mut cb = center_score(to);
-                if to == (3, 3) {
-                    cb += 80;
-                }
-                if !knight_safe.is_empty() && knight_safe.contains(&to) {
-                    cb += 80;
-                }
-                evac_bonus += cb.max(0);
+                evac_bonus += knight_evacuation_bonus(to, &knight_safe, by_pawn);
             }
 
-            // Bonus for evacuating to a known safe square
-            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty()
-                && knight_safe.contains(&to) {
-                    evac_bonus += KNIGHT_SAFE_TO_SPECIFIC_REWARD;
-                }
             delta += apply_for_side(evac_bonus, side);
         } else {
-            // We did NOT move the threatened piece
-            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-                delta -= apply_for_side(KNIGHT_IGNORE_PAWN_THREAT_PENALTY, side);
+            // We did NOT move the threatened piece - apply penalties only if piece remains threatened
+            if !still_attacked {
+                continue; // Piece no longer threatened after our move (e.g., we blocked the attack)
             }
-            if still_attacked {
+
+            // Knight-specific penalty for ignoring pawn threats when safe squares exist
+            if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
+                delta -= apply_for_side(KNIGHT_IGNORE_PAWN_THREAT_PENALTY + KNIGHT_NON_EVAC_DEMOTION, side);
+            } else {
+                // General penalty for leaving pieces hanging
                 let pen = match pt {
                     PieceType::Knight | PieceType::Bishop => 200,
                     PieceType::Rook => 120,
@@ -125,15 +143,6 @@ pub fn threat_resolution_and_evacuation(
                 };
                 let val = if by_pawn { pen + 400 } else { pen };
                 delta -= apply_for_side(val, side);
-            }
-        }
-
-        // Additional knight demotion if not evacuating
-        if pt == PieceType::Knight && by_pawn && !knight_safe.is_empty() {
-            if (tr, tc) != from {
-                delta -= apply_for_side(KNIGHT_NON_EVAC_DEMOTION, side);
-            } else if knight_safe.contains(&to) {
-                delta += apply_for_side(KNIGHT_SAFE_TO_SPECIFIC_REWARD, side);
             }
         }
     }

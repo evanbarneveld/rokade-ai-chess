@@ -3,7 +3,7 @@ please Here are the orthogonal aspects of your chess engine that can be reviewed
 please review the <aspect> aspect of the chess engine. See <main-file> for a starting point
 
 
-some logic is backwards???? unusual for a chess engine??
+some logic is backwards???? unusual for a chess engine?? (white/black symmetry)
 
 Aspect,Main File
 ----------------

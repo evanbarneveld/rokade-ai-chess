@@ -1,6 +1,5 @@
 use crate::history::history::History;
 use crate::piece::pieces::Color;
-use crate::state::fen::writer::game_state_to_fen_string;
 use crate::state::game_state::GameState;
 
 // Root repetition-avoidance bias when a move would immediately create 3-fold
@@ -19,10 +18,10 @@ pub(crate) fn apply_repetition_avoidance_bias(
 ) -> i32 {
     let mut gs = *game_state;
     gs.make_move_fast(from, to, promo);
-    
-    let fen = game_state_to_fen_string(gs);
-    let truncated = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
-    let count = history.fen_repetition_count(&truncated);
+
+    // Use zobrist key instead of expensive FEN string generation
+    let zobrist_key = gs.zobrist_key();
+    let count = history.zobrist_repetition_count(zobrist_key);
     let sa = if active_color == Color::White {
         adjusted
     } else {

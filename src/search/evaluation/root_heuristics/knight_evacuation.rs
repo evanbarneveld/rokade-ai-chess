@@ -71,9 +71,17 @@ pub fn knight_evacuations_priority(
 
     let mut delta = 0;
 
-    // Penalize moves that don't evacuate an attacked knight
+    // Penalize moves that don't evacuate an attacked knight (only if safe squares exist)
     if !attacked_knights.contains(&from) {
-        delta -= apply_for_side(500, side);
+        // Check if any attacked knight has safe squares available
+        let has_safe_squares = attacked_knights.iter().any(|&knight_pos| {
+            !knight_safe_squares(base_board, side, knight_pos).is_empty()
+        });
+        if has_safe_squares {
+            // Reduced from 500 to 250 to avoid overriding legitimately good moves
+            // (e.g., winning material elsewhere)
+            delta -= apply_for_side(250, side);
+        }
     } else if let Some(p) = base_board.get(from.0, from.1)
         && p.get_type() == PieceType::Knight {
             let (tr, tc) = to;
@@ -86,14 +94,15 @@ pub fn knight_evacuations_priority(
                 // Safe evacuation bonus with center preference
                 let mut evac = KNIGHT_SAFE_EVAC_REWARD;
                 for &(cr, cc) in &CENTER_SQUARES {
-                    let dr = tr.abs_diff(cr);
-                    let dc = tc.abs_diff(cc);
-                    let dist = (dr + dc) as i32;
-                    evac += (20 - KNIGHT_CENTER_STEP * dist).max(0);
+                    let dr = tr.abs_diff(cr) as i32;
+                    let dc = tc.abs_diff(cc) as i32;
+                    let dist = dr.saturating_add(dc);
+                    let center_bonus = 20_i32.saturating_sub(KNIGHT_CENTER_STEP.saturating_mul(dist));
+                    evac = evac.saturating_add(center_bonus.max(0));
                 }
                 // Extra bonus for d4 square
                 if (tr, tc) == (3, 3) {
-                    evac += KNIGHT_CENTER_EXTRA_D4;
+                    evac = evac.saturating_add(KNIGHT_CENTER_EXTRA_D4);
                 }
                 delta += apply_for_side(evac, side);
             } else {

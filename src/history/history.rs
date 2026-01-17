@@ -115,6 +115,22 @@ impl History {
         *self.fen_counts.get(truncated_fen).unwrap_or(&0)
     }
 
+    // Returns how many times a given zobrist key has appeared in the history
+    pub fn zobrist_repetition_count(&self, zobrist_key: u64) -> usize {
+        let mut count = 0;
+        if let Some(starting) = self.starting_zobrist {
+            if starting == zobrist_key {
+                count += 1;
+            }
+        }
+        for (_, _, _, _, z) in &self.plies {
+            if *z == zobrist_key {
+                count += 1;
+            }
+        }
+        count
+    }
+
     // Returns the repetition count of the most recent position (FEN) in history
     // If there is no move yet, returns 0
     pub fn current_repetition_count(&self) -> usize {
