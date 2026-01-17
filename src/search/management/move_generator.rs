@@ -102,6 +102,37 @@ fn generate_piece_targets(piece_type: PieceType, from: (usize, usize), color: Co
     targets
 }
 
+/// Helper function to convert promotion char to PieceType
+#[inline]
+fn promo_char_to_piece_type(pc: char) -> PieceType {
+    match pc {
+        'q' => PieceType::Queen,
+        'r' => PieceType::Rook,
+        'b' => PieceType::Bishop,
+        'n' => PieceType::Knight,
+        _ => PieceType::Queen,
+    }
+}
+
+/// Helper function to convert PieceType to promotion char
+#[inline]
+fn piece_type_to_promo_char(pt: PieceType) -> Option<char> {
+    match pt {
+        PieceType::Queen => Some('q'),
+        PieceType::Rook => Some('r'),
+        PieceType::Bishop => Some('b'),
+        PieceType::Knight => Some('n'),
+        _ => None,
+    }
+}
+
+/// Check if a pawn move is a promotion
+#[inline]
+fn is_promotion(to: (usize, usize), active_color: Color) -> bool {
+    (active_color == Color::White && to.0 == 7)
+        || (active_color == Color::Black && to.0 == 0)
+}
+
 pub fn find_all_valid_moves(
     game_state: &mut GameState,
 ) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
@@ -140,21 +171,13 @@ pub fn find_all_valid_moves(
                 continue;
             }
 
-            let is_pawn_promotion = piece_type == PieceType::Pawn
-                && ((active_color == Color::White && to.0 == 7)
-                    || (active_color == Color::Black && to.0 == 0));
+            let is_pawn_promotion = piece_type == PieceType::Pawn && is_promotion(to, active_color);
 
             if is_pawn_promotion {
                 let promo_chars = ['q', 'r', 'b', 'n'];
                 for &pc in promo_chars.iter() {
                     let mut gs_var = *game_state;
-                    let promo_piece = Some(Piece::new(match pc {
-                        'q' => PieceType::Queen,
-                        'r' => PieceType::Rook,
-                        'b' => PieceType::Bishop,
-                        'n' => PieceType::Knight,
-                        _ => PieceType::Queen,
-                    }, active_color));
+                    let promo_piece = Some(Piece::new(promo_char_to_piece_type(pc), active_color));
                     if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
                          && !gs_var.mutable_board().is_side_in_check(active_color) {
                              result.push((from, to, Some(pc)));
@@ -210,9 +233,7 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                     from, to, is_capture, is_pawn_move,
                 ) { continue; }
 
-                let is_pawn_promotion = piece_type == PieceType::Pawn
-                    && ((active_color == Color::White && to.0 == 7)
-                        || (active_color == Color::Black && to.0 == 0));
+                let is_pawn_promotion = piece_type == PieceType::Pawn && is_promotion(to, active_color);
 
                 if is_pawn_promotion {
                     let promo_types = [
@@ -226,14 +247,12 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                         let promo_piece = Some(Piece::new(*pt, active_color));
                         if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
                             && !gs_var.mutable_board().is_side_in_check(active_color) {
-                                let ch = match pt {
-                                    PieceType::Queen => Some('q'),
-                                    PieceType::Rook => Some('r'),
-                                    PieceType::Bishop => Some('b'),
-                                    PieceType::Knight => Some('n'),
-                                    _ => None,
-                                };
-                                out.push(PerftMove { from, to, is_capture, promo: ch });
+                                out.push(PerftMove {
+                                    from,
+                                    to,
+                                    is_capture,
+                                    promo: piece_type_to_promo_char(*pt)
+                                });
                             }
                     }
                 } else {

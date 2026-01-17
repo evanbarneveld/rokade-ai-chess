@@ -3,12 +3,6 @@
 
 ## Move Generation (move_generator.rs)
 
-### Fix 4.1: CRITICAL - Implement piece-specific move generation
-**Location**: Lines 23-75, 100-150
-**Issue**: 8x8x8x8 = 4096 iterations per move gen (extremely inefficient)
-**Action**: Generate moves based on piece type (knight: 8 squares, bishop: diagonal rays, etc.)
-**Priority**: CRITICAL (massive performance impact)
-
 ### Fix 4.2: Extract shared promotion logic
 **Location**: Lines 50-65, 120-140
 **Issue**: Duplicate code between two functions
@@ -47,9 +41,7 @@
 
 ## Priority
 
-1. **Fix 4.1** (Move Generation) - CRITICAL performance
 2. **Fix 5.1** (Attack Bitboards) - CRITICAL performance
 4. **Fix 5.3** (Attack caching) - HIGH performance
-7. **Fix 3.3** (score_raw override) - MEDIUM correctness
 9. **Fix 4.3** (Pseudo-legal moves) - MEDIUM performance
 11. All LOW priority items - refactoring/cleanup
