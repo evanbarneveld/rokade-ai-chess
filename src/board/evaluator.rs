@@ -359,7 +359,7 @@ impl<'a> EvalContext<'a> {
                 self.board, row, col, color, self.phase()
             ),
             PieceType::Bishop => val += crate::board::evaluators::evaluate_bishops::evaluate_bishop(
-                row, col, color, self.phase()
+                self.board, row, col, color, self.phase(), self.eg
             ),
             PieceType::Rook => val += crate::board::evaluators::evaluate_rooks::evaluate_rook(
                 self.board, row, col, color, self.phase(), self.eg, self.stats.white_pawns, self.stats.black_pawns
@@ -521,6 +521,14 @@ impl<'a> EvalContext<'a> {
         }
         if self.stats.black_bishops >= 2 {
             score -= self.taper(36, 24);
+        }
+
+        // Bishop pair bonus - evaluate for both colors
+        for &color in &[Color::White, Color::Black] {
+            let bishop_pair = crate::board::evaluators::evaluate_bishops::bishop_pair_bonus(
+                self.board, color, self.phase(), self.eg
+            );
+            score += apply_color_score(bishop_pair, color);
         }
 
         // Rook/Queen activity - evaluate for both colors
