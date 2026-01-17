@@ -10,7 +10,7 @@ pub(crate) fn apply_repetition_avoidance_bias(
     mut adjusted: i32,
     game_state: &GameState,
     history: &History,
-    active_color: Color,
+    _active_color: Color,
     from: (usize, usize),
     to: (usize, usize),
     promo: Option<char>,
@@ -22,29 +22,26 @@ pub(crate) fn apply_repetition_avoidance_bias(
     // Use zobrist key instead of expensive FEN string generation
     let zobrist_key = gs.zobrist_key();
     let count = history.zobrist_repetition_count(zobrist_key);
-    let sa = if active_color == Color::White {
-        adjusted
-    } else {
-        -adjusted
-    };
+
     if count >= 2 {
         // Root repetition-avoidance bias:
-        // If we are winning (sa > 0), we penalize the draw to encourage continuing the game.
-        // If we are losing (sa <= 0), we don't penalize it (we want the draw).
-        // IN ALL CASES, we floor the score at a slight penalty (-10 cp) to ensure
-        // that a draw is always preferred over a clear loss, even if root-level
-        // heuristics (like self-hang) are very negative.
-        if active_color == Color::White {
-            if sa > 0 { adjusted -= REP_AVOIDANCE_BIAS_CP; }
-            // For a draw by repetition, we want to be extremely careful not to avoid it
-            // if it's our best saving grace. We floor it at -10 CP and then
-            // potentially override other root bonuses if they are too optimistic.
-            adjusted = adjusted.max(-10);
-            if score_raw == 0 && adjusted > 0 { adjusted = 0; }
-        } else {
-            if sa > 0 { adjusted += REP_AVOIDANCE_BIAS_CP; }
-            adjusted = adjusted.min(10);
-            if score_raw == 0 && adjusted < 0 { adjusted = 0; }
+        // If we are winning (adjusted > 0), penalize the draw to encourage continuing.
+        // If we are losing (adjusted <= 0), don't penalize it (we want the draw).
+        // Clamp the score to a small range [-10, +10] to ensure a draw by repetition
+        // is always preferred over a clear loss.
+
+        if adjusted > 0 {
+            // Winning position - discourage repetition
+            adjusted -= REP_AVOIDANCE_BIAS_CP;
+        }
+
+        // Clamp to [-10, +10] range to ensure draw preference over clear loss
+        adjusted = adjusted.clamp(-10, 10);
+
+        // If the raw search score is 0 (draw/even), don't let heuristics make it non-zero.
+        // This prevents root-level heuristics from being overly optimistic about drawn positions.
+        if score_raw == 0 {
+            adjusted = 0;
         }
     }
     adjusted
