@@ -278,16 +278,24 @@ pub fn adjusted_root_eval_for_move(
         base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw,
     );
 
+    // Calculate the heuristic adjustment
+    let heuristic_delta = adj - score_raw;
+
     // Safety: don't let heuristics turn a losing move into a winning one
-    if score_raw < 0 {
-        if side == Color::White {
-            adj = adj.min(score_raw);
-        } else {
-            adj = adj.max(score_raw);
+    // EXCEPT for critical tactical penalties like ignoring promotion threats
+    let is_critical_penalty = heuristic_delta.abs() > 1000; // Promotion threat penalty is -1200
+
+    if !is_critical_penalty {
+        if score_raw < 0 {
+            if side == Color::White {
+                adj = adj.min(score_raw);
+            } else {
+                adj = adj.max(score_raw);
+            }
+        } else if score_raw == 0 {
+            // Don't drag draw scores down too much, but allow significant penalties (like suicidal checks)
+            adj = adj.max(-500);
         }
-    } else if score_raw == 0 {
-        // Don't drag draw scores down too much, but allow significant penalties (like suicidal checks)
-        adj = adj.max(-500);
     }
     adj
 }

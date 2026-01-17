@@ -38,6 +38,104 @@ fn knight_evacuation_bonus(
     bonus
 }
 
+/// Detects if opponent has a pawn one move away from promotion.
+/// Returns a massive penalty if we don't address this threat.
+#[inline]
+fn detect_opponent_promotion_threat(
+    base_board: &Board,
+    post_after: &Board,
+    side: Color,
+    _from: (usize, usize),
+    to: (usize, usize),
+) -> i32 {
+    let opp = opposite_color(side);
+    let promotion_rank = match opp {
+        Color::White => 6, // White pawns on rank 7 (index 6) can promote next move
+        Color::Black => 1, // Black pawns on rank 2 (index 1) can promote next move
+    };
+
+    let promotion_square_rank = match opp {
+        Color::White => 7,
+        Color::Black => 0,
+    };
+
+    let mut threat_penalty = 0;
+
+    // Check all opponent pawns on the promotion rank
+    for col in 0..8 {
+        if let Some(p) = base_board.get(promotion_rank, col) {
+            if p.get_color() == opp && p.get_type() == PieceType::Pawn {
+                // Found an opponent pawn threatening to promote!
+
+                // First check: did we capture the pawn?
+                if to == (promotion_rank, col) {
+                    continue; // Threat eliminated
+                }
+
+                // Second: is the pawn still there after our move?
+                let pawn_still_exists = post_after.get(promotion_rank, col)
+                    .map(|p| p.get_color() == opp && p.get_type() == PieceType::Pawn)
+                    .unwrap_or(false);
+
+                if !pawn_still_exists {
+                    continue; // Pawn was captured somehow
+                }
+
+                // Third: can the pawn actually promote on its next move?
+                // Check if it can advance straight
+                let can_advance_straight = base_board.get(promotion_square_rank, col).is_none();
+                let blocked_straight_by_us = to == (promotion_square_rank, col);
+
+                // Check if it can capture diagonally to promote
+                let mut can_capture_diagonal = false;
+                if col > 0 {
+                    if let Some(piece) = base_board.get(promotion_square_rank, col - 1) {
+                        if piece.get_color() == side {
+                            can_capture_diagonal = true;
+                            // Did we move this piece away?
+                            if to != (promotion_square_rank, col - 1) {
+                                // Piece still there after our move
+                            } else {
+                                can_capture_diagonal = false; // We removed the capturable piece
+                            }
+                        }
+                    }
+                }
+                if col < 7 {
+                    if let Some(piece) = base_board.get(promotion_square_rank, col + 1) {
+                        if piece.get_color() == side {
+                            let piece_still_there = post_after.get(promotion_square_rank, col + 1)
+                                .map(|p| p.get_color() == side)
+                                .unwrap_or(false);
+                            if piece_still_there {
+                                can_capture_diagonal = true;
+                            }
+                        }
+                    }
+                }
+
+                // If pawn can promote (either by advancing or capturing) and we didn't stop it
+                let can_promote = (can_advance_straight && !blocked_straight_by_us) || can_capture_diagonal;
+
+                if can_promote {
+                    // Promotion to queen is worth ~900cp, so penalty should be massive
+                    // Apply penalty from the perspective of the side to move
+                    // If opponent can promote, that's BAD for us, so:
+                    // - For White: penalty makes score more negative (worse)
+                    // - For Black: penalty makes score more positive (worse for Black since Black wants negative)
+                    let penalty_value = match side {
+                        Color::White => -1200, // White wants positive scores, so -1200 is bad
+                        Color::Black => 1200,  // Black wants negative scores, so +1200 is bad
+                    };
+                    threat_penalty += penalty_value;
+                }
+            }
+        }
+    }
+
+    threat_penalty
+}
+
 /// Handle threat resolution and piece evacuation heuristics.
 #[inline]
 pub fn threat_resolution_and_evacuation(
@@ -54,6 +152,9 @@ pub fn threat_resolution_and_evacuation(
 
     let mut base_clone = *base_board;
     let opp = opposite_color(side);
+
+    // First check for opponent promotion threats
+    let mut delta = detect_opponent_promotion_threat(base_board, post_after, side, from, to);
 
     // Find all our threatened pieces
     let mut threatened: Vec<(usize, usize, PieceType, bool)> = Vec::new();
@@ -72,10 +173,8 @@ pub fn threat_resolution_and_evacuation(
         }
     }
     if threatened.is_empty() {
-        return 0;
+        return delta;
     }
-
-    let mut delta = 0;
     for (tr, tc, pt, by_pawn) in threatened {
         // Precompute knight safe squares if applicable
         let knight_safe: Vec<(usize, usize)> = if pt == PieceType::Knight && by_pawn {
