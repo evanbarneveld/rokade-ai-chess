@@ -82,7 +82,7 @@ impl GameState {
     }
 
     /// Construct GameState from board and side, inferring castling rights
-    pub fn from_board_and_side(board: Board, side: Color) -> Self {
+    pub fn from_board_and_side(mut board: Board, side: Color) -> Self {
         let mut rights_str = String::new();
 
         // White castling
@@ -110,6 +110,8 @@ impl GameState {
         }
 
         let rights = CastlingRights::from_fen(&rights_str);
+        // Ensure piece counts are correct for externally-constructed boards
+        board.recompute_piece_counts();
         GameState::new_from_existing_state(board, side, rights, None, 0, 1)
     }
 

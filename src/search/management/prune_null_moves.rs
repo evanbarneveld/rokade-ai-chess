@@ -1,4 +1,4 @@
-use crate::piece::pieces::{Color, PieceType};
+use crate::piece::pieces::Color;
 use crate::search::core::alphabeta::alphabeta;
 use crate::search::state::tt::TranspositionTable;
 use crate::search::state::rep_stack::RepetitionStack;
@@ -36,23 +36,9 @@ pub fn prune_null_moves(
     if depth >= NULL_MOVE_PRUNING_START_DEPTH {
         let in_check = game_state.mutable_board().is_side_in_check(to_move);
         if !in_check && halfmove_clock < 100 {
-            // Quick material heuristic: require presence of any piece other than kings/pawns
-            let mut has_non_pawn_minor = false;
-            'scan: for r in 0..8 {
-                for c in 0..8 {
-                    if let Some(p) = game_state.board().get(r, c)
-                        && p.get_color() == to_move {
-                            match p.get_type() {
-                                PieceType::Knight | PieceType::Bishop | PieceType::Rook | PieceType::Queen => {
-                                    has_non_pawn_minor = true;
-                                    break 'scan;
-                                }
-                                _ => {}
-                            }
-                        }
-                }
-            }
-            if has_non_pawn_minor {
+            // O(1) material check: require presence of any piece other than kings/pawns
+            // to avoid zugzwang-related errors in pawn endgames
+            if game_state.board().has_non_pawn_material(to_move) {
                 // Reduction R: slightly deeper at high depths with stronger eval
                 let r: usize = if depth >= 8 { 3 } else { 2 };
                 // Probe a null-window Search; use a narrow window around beta (White) or alpha (Black)

@@ -18,6 +18,9 @@ pub struct Board {
     squares: [[Option<Piece>; 8]; 8],
     white_king_location: (usize, usize),
     black_king_location: (usize, usize),
+    /// Piece counts per color: [White, Black] x [Knight, Bishop, Rook, Queen]
+    /// Used for O(1) material checks (e.g., null move pruning zugzwang detection)
+    piece_counts: [[u8; 4]; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -30,6 +33,7 @@ pub struct UndoMove {
     pub(crate) prev_black_king: (usize, usize),
     pub(crate) castle_rook_from: Option<(usize, usize)>,
     pub(crate) castle_rook_to: Option<(usize, usize)>,
+    pub(crate) prev_piece_counts: [[u8; 4]; 2],
 }
 
 impl Default for Board {
@@ -47,7 +51,8 @@ impl Board {
         let mut board = Board {
             squares: [[None; 8]; 8],
             white_king_location: (0, 0),
-            black_king_location: (0, 0)
+            black_king_location: (0, 0),
+            piece_counts: [[0; 4]; 2],
         };
         board.setup_initial_position();
         board
@@ -57,7 +62,8 @@ impl Board {
         Board {
             squares: [[None; 8]; 8],
             white_king_location: (0, 0),
-            black_king_location: (0, 0)
+            black_king_location: (0, 0),
+            piece_counts: [[0; 4]; 2],
         }
     }
 
@@ -80,6 +86,13 @@ impl Board {
         }
 
         self.find_and_set_location_of_kings();
+
+        // Initialize piece counts: each side starts with 2N, 2B, 2R, 1Q
+        // Index: 0=Knight, 1=Bishop, 2=Rook, 3=Queen
+        self.piece_counts = [
+            [2, 2, 2, 1], // White
+            [2, 2, 2, 1], // Black
+        ];
     }
 
     // ============================================================
@@ -220,9 +233,18 @@ impl Board {
         let captured = self.get(to.0, to.1);
         let prev_white_king = self.get_king_location(Color::White);
         let prev_black_king = self.get_king_location(Color::Black);
+        let prev_piece_counts = self.piece_counts;
 
         let mut castle_rook_from: Option<(usize, usize)> = None;
         let mut castle_rook_to: Option<(usize, usize)> = None;
+
+        // Update piece counts for captured piece
+        if let Some(cap) = captured {
+            if let Some(idx) = Self::piece_type_to_count_index(cap.get_type()) {
+                self.piece_counts[cap.get_color() as usize][idx] =
+                    self.piece_counts[cap.get_color() as usize][idx].saturating_sub(1);
+            }
+        }
 
         // Handle castling
         if let Some(p) = moved
@@ -272,9 +294,14 @@ impl Board {
                         'n' => PieceType::Knight,
                         _ => p.get_type(),
                     };
+                    // Update piece counts for promotion
+                    if let Some(idx) = Self::piece_type_to_count_index(pt) {
+                        self.piece_counts[p.get_color() as usize][idx] += 1;
+                    }
                     p = Piece::new(pt, p.get_color());
                 } else if (p.get_color() == Color::White && to.0 == 7) || (p.get_color() == Color::Black && to.0 == 0) {
-                    // Auto-promote to queen
+                    // Auto-promote to queen - update piece counts
+                    self.piece_counts[p.get_color() as usize][3] += 1; // 3 = Queen index
                     p = Piece::new(PieceType::Queen, p.get_color());
                 }
             }
@@ -296,6 +323,7 @@ impl Board {
             prev_black_king,
             castle_rook_from,
             castle_rook_to,
+            prev_piece_counts,
         }
     }
 
@@ -317,6 +345,49 @@ impl Board {
         // Restore king locations
         self.set_king_location(Color::White, undo.prev_white_king);
         self.set_king_location(Color::Black, undo.prev_black_king);
+
+        // Restore piece counts
+        self.piece_counts = undo.prev_piece_counts;
+    }
+
+    // ============================================================
+    // PIECE COUNT MANAGEMENT
+    // ============================================================
+
+    /// Convert piece type to count array index (Knight=0, Bishop=1, Rook=2, Queen=3)
+    /// Returns None for Pawn and King (not tracked)
+    #[inline]
+    const fn piece_type_to_count_index(pt: PieceType) -> Option<usize> {
+        match pt {
+            PieceType::Knight => Some(0),
+            PieceType::Bishop => Some(1),
+            PieceType::Rook => Some(2),
+            PieceType::Queen => Some(3),
+            _ => None,
+        }
+    }
+
+    /// Recompute piece counts by scanning the board.
+    /// Call this after setting up a position from FEN or other external source.
+    pub fn recompute_piece_counts(&mut self) {
+        self.piece_counts = [[0; 4]; 2];
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(p) = self.get(r, c) {
+                    if let Some(idx) = Self::piece_type_to_count_index(p.get_type()) {
+                        self.piece_counts[p.get_color() as usize][idx] += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /// O(1) check if a side has any non-pawn material (Knight, Bishop, Rook, or Queen).
+    /// Used by null move pruning to detect potential zugzwang positions.
+    #[inline]
+    pub fn has_non_pawn_material(&self, color: Color) -> bool {
+        let counts = self.piece_counts[color as usize];
+        counts[0] + counts[1] + counts[2] + counts[3] > 0
     }
 
     // ============================================================
