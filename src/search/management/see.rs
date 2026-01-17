@@ -102,28 +102,31 @@ fn find_smallest_attacker(
     let mut smallest_val = i32::MAX;
 
     // Check pawns first (cheapest)
-    // In this engine, BOTH White and Black pawns attack toward higher row numbers
-    // This is unconventional but matches the test expectations and engine design
-    // To find pawn attackers of target square (r, c), check (r-1, c±1)
-    let pawn_rows: &[i32] = &[-1];  // Both colors attack from one row below
-    for &dr in pawn_rows {
-        for dc in [-1, 1] {
-            let r_i32 = tr as i32 + dr;
-            let c_i32 = tc as i32 + dc;
-            // Check bounds before casting to usize to avoid wraparound
-            if r_i32 >= 0 && r_i32 < 8 && c_i32 >= 0 && c_i32 < 8 {
-                let r = r_i32 as usize;
-                let c = c_i32 as usize;
-                if let Some(p) = board.get(r, c)
-                    && p.get_color() == attacker_color
-                    && p.get_type() == PieceType::Pawn {
-                        let val = piece_value_cp(PieceType::Pawn);
-                        if val < smallest_val {
-                            smallest_val = val;
-                            smallest = Some(((r, c), p));
-                        }
+    // White pawns attack from lower rows (row-1), Black pawns attack from higher rows (row+1)
+    // To find pawn attackers of target square (r, c):
+    // - White pawn attackers: check (r-1, c±1)
+    // - Black pawn attackers: check (r+1, c±1)
+    let pawn_row_offset = match attacker_color {
+        Color::White => -1,  // White pawns attack from one row below (toward higher rows)
+        Color::Black => 1,   // Black pawns attack from one row above (toward lower rows)
+    };
+
+    for dc in [-1, 1] {
+        let r_i32 = tr as i32 + pawn_row_offset;
+        let c_i32 = tc as i32 + dc;
+        // Check bounds before casting to usize to avoid wraparound
+        if r_i32 >= 0 && r_i32 < 8 && c_i32 >= 0 && c_i32 < 8 {
+            let r = r_i32 as usize;
+            let c = c_i32 as usize;
+            if let Some(p) = board.get(r, c)
+                && p.get_color() == attacker_color
+                && p.get_type() == PieceType::Pawn {
+                    let val = piece_value_cp(PieceType::Pawn);
+                    if val < smallest_val {
+                        smallest_val = val;
+                        smallest = Some(((r, c), p));
                     }
-            }
+                }
         }
     }
 
@@ -253,17 +256,18 @@ pub fn see_after(board: &Board, side: Color, to: (usize, usize), captured: Optio
 #[inline]
 pub fn attacked_by_pawn(board: &Board, sq: (usize, usize), attacker: Color) -> bool {
     let (r, c) = sq;
-    // Both White and Black pawns attack one row "ahead" in the same direction on THIS board
-    // White pawns at row N attack row N+1
-    // Black pawns at row N also attack row N+1 (when they're on White's side of board)
+    // White pawns attack from row-1 (from lower rows toward higher rows)
+    // Black pawns attack from row+1 (from higher rows toward lower rows)
     match attacker {
         Color::White => {
+            // White pawn at (r-1, c±1) attacks sq at (r, c)
             (r > 0 && c > 0 && matches!(board.get(r-1, c-1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
             || (r > 0 && c + 1 < 8 && matches!(board.get(r-1, c+1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
         }
         Color::Black => {
-            (r > 0 && c > 0 && matches!(board.get(r-1, c-1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
-            || (r > 0 && c + 1 < 8 && matches!(board.get(r-1, c+1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
+            // Black pawn at (r+1, c±1) attacks sq at (r, c)
+            (r + 1 < 8 && c > 0 && matches!(board.get(r+1, c-1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
+            || (r + 1 < 8 && c + 1 < 8 && matches!(board.get(r+1, c+1), Some(p) if p.get_color() == attacker && p.get_type() == PieceType::Pawn))
         }
     }
 }
@@ -457,11 +461,12 @@ mod tests {
     #[test]
     fn test_see_knight_takes_pawn_defended_by_pawn() {
         // Knight takes pawn defended by pawn: N x P(p) => lose knight
+        // Black pawn at row 4 (rank 4) can attack row 3 (rank 5) diagonally
         let mut board = setup_board_from_pieces(&[
-            ((2, 2), PieceType::Pawn, Color::Black), // Defender pawn at c6
+            ((4, 2), PieceType::Pawn, Color::Black), // Defender pawn at c4, attacks d3 (row 3)
         ]);
-        // Knight on d5 after capturing pawn
-        board.set(3, 3, Some(Piece::new(PieceType::Knight, Color::White))); // d5
+        // Knight on d3 (row 3) after capturing pawn - note: row 3 = rank 5 in this engine
+        board.set(3, 3, Some(Piece::new(PieceType::Knight, Color::White))); // d3
 
         let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
         // Knight (320) takes pawn (100), then black pawn takes knight (320)
@@ -473,9 +478,9 @@ mod tests {
     fn test_see_equal_trade_knight_for_knight() {
         // White knight takes black knight, black has a piece that can recapture
         let mut board = setup_board_from_pieces(&[
-            ((2, 2), PieceType::Pawn, Color::Black), // Can recapture
+            ((4, 2), PieceType::Pawn, Color::Black), // Can recapture at row 3 from row 4
         ]);
-        board.set(3, 3, Some(Piece::new(PieceType::Knight, Color::White))); // WN on d5
+        board.set(3, 3, Some(Piece::new(PieceType::Knight, Color::White))); // WN on d3
 
         let see = see_dest_estimate(&board, Color::White, (3, 3), 320);
         // Takes knight (320), then loses knight (320) => 0
@@ -486,9 +491,9 @@ mod tests {
     fn test_see_queen_takes_pawn_attacked_by_pawn() {
         // Queen takes pawn, but attacked by enemy pawn => bad trade
         let mut board = setup_board_from_pieces(&[
-            ((2, 2), PieceType::Pawn, Color::Black), // Attacking pawn
+            ((4, 2), PieceType::Pawn, Color::Black), // Attacking pawn at row 4
         ]);
-        board.set(3, 3, Some(Piece::new(PieceType::Queen, Color::White))); // Queen on d5
+        board.set(3, 3, Some(Piece::new(PieceType::Queen, Color::White))); // Queen on d3 (row 3)
 
         let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
         // Queen (900) takes pawn (100), loses queen (900) => 100 - 900 = -800
@@ -581,7 +586,7 @@ mod tests {
     #[test]
     fn test_pawn_attacked_minor_penalty() {
         let board = setup_board_from_pieces(&[
-            ((2, 2), PieceType::Pawn, Color::Black), // Black pawn
+            ((4, 2), PieceType::Pawn, Color::Black), // Black pawn at row 4 attacks row 3
         ]);
 
         let penalty = pawn_attacked_minor_penalty(&board, Color::White, (3, 3), PieceType::Knight);
