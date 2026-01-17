@@ -1,4 +1,4 @@
-Here are the orthogonal aspects of your chess engine that can be reviewed separately:
+please Here are the orthogonal aspects of your chess engine that can be reviewed separately:
 
 please review the <aspect> aspect of the chess engine. See <main-file> for a starting point
 
@@ -24,42 +24,46 @@ Summary
 
 Aspect,Main File
 ----------------
+Cycle (reviewed/fixed/tested)
+1 Alpha-Beta/PVS,src/search/core/alphabeta.rs
+1 Quiescence Search,src/search/core/qsearch.rs
+1 Iterative Deepening,src/search/core/advanced_search.rs
+0 Aspiration Windows,src/search/management/aspiration.rs
+0 Null Move Pruning,src/search/management/prune_null_moves.rs
+0 Late Move Reduction,src/search/core/alphabeta.rs
+0 Futility Pruning,src/search/core/qsearch.rs
+0 Delta Pruning,src/search/core/qsearch.rs
+0 SEE Pruning,src/board/see.rs
+0 TT Move Priority,src/search/core/alphabeta.rs
+0 MVV-LVA,src/search/core/alphabeta.rs
+0 Killer Moves,src/search/evaluation/heuristics.rs
+0 History Heuristic,src/search/evaluation/heuristics.rs
+0 Transposition Table,src/search/state/tt.rs
+0 Zobrist Hashing,src/search/state/zobrist.rs
+0 Material + PST,src/board/evaluators/pst.rs
+0 Pawn Structure,src/board/evaluators/evaluate_pawns.rs
+0 Knight Evaluation,src/board/evaluators/evaluate_knights.rs
+0 Bishop Evaluation,src/board/evaluators/evaluate_bishops.rs
+0 Rook Evaluation,src/board/evaluators/evaluate_rooks.rs
+0 Queen Evaluation,src/board/evaluators/evaluate_queens.rs
+0 King Safety,src/board/evaluators/evaluate_king.rs
+0 Mobility & Activity,src/board/evaluator.rs
+0 Hanging Pieces,src/board/evaluator.rs
+0 Threat Resolution,src/search/evaluation/root_heuristics/threat_resolution.rs
+0 Knight Evacuation,src/search/evaluation/root_heuristics/knight_evacuation.rs
+0 Repetition Avoidance,src/search/evaluation/repetition.rs
+0 Move Generation,src/search/management/move_generator.rs
+0 Board Representation,src/board/board.rs
+0 Attack Detection,src/board/checks/square_attacked.rs
+0 Time Management,src/search/integration/time_control.rs
+0 Opening Book,src/book/book.rs
+0 UCI Protocol,src/uci/mod.rs
+0 Parallel Search,src/search/integration/threading.rs
+0 Playing Strength,src/search/integration/playing_strength.rs
 
-Alpha-Beta/PVS,src/search/core/alphabeta.rs
-Quiescence Search,src/search/core/qsearch.rs
-Iterative Deepening,src/search/core/advanced_search.rs
-Aspiration Windows,src/search/management/aspiration.rs
-Null Move Pruning,src/search/management/prune_null_moves.rs
-Late Move Reduction,src/search/core/alphabeta.rs
-Futility Pruning,src/search/core/qsearch.rs
-Delta Pruning,src/search/core/qsearch.rs
-SEE Pruning,src/board/see.rs
-TT Move Priority,src/search/core/alphabeta.rs
-MVV-LVA,src/search/core/alphabeta.rs
-Killer Moves,src/search/evaluation/heuristics.rs
-History Heuristic,src/search/evaluation/heuristics.rs
-Transposition Table,src/search/state/tt.rs
-Zobrist Hashing,src/search/state/zobrist.rs
-Material + PST,src/board/evaluators/pst.rs
-Pawn Structure,src/board/evaluators/evaluate_pawns.rs
-Knight Evaluation,src/board/evaluators/evaluate_knights.rs
-Bishop Evaluation,src/board/evaluators/evaluate_bishops.rs
-Rook Evaluation,src/board/evaluators/evaluate_rooks.rs
-Queen Evaluation,src/board/evaluators/evaluate_queens.rs
-King Safety,src/board/evaluators/evaluate_king.rs
-Mobility & Activity,src/board/evaluator.rs
-Hanging Pieces,src/board/evaluator.rs
-Threat Resolution,src/search/evaluation/root_heuristics/threat_resolution.rs
-Knight Evacuation,src/search/evaluation/root_heuristics/knight_evacuation.rs
-Repetition Avoidance,src/search/evaluation/repetition.rs
-Move Generation,src/search/management/move_generator.rs
-Board Representation,src/board/board.rs
-Attack Detection,src/board/checks/square_attacked.rs
-Time Management,src/search/integration/time_control.rs
-Opening Book,src/book/book.rs
-UCI Protocol,src/uci/mod.rs
-Parallel Search,src/search/integration/threading.rs
-Playing Strength,src/search/integration/playing_strength.rs
+More aspects:
+
+0 |Piece development
 
 
 Search Algorithms

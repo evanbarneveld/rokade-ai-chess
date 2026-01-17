@@ -64,33 +64,35 @@ pub(crate) fn probe_with_aspiration(
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
             a = bounds.0;
             if tried < 3 { continue; }
+            // After 3 tries still failing low, fall back to full-width search
         } else if best_raw >= b {
             // fail-high: widen up
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
             let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
             b = bounds.1;
             if tried < 3 { continue; }
+            // After 3 tries still failing high, fall back to full-width search
+        } else {
+            // Score is within bounds - return the result directly
+            return (_mv, _best_adj, best_raw);
         }
+
         // At this point we have tried a few widened windows but still failed to land inside bounds.
-        // To ensure a stable PV update at this depth, fall back to a full-width search at once.
-         {
-            // Reset to the full window and a modest aspiration window for subsequent depths
-            *window = (*window).max(ASP_WINDOW_INIT_CP);
-            let (fa, fb) = (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1);
-            let (mv2, best_adj2, best_raw2) = evaluate_root_for_bounds(
-                active_color,
-                root_moves,
-                depth_now,
-                fa,
-                fb,
-                tt,
-                game_state,
-                history,
-            );
-            if best_raw2 == SEARCH_ABORTED {
-                return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
-            }
-            return (mv2, best_adj2, best_raw2);
+        // Fall back to a full-width search to ensure a stable result.
+        let (fa, fb) = (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1);
+        let (mv2, best_adj2, best_raw2) = evaluate_root_for_bounds(
+            active_color,
+            root_moves,
+            depth_now,
+            fa,
+            fb,
+            tt,
+            game_state,
+            history,
+        );
+        if best_raw2 == SEARCH_ABORTED {
+            return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
         }
+        return (mv2, best_adj2, best_raw2);
     }
 }

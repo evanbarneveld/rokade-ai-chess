@@ -84,3 +84,62 @@ pub fn compute_zobrist_full(
 
     key
 }
+
+// ============================================================
+// INCREMENTAL ZOBRIST UPDATE HELPERS
+// These are available for future optimization to true incremental updates
+// ============================================================
+
+/// XOR a piece in/out of the key (toggle)
+#[inline]
+#[allow(dead_code)]
+pub fn zobrist_toggle_piece(key: u64, pt: PieceType, color: Color, sq: (usize, usize)) -> u64 {
+    zobrist_init_once();
+    let idx = piece_index(pt, color);
+    let sq_idx = sq.0 * 8 + sq.1;
+    unsafe { key ^ Z_PIECE[idx][sq_idx] }
+}
+
+/// XOR the side-to-move bit
+#[inline]
+#[allow(dead_code)]
+pub fn zobrist_toggle_side(key: u64) -> u64 {
+    zobrist_init_once();
+    unsafe { key ^ Z_SIDE }
+}
+
+/// Update castling portion of key (XOR out old, XOR in new)
+#[inline]
+#[allow(dead_code)]
+pub fn zobrist_update_castling(key: u64, old_rights: &crate::state::castling::CastlingRights, new_rights: &crate::state::castling::CastlingRights) -> u64 {
+    zobrist_init_once();
+    let old_idx = castling_index(old_rights);
+    let new_idx = castling_index(new_rights);
+    unsafe { key ^ Z_CASTLING[old_idx] ^ Z_CASTLING[new_idx] }
+}
+
+/// Update en passant portion of key (XOR out old, XOR in new)
+#[inline]
+#[allow(dead_code)]
+pub fn zobrist_update_ep(key: u64, old_ep: Option<(usize, usize)>, new_ep: Option<(usize, usize)>) -> u64 {
+    zobrist_init_once();
+    let mut k = key;
+    if let Some((_, c)) = old_ep {
+        unsafe { k ^= Z_EP[c]; }
+    }
+    if let Some((_, c)) = new_ep {
+        unsafe { k ^= Z_EP[c]; }
+    }
+    k
+}
+
+#[inline]
+#[allow(dead_code)]
+fn castling_index(rights: &crate::state::castling::CastlingRights) -> usize {
+    let mut idx = 0;
+    if rights.white_kingside() { idx |= 1; }
+    if rights.white_queenside() { idx |= 2; }
+    if rights.black_kingside() { idx |= 4; }
+    if rights.black_queenside() { idx |= 8; }
+    idx
+}

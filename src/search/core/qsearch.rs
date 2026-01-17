@@ -4,8 +4,9 @@ use crate::search::core::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE,
 use crate::state::game_state::GameState;
 use crate::search::management::see::see_dest_estimate;
 use crate::search::integration::time_control::time_is_up;
-use crate::search::state::zobrist::compute_zobrist_full;
+// Note: Zobrist key is now maintained incrementally in GameState
 use crate::search::state::rep_stack::RepetitionStack;
+use crate::search::state::tt::MATE_VALUE;
 
 // Tighter margins with a stronger static evaluator
 const FUT_MARGIN: i32 = 40;
@@ -30,12 +31,8 @@ pub fn qsearch(
     }
     // Draw checks in quiescence as well (only if Zobrist hashing is enabled)
     if crate::search::core::advanced_search::ZOBRIST_HASHING_ENABLED {
-        let key_here = compute_zobrist_full(
-            game_state.board(),
-            to_move,
-            &game_state.castling_rights(),
-            game_state.en_passant_target(),
-        );
+        // Use the incrementally maintained Zobrist key from GameState
+        let key_here = game_state.zobrist_key();
         if rep_stack.contains(&key_here) {
             return 0;
         }
@@ -63,6 +60,16 @@ pub fn qsearch(
             if stand_pat < beta {
                 beta = stand_pat;
             }
+        }
+
+        // Delta pruning: if we're so far behind that even the best capture can't help, give up early
+        // This is checked before move generation to save work
+        if to_move == Color::White {
+            if stand_pat + DELTA_MARGIN <= alpha {
+                return stand_pat;
+            }
+        } else if stand_pat - DELTA_MARGIN >= beta {
+            return stand_pat;
         }
     }
 
@@ -180,18 +187,16 @@ pub fn qsearch(
         }
     }
 
-    // Delta pruning
-    if !in_check {
-        if to_move == Color::White {
-            if stand_pat + DELTA_MARGIN <= alpha {
-                return stand_pat;
-            }
-        } else if stand_pat - DELTA_MARGIN >= beta {
-            return stand_pat;
-        }
-    }
-
     if moves.is_empty() {
+        // If in check with no legal moves, it's checkmate
+        // Use a large offset (100) since we don't track exact ply in qsearch
+        if in_check {
+            return if to_move == Color::White {
+                -MATE_VALUE + 100  // White is mated (very bad for White)
+            } else {
+                MATE_VALUE - 100   // Black is mated (very good for White)
+            };
+        }
         return stand_pat;
     }
 
@@ -212,27 +217,23 @@ pub fn qsearch(
         });
     }
 
-    // Simple capture SEE-like filter: skip obviously losing captures when not in check.
-    // Uses basic piece values; this is a cheap approximation, not true SEE.
+    // Futility pruning in move loop: skip captures that cannot improve the position
+    // Note: SEE-based bad capture filtering is already done during move generation
 
     let mut a = alpha;
     let mut bnd = beta;
     if to_move == Color::White {
         let mut best = MIN_EVAL_VALUE;
         for (from, to, promo) in moves.into_iter() {
-            if !in_check && QSEE_PRUNING_ENABLED
-                && let (Some(att), Some(vic)) = (game_state.board().get(from.0, from.1), game_state.board().get(to.0, to.1)) {
-                    let att_v = piece_value_cp(att.get_type());
+            // Futility in qsearch (White to move): if even taking the victim cannot raise alpha, skip
+            if !in_check && QSEE_PRUNING_ENABLED && promo.is_none() {
+                if let Some(vic) = game_state.board().get(to.0, to.1) {
                     let vic_v = piece_value_cp(vic.get_type());
-                    // Skip "bad" captures where attacker is significantly more valuable than victim
-                    if vic_v + 50 < att_v && promo.is_none() {
-                        continue;
-                    }
-                    // Futility in qsearch (White to move): if even taking the victim cannot raise alpha, skip
-                    if stand_pat + vic_v + FUT_MARGIN <= a && promo.is_none() {
+                    if stand_pat + vic_v + FUT_MARGIN <= a {
                         continue;
                     }
                 }
+            }
             let u = game_state.make_move_fast(from, to, promo);
             let score = qsearch(game_state, a, bnd, rep_stack);
             game_state.unmake_move_fast(u);
@@ -250,18 +251,15 @@ pub fn qsearch(
     } else {
         let mut best = MAX_EVAL_VALUE;
         for (from, to, promo) in moves.into_iter() {
-            if !in_check && QSEE_PRUNING_ENABLED
-                && let (Some(att), Some(vic)) = (game_state.board().get(from.0, from.1), game_state.board().get(to.0, to.1)) {
-                    let att_v = piece_value_cp(att.get_type());
+            // Futility in qsearch (Black to move): if even taking the victim cannot drop below beta, skip
+            if !in_check && QSEE_PRUNING_ENABLED && promo.is_none() {
+                if let Some(vic) = game_state.board().get(to.0, to.1) {
                     let vic_v = piece_value_cp(vic.get_type());
-                    if vic_v + 50 < att_v && promo.is_none() {
-                        continue;
-                    }
-                    // Futility in qsearch (Black to move): if even taking the victim cannot drop below beta, skip
-                    if stand_pat - vic_v - FUT_MARGIN >= bnd && promo.is_none() {
+                    if stand_pat - vic_v - FUT_MARGIN >= bnd {
                         continue;
                     }
                 }
+            }
             let u = game_state.make_move_fast(from, to, promo);
             let score = qsearch(game_state, a, bnd, rep_stack);
             game_state.unmake_move_fast(u);

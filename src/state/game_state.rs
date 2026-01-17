@@ -4,6 +4,7 @@ use crate::history::history::History;
 use crate::piece::pieces::{Piece, Color, PieceType};
 use crate::state::outcome::{recompute_outcome, OutcomeType};
 use crate::state::castling::CastlingRights;
+use crate::search::state::zobrist::compute_zobrist_full;
 
 // ============================================================
 // GAME STATE - Chess Rules + Game Management
@@ -25,7 +26,9 @@ pub struct GameState {
     en_passant_target: Option<(usize, usize)>,
     half_move_clock: u32,
     full_move_number: u32,
-    outcome: Option<OutcomeType>
+    outcome: Option<OutcomeType>,
+    /// Incrementally maintained Zobrist hash key
+    zobrist_key: u64,
 }
 
 impl Default for GameState {
@@ -40,14 +43,20 @@ impl GameState {
     // ============================================================
 
     pub fn new() -> Self {
+        let board = Board::new();
+        let active_color = Color::White;
+        let castling_rights = CastlingRights::all();
+        let en_passant_target = None;
+        let zobrist_key = compute_zobrist_full(&board, active_color, &castling_rights, en_passant_target);
         GameState {
-            board: Board::new(),
-            active_color: Color::White,
-            castling_rights: CastlingRights::all(),
-            en_passant_target: None,
+            board,
+            active_color,
+            castling_rights,
+            en_passant_target,
             half_move_clock: 0,
             full_move_number: 1,
-            outcome: None
+            outcome: None,
+            zobrist_key,
         }
     }
 
@@ -59,6 +68,7 @@ impl GameState {
         half_move_clock: u32,
         full_move_number: u32
     ) -> Self {
+        let zobrist_key = compute_zobrist_full(&board, active_color, &castling_rights, en_passant_target);
         GameState {
             board,
             active_color,
@@ -66,7 +76,8 @@ impl GameState {
             en_passant_target,
             half_move_clock,
             full_move_number,
-            outcome: None
+            outcome: None,
+            zobrist_key,
         }
     }
 
@@ -140,6 +151,12 @@ impl GameState {
 
     pub fn get_outcome(&self) -> Option<OutcomeType> {
         self.outcome
+    }
+
+    /// Get the current Zobrist hash key (maintained incrementally during search)
+    #[inline]
+    pub fn zobrist_key(&self) -> u64 {
+        self.zobrist_key
     }
 
     // ============================================================
@@ -253,6 +270,7 @@ pub struct UndoGameState {
     pub(crate) prev_full_move_number: u32,
     pub(crate) ep_captured_sq: Option<(usize, usize)>,
     pub(crate) ep_captured_piece: Option<Piece>,
+    pub(crate) prev_zobrist_key: u64,
 }
 
 impl GameState {
@@ -263,6 +281,7 @@ impl GameState {
         let prev_en_passant_target = self.en_passant_target;
         let prev_half_move_clock = self.half_move_clock;
         let prev_full_move_number = self.full_move_number;
+        let prev_zobrist_key = self.zobrist_key;
 
         let moving_piece = self.board.get(from.0, from.1);
 
@@ -427,6 +446,15 @@ impl GameState {
             self.full_move_number += 1;
         }
 
+        // Recompute Zobrist key for the new position
+        // (Incremental update would be faster but more complex due to castling/ep/promotion)
+        self.zobrist_key = compute_zobrist_full(
+            &self.board,
+            self.active_color,
+            &self.castling_rights,
+            self.en_passant_target,
+        );
+
         UndoGameState {
             board_undo,
             prev_active_color,
@@ -436,6 +464,7 @@ impl GameState {
             prev_full_move_number,
             ep_captured_sq,
             ep_captured_piece,
+            prev_zobrist_key,
         }
     }
 
@@ -459,6 +488,7 @@ impl GameState {
         self.en_passant_target = u.prev_en_passant_target;
         self.half_move_clock = u.prev_half_move_clock;
         self.full_move_number = u.prev_full_move_number;
+        self.zobrist_key = u.prev_zobrist_key;
 
         #[cfg(debug_assertions)]
         {

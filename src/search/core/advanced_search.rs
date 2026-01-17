@@ -111,7 +111,7 @@ pub fn find_best_move(
 
     let effective_depth = search_depth;
 
-    let root_moves: Vec<((usize, usize), (usize, usize), Option<char>)> = {
+    let mut root_moves: Vec<((usize, usize), (usize, usize), Option<char>)> = {
         let mut v = Vec::with_capacity(gen_moves.len());
 
         get_root_moves(&mut gs, history, active_color, &gen_moves, &mut v);
@@ -165,11 +165,12 @@ pub fn find_best_move(
     let mut tt = tt_mutex.lock().unwrap();
     let mut _last_score: i32 = 0;
     let mut chosen: Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> = None;
-    let mut window: i32 = ASP_WINDOW_INIT_CP;
 
     if ID_ITERATIONS_ENABLED {
         for depth_now in 1..=effective_depth {
             tt.next_age();
+            // Reset aspiration window at the start of each iteration
+            let mut window: i32 = ASP_WINDOW_INIT_CP;
             let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
                 probe_with_aspiration(
                     active_color,
@@ -209,11 +210,20 @@ pub fn find_best_move(
             let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
             emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
             chosen = Some((bf, bt, bpromo, best_adj, depth_now));
+
+            // Reorder root moves: place best move from this iteration first for next iteration
+            if let Some(pos) = root_moves.iter().position(|&(f, t, p)| f == bf && t == bt && p == bpromo) {
+                if pos > 0 {
+                    let best = root_moves.remove(pos);
+                    root_moves.insert(0, best);
+                }
+            }
         }
     } else {
         // Single-depth Search without iterative deepening
         let depth_now = effective_depth;
         tt.next_age();
+        let mut window: i32 = ASP_WINDOW_INIT_CP;
         let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
             probe_with_aspiration(
                 active_color,
