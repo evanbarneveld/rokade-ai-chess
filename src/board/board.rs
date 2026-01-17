@@ -442,7 +442,7 @@ impl Board {
         let a = attacker.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
 
         if victim.is_some() {
-            v * 100 - a
+            v * 10 - a / 10
         } else {
             -1
         }

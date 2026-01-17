@@ -168,23 +168,29 @@ pub fn adjust_root_score(
         .unwrap_or(false);
 
     // 1. SEE penalties
-    adjusted += apply_destination_see_penalties(
+    let see_delta = apply_destination_see_penalties(
         base_board, &post_after, side, from, to,
         is_capture, moved_is_pawn, gives_check, moved_is_queen,
     );
+    adjusted += see_delta;
 
     // 2. Threat resolution and evacuation
-    adjusted += threat_resolution_and_evacuation(
+    let threat_delta = threat_resolution_and_evacuation(
         base_board, &post_after, side, from, to, gives_check,
     );
+    adjusted += threat_delta;
 
     // 3. Knight evacuation priority
     adjusted += knight_evacuations_priority(base_board, side, from, to, gives_check);
 
     // 4. Capture bonus
-    if let Some(captured) = base_board.get(to.0, to.1) {
-        adjusted += capture_value_cp(captured.get_type()) / ROOT_CAPTURE_BONUS_DIV;
-    }
+    let cap_bonus = if let Some(captured) = base_board.get(to.0, to.1) {
+        let b = capture_value_cp(captured.get_type()) / ROOT_CAPTURE_BONUS_DIV;
+        adjusted += b;
+        b
+    } else {
+        0
+    };
 
     // 5. Endgame / 50-move scaling
     adjusted += endgame_50move_scaling(side, score_raw, base_hmc, is_capture, moved_is_pawn);
@@ -193,9 +199,10 @@ pub fn adjust_root_score(
     adjusted += king_safety_root_heuristics(base_board, side, from, to, is_capture);
 
     // 7. Self-hang or check mobility
-    adjusted += self_hang_or_check_mobility(
+    let hang_delta = self_hang_or_check_mobility(
         base_board, &post_after, side, from, to, gives_check, opp,
     );
+    adjusted += hang_delta;
 
     // 8. Queen kingside pressure
     adjusted += queen_kingside_pressure_bonus(base_board, side, from, to);

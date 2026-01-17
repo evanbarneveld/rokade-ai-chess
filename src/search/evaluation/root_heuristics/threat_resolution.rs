@@ -72,9 +72,25 @@ pub fn threat_resolution_and_evacuation(
             // We moved the threatened piece - calculate evacuation bonus
             let mut evac_bonus = 0;
             let see_new = see_dest_estimate(post_after, side, to, 0);
+
+            // ALWAYS give evacuation bonus for moving an attacked piece
+            // Scale bonus by piece value to prioritize saving more valuable pieces
+            let base_evac = match pt {
+                PieceType::Queen => 800,
+                PieceType::Rook => 600,
+                PieceType::Bishop | PieceType::Knight => 500,
+                PieceType::Pawn => 300,
+                PieceType::King => 1000,
+            };
+
+            // Moving to safety gets full bonus; moving to another attacked square gets half bonus
             if !still_attacked || see_new >= 0 {
-                evac_bonus += 400;
+                evac_bonus += base_evac;
+            } else {
+                // Even moving to an attacked square is better than leaving it hanging
+                evac_bonus += base_evac / 2;
             }
+
 
             // Knight-specific center bonus
             if pt == PieceType::Knight {

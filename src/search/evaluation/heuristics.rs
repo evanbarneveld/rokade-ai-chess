@@ -26,7 +26,11 @@ impl SearchHeuristics {
     #[inline]
     fn idx_side(side: Color) -> usize { if let Color::White = side { 0 } else { 1 } }
     #[inline]
-    fn flat(from: (usize, usize), to: (usize, usize)) -> i16 { ((from.0*8 + from.1)*8 + (to.0*8 + to.1)) as i16 }
+    fn flat(from: (usize, usize), to: (usize, usize)) -> i16 {
+        let from_sq = (from.0 * 8 + from.1) as i16;
+        let to_sq = (to.0 * 8 + to.1) as i16;
+        from_sq * 64 + to_sq
+    }
 
     pub fn add_killer(&mut self, ply: usize, from: (usize, usize), to: (usize, usize)) {
         if ply >= self.killers.len() { return; }

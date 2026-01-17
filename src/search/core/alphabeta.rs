@@ -1,4 +1,5 @@
 use std::sync::{Mutex, OnceLock};
+use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{Color, Piece, PieceType, piece_value_cp};
 use crate::search::evaluation::heuristics::SearchHeuristics;
 use crate::search::management::prune_null_moves::prune_null_moves;
@@ -13,6 +14,7 @@ use crate::search::state::zobrist::compute_zobrist_full;
 use crate::search::state::rep_stack::RepetitionStack;
 
 const HUNDRED_HALF_MOVES: u32 = 100;
+const FRONTIER_FUTILITY_MARGIN: i32 = 200; // Margin for futility pruning at depth=1
 
 
 // ============================================================
@@ -208,6 +210,13 @@ fn search_moves(
     let mut is_first_move = true;
     let mut move_index: i32 = 0;
 
+    // Frontier futility pruning: compute static eval once if at depth=1
+    let static_eval = if depth == 1 {
+        Some(evaluate_position(game_state.board(), to_move))
+    } else {
+        None
+    };
+
     for (from, to, promo) in moves {
         let u = game_state.make_move_fast(from, to, promo);
 
@@ -236,6 +245,21 @@ fn search_moves(
         let quiet = !is_capture && promo.is_none();
         let allow_reduce = !(gives_check && child_depth <= 5);
         let captured_piece = u.board_undo.captured;
+
+        // Frontier futility pruning: skip quiet moves at depth=1 that can't improve position
+        if let Some(eval) = static_eval {
+            if quiet && !gives_check && !is_first_move {
+                if maximizing && eval + FRONTIER_FUTILITY_MARGIN <= alpha {
+                    game_state.unmake_move_fast(u);
+                    move_index += 1;
+                    continue;
+                } else if !maximizing && eval - FRONTIER_FUTILITY_MARGIN >= beta {
+                    game_state.unmake_move_fast(u);
+                    move_index += 1;
+                    continue;
+                }
+            }
+        }
 
         // Calculate LMR reduction
         let reduction = if is_first_move {
@@ -269,6 +293,10 @@ fn search_moves(
         game_state.unmake_move_fast(u);
         is_first_move = false;
 
+        // Track if this move improved the bound before updating
+        let old_alpha = alpha;
+        let old_beta = beta;
+
         // Update best value
         if is_better(current_score, current_value, maximizing) {
             current_value = current_score;
@@ -284,6 +312,11 @@ fn search_moves(
                         h.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
+            } else if quiet && current_score <= old_alpha {
+                // Penalize quiet moves that failed to improve alpha
+                with_heuristics(|h| {
+                    h.add_history(to_move, from, to, -((depth as i32) * (depth as i32)) / 2);
+                });
             }
             if current_value >= beta {
                 // Record killer move on beta cutoff for quiet moves
@@ -301,6 +334,11 @@ fn search_moves(
                         h.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
+            } else if quiet && current_score >= old_beta {
+                // Penalize quiet moves that failed to improve beta
+                with_heuristics(|h| {
+                    h.add_history(to_move, from, to, -((depth as i32) * (depth as i32)) / 2);
+                });
             }
             if current_value <= alpha {
                 // Record killer move on alpha cutoff for quiet moves

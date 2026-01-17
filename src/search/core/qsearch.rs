@@ -2,15 +2,15 @@ use crate::board::evaluator::evaluate_position;
 use crate::piece::pieces::{piece_value_cp, Color, PieceType};
 use crate::search::core::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, QUIESCENCE_ENABLED, QSEE_PRUNING_ENABLED, MVV_LVA_ENABLED, SEARCH_ABORTED};
 use crate::state::game_state::GameState;
-use crate::search::management::see::see_dest_estimate;
+use crate::search::management::see::{see_dest_estimate, QSEE_CAPTURE_TOLERANCE};
 use crate::search::integration::time_control::time_is_up;
 // Note: Zobrist key is now maintained incrementally in GameState
 use crate::search::state::rep_stack::RepetitionStack;
 use crate::search::state::tt::MATE_VALUE;
 
 // Tighter margins with a stronger static evaluator
-const FUT_MARGIN: i32 = 40;
-const DELTA_MARGIN: i32 = 120; // centipawns
+const FUT_MARGIN: i32 = 80;
+const DELTA_MARGIN: i32 = 925; // Queen value (900) + pawn promotion buffer (25)
 const MAX_QUIET_PUSHES: usize = 2;
 
 // Quiescence Search: consider only tactical continuations (captures) unless in check.
@@ -65,11 +65,15 @@ pub fn qsearch(
         // Delta pruning: if we're so far behind that even the best capture can't help, give up early
         // This is checked before move generation to save work
         if to_move == Color::White {
+            // White: too far below alpha, even capturing a queen + promotion won't help
             if stand_pat + DELTA_MARGIN <= alpha {
                 return stand_pat;
             }
-        } else if stand_pat - DELTA_MARGIN >= beta {
-            return stand_pat;
+        } else {
+            // Black: too far above beta (bad for Black), even capturing a queen + promotion won't help
+            if stand_pat - DELTA_MARGIN >= beta {
+                return stand_pat;
+            }
         }
     }
 
@@ -109,7 +113,7 @@ pub fn qsearch(
                 
                 let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
                 let see = see_dest_estimate(&post, to_move, to, cap_val);
-                see >= -50 // allow slightly negative to avoid over-pruning, but skip clearly losing captures
+                see >= QSEE_CAPTURE_TOLERANCE
             });
         } else {
             // Keep captures or promotions only, no SEE-based filtering
@@ -177,6 +181,20 @@ pub fn qsearch(
                 game_state.unmake_move_fast(u);
                 if illegal || attacked {
                     continue;
+                }
+                // Futility pruning for quiet pawn pushes: skip if cannot improve position
+                if QSEE_PRUNING_ENABLED {
+                    // Estimate pawn push value at ~100cp (depends on advancement)
+                    let push_bonus = 100;
+                    if to_move == Color::White {
+                        if stand_pat + push_bonus + FUT_MARGIN <= alpha {
+                            continue;
+                        }
+                    } else {
+                        if stand_pat - push_bonus - FUT_MARGIN >= beta {
+                            continue;
+                        }
+                    }
                 }
                 moves.push((from, to, None));
                 added += 1;

@@ -284,6 +284,7 @@ pub(crate) fn evaluate_root_for_bounds(
                 best_adjusted = adjusted;
                 best_score_raw = score_raw;
             }
+
             // Aspiration cutoffs help ordering mid-loop too
             if active_color == Color::White && score_raw >= b {
                 break;
