@@ -2,9 +2,6 @@ please Here are the orthogonal aspects of your chess engine that can be reviewed
 
 please review the <aspect> aspect of the chess engine. See <main-file> for a starting point
 
-
-some logic is backwards???? unusual for a chess engine?? (white/black symmetry)
-
 Aspect,Main File
 ----------------
 Done (=reviewed/fixed/tested)
@@ -42,12 +39,11 @@ Done (=reviewed/fixed/tested)
 [X] Board Representation,src/board/board.rs
 [X] Attack Detection,src/board/checks/square_attacked.rs
 
-[ ] Opening Book,src/book/book.rs
-[ ] Time Management,src/search/integration/time_control.rs
-[ ] UCI Protocol,src/uci/mod.rs
-[ ] Opening Book,src/book/book.rs
-[ ] Parallel Search,src/search/integration/threading.rs
-[ ] Playing Strength,src/search/integration/playing_strength.rs
+[X] Opening Book,src/book/book.rs
+[X] Time Management,src/search/integration/time_control.rs
+[X] UCI Protocol,src/uci/mod.rs
+[X] Parallel Search,src/search/integration/threading.rs
+[X] Playing Strength,src/search/integration/playing_strength.rs
 
 More aspects:
 

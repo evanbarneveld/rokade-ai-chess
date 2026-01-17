@@ -21,6 +21,8 @@ pub fn qsearch(
     rep_stack: &mut RepetitionStack,
 ) -> i32 {
     let to_move = game_state.active_color();
+    let maximizing = to_move == Color::White;
+
     // If quiescence is disabled, return a static evaluation immediately.
     if !QUIESCENCE_ENABLED {
         return evaluate_position(game_state.board(), to_move);
@@ -46,7 +48,8 @@ pub fn qsearch(
         game_state.mutable_board().is_side_in_check(to_move);
     let stand_pat = evaluate_position(game_state.board(), to_move);
     if !in_check {
-        if to_move == Color::White {
+        // Stand-pat cutoff: if current position is already good enough, return it
+        if maximizing {
             if stand_pat >= beta {
                 return stand_pat;
             }
@@ -64,13 +67,11 @@ pub fn qsearch(
 
         // Delta pruning: if we're so far behind that even the best capture can't help, give up early
         // This is checked before move generation to save work
-        if to_move == Color::White {
-            // White: too far below alpha, even capturing a queen + promotion won't help
+        if maximizing {
             if stand_pat + DELTA_MARGIN <= alpha {
                 return stand_pat;
             }
         } else {
-            // Black: too far above beta (bad for Black), even capturing a queen + promotion won't help
             if stand_pat - DELTA_MARGIN >= beta {
                 return stand_pat;
             }
@@ -186,7 +187,7 @@ pub fn qsearch(
                 if QSEE_PRUNING_ENABLED {
                     // Estimate pawn push value at ~100cp (depends on advancement)
                     let push_bonus = 100;
-                    if to_move == Color::White {
+                    if maximizing {
                         if stand_pat + push_bonus + FUT_MARGIN <= alpha {
                             continue;
                         }
@@ -209,7 +210,7 @@ pub fn qsearch(
         // If in check with no legal moves, it's checkmate
         // Use a large offset (100) since we don't track exact ply in qsearch
         if in_check {
-            return if to_move == Color::White {
+            return if maximizing {
                 -MATE_VALUE + 100  // White is mated (very bad for White)
             } else {
                 MATE_VALUE - 100   // Black is mated (very good for White)
@@ -238,59 +239,51 @@ pub fn qsearch(
     // Futility pruning in move loop: skip captures that cannot improve the position
     // Note: SEE-based bad capture filtering is already done during move generation
 
-    let mut a = alpha;
-    let mut bnd = beta;
-    if to_move == Color::White {
-        let mut best = MIN_EVAL_VALUE;
-        for (from, to, promo) in moves.into_iter() {
-            // Futility in qsearch (White to move): if even taking the victim cannot raise alpha, skip
-            if !in_check && QSEE_PRUNING_ENABLED && promo.is_none() {
-                if let Some(vic) = game_state.board().get(to.0, to.1) {
-                    let vic_v = piece_value_cp(vic.get_type());
-                    if stand_pat + vic_v + FUT_MARGIN <= a {
+    let mut best = if maximizing { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE };
+
+    for (from, to, promo) in moves.into_iter() {
+        // Futility in qsearch: if even taking the victim cannot improve our position, skip
+        if !in_check && QSEE_PRUNING_ENABLED && promo.is_none() {
+            if let Some(vic) = game_state.board().get(to.0, to.1) {
+                let vic_v = piece_value_cp(vic.get_type());
+                if maximizing {
+                    if stand_pat + vic_v + FUT_MARGIN <= alpha {
+                        continue;
+                    }
+                } else {
+                    if stand_pat - vic_v - FUT_MARGIN >= beta {
                         continue;
                     }
                 }
             }
-            let u = game_state.make_move_fast(from, to, promo);
-            let score = qsearch(game_state, a, bnd, rep_stack);
-            game_state.unmake_move_fast(u);
+        }
+
+        let u = game_state.make_move_fast(from, to, promo);
+        let score = qsearch(game_state, alpha, beta, rep_stack);
+        game_state.unmake_move_fast(u);
+
+        // Update best value
+        if maximizing {
             if score > best {
                 best = score;
             }
-            if best > a {
-                a = best;
+            if best > alpha {
+                alpha = best;
             }
-            if a >= bnd {
-                break;
-            }
-        }
-        best
-    } else {
-        let mut best = MAX_EVAL_VALUE;
-        for (from, to, promo) in moves.into_iter() {
-            // Futility in qsearch (Black to move): if even taking the victim cannot drop below beta, skip
-            if !in_check && QSEE_PRUNING_ENABLED && promo.is_none() {
-                if let Some(vic) = game_state.board().get(to.0, to.1) {
-                    let vic_v = piece_value_cp(vic.get_type());
-                    if stand_pat - vic_v - FUT_MARGIN >= bnd {
-                        continue;
-                    }
-                }
-            }
-            let u = game_state.make_move_fast(from, to, promo);
-            let score = qsearch(game_state, a, bnd, rep_stack);
-            game_state.unmake_move_fast(u);
+        } else {
             if score < best {
                 best = score;
             }
-            if best < bnd {
-                bnd = best;
-            }
-            if a >= bnd {
-                break;
+            if best < beta {
+                beta = best;
             }
         }
-        best
+
+        // Alpha-beta cutoff
+        if alpha >= beta {
+            break;
+        }
     }
+
+    best
 }

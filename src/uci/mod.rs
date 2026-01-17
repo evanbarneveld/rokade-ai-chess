@@ -27,12 +27,14 @@ use crate::search::integration::uci_feedback::set_info_callback;
 // - ucinewgame
 // - position [startpos|fen <fen>] [moves <move1> <move2> ...]
 // - go depth N
+// - go infinite
 // - go wtime <time-in-ms> btime <time-in-ms> [ winc <time-in-ms> binc <time-in-ms>
 // - stop (stop current search)
 // - cli (switch back to CLI mode)
 // - quit
 
-const UCI_INFO_SCORE_DIVISOR: f32 = 8.0f32;
+// Move overhead: safety margin (in ms) to account for GUI communication latency
+const MOVE_OVERHEAD_MS: usize = 50;
 
 static LOG: OnceLock<Mutex<File>> = OnceLock::new();
 
@@ -184,6 +186,7 @@ pub fn run_uci() -> io::Result<()> {
             let white_is_active = engine.lock().unwrap().active_color_is_white();
 
             let mut movetime: usize = 0; // default unlimited time per move unless constrained below
+            let mut is_infinite = false; // go infinite flag
 
             // Parse tokens for movetime and/or wtime/btime and increments winc/binc (order-independent)
             let tokens: Vec<&str> = line.split_whitespace().collect();
@@ -196,6 +199,11 @@ pub fn run_uci() -> io::Result<()> {
             let mut i = 1; // start after 'go'
             while i < tokens.len() {
                 match tokens[i] {
+                    "infinite" => {
+                        is_infinite = true;
+                        i += 1;
+                        continue;
+                    }
                     "movetime" => {
                         if i + 1 < tokens.len() {
                             if let Ok(v) = tokens[i + 1].parse::<usize>() {
@@ -239,8 +247,12 @@ pub fn run_uci() -> io::Result<()> {
                 i += 1;
             }
 
+            // If go infinite, don't set any time limit
+            if is_infinite {
+                movetime = 0;
+            }
             // If no explicit movetime was given but wtime/btime or winc/binc was provided, derive a reasonable per-move budget
-            if movetime == 0 && (wtime.is_some() || btime.is_some() || winc.is_some() || binc.is_some()) {
+            else if movetime == 0 && (wtime.is_some() || btime.is_some() || winc.is_some() || binc.is_some()) {
                 let time_left = if white_is_active { wtime.unwrap_or(0) } else { btime.unwrap_or(0) };
                 let inc = if white_is_active { winc.unwrap_or(0) } else { binc.unwrap_or(0) };
 
@@ -285,7 +297,12 @@ pub fn run_uci() -> io::Result<()> {
                     if budget > max_cap { budget = max_cap; }
                 }
 
-                if budget > 0 { movetime = budget; }
+                // Apply move overhead compensation - reserve time for GUI communication
+                if budget > MOVE_OVERHEAD_MS {
+                    movetime = budget.saturating_sub(MOVE_OVERHEAD_MS);
+                } else if budget > 0 {
+                    movetime = budget;
+                }
             }
 
             let engine_inner = Arc::clone(&engine);
@@ -314,7 +331,7 @@ pub fn run_uci() -> io::Result<()> {
                     let nps = (nodes as u128 * 1000u128) / ms;
                     // Print directly to stdout; ignore logging for async updates
                     let score_cp_from_white_perspective = if white_is_active_inner { score_cp } else { -score_cp };
-                    let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, nodes, nps, hashfull, pv);
+                    let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, score_cp_from_white_perspective, nodes, nps, hashfull, pv);
                     write_to_stdout_and_log_with_flush("OUT", &log_text);
                 });
                 set_info_callback(Some(info_cb));
@@ -333,7 +350,7 @@ pub fn run_uci() -> io::Result<()> {
                 // If we have extra info from the Search, emit a UCI info line
                 if let Some((score_cp, depth_used)) = info_opt {
                     let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
-                    let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, (score_cp_from_white_perspective as f32 / UCI_INFO_SCORE_DIVISOR) as i32, elapsed_ms, nodes, nps, best_move_str);
+                    let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, score_cp_from_white_perspective, elapsed_ms, nodes, nps, best_move_str);
                     write_to_stdout_and_log_with_flush("OUT", &log_text);
                 }
 
@@ -344,7 +361,13 @@ pub fn run_uci() -> io::Result<()> {
             continue;
         }
         if line == "stop" {
+            // Immediately expire the time budget to stop search
+            // Set to 1ms to trigger immediate abort on next time check
             set_time_budget_ms(1);
+            // Wait for search to complete (flag will be cleared by search thread)
+            while searching.load(Ordering::SeqCst) {
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
             continue;
         }
         if line == "quit" {
