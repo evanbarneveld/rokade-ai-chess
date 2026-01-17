@@ -16,8 +16,9 @@ pub fn prune_null_moves(
     ply: i32,
     tt: &mut TranspositionTable,
     rep_stack: &mut RepetitionStack,
+    allow_null_move: bool,
 ) -> Option<i32> {
-    if !NULL_MOVE_PRUNING_ENABLED {
+    if !NULL_MOVE_PRUNING_ENABLED || !allow_null_move {
         return None;
     }
     let to_move = game_state.active_color();
@@ -76,6 +77,7 @@ pub fn prune_null_moves(
                     ply + 1,
                     tt,
                     rep_stack,
+                    false, // Prevent consecutive null moves
                 );
 
                 // Unmake null move
@@ -85,10 +87,10 @@ pub fn prune_null_moves(
                 
                 if to_move == Color::White {
                     if score >= beta {
-                        return Some(score); // null-move cutoff for White
+                        return Some(beta); // null-move cutoff for White (return bound, not raw score)
                     }
                 } else if score <= alpha {
-                    return Some(score); // null-move cutoff for Black
+                    return Some(alpha); // null-move cutoff for Black (return bound, not raw score)
                 }
             }
         }

@@ -248,6 +248,7 @@ pub fn evaluate_after_root_move(
             1,
             tt,
             &mut rep_stack,
+            true, // Allow null move at root
         )
     };
     game_state.unmake_move_fast(u);

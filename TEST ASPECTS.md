@@ -28,8 +28,8 @@ Cycle (reviewed/fixed/tested)
 1 Alpha-Beta/PVS,src/search/core/alphabeta.rs
 1 Quiescence Search,src/search/core/qsearch.rs
 1 Iterative Deepening,src/search/core/advanced_search.rs
-0 Aspiration Windows,src/search/management/aspiration.rs
-0 Null Move Pruning,src/search/management/prune_null_moves.rs
+1 Aspiration Windows,src/search/management/aspiration.rs
+1 Null Move Pruning,src/search/management/prune_null_moves.rs
 0 Late Move Reduction,src/search/core/alphabeta.rs
 0 Futility Pruning,src/search/core/qsearch.rs
 0 Delta Pruning,src/search/core/qsearch.rs

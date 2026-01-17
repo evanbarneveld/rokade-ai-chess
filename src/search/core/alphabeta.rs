@@ -28,6 +28,7 @@ pub fn alphabeta(
     ply: i32,
     tt: &mut TranspositionTable,
     rep_stack: &mut RepetitionStack,
+    allow_null_move: bool,
 ) -> i32 {
     let to_move = game_state.active_color();
     bump_node();
@@ -112,7 +113,7 @@ pub fn alphabeta(
     }
 
     // Null-move pruning (after TT probe so we skip if TT already cut off)
-    if let Some(value) = prune_null_moves(game_state, depth, alpha, beta, ply, tt, rep_stack) {
+    if let Some(value) = prune_null_moves(game_state, depth, alpha, beta, ply, tt, rep_stack, allow_null_move) {
         if pushed_rep {
             rep_stack.pop();
         }
@@ -249,15 +250,15 @@ fn search_moves(
         // Search with appropriate window
         let current_score = if is_first_move {
             // Full window on first move
-            alphabeta(game_state, child_depth, alpha, beta, ply + 1, tt, rep_stack)
+            alphabeta(game_state, child_depth, alpha, beta, ply + 1, tt, rep_stack, true)
         } else {
             // Null-window search
             let (nw_alpha, nw_beta) = null_window(alpha, beta, maximizing);
-            let mut sc = alphabeta(game_state, reduced_depth, nw_alpha, nw_beta, ply + 1, tt, rep_stack);
+            let mut sc = alphabeta(game_state, reduced_depth, nw_alpha, nw_beta, ply + 1, tt, rep_stack, true);
 
             // Re-search with full window if needed
             if is_better(sc, alpha, maximizing) && (reduced_depth < child_depth || is_better(beta, sc, maximizing)) {
-                sc = alphabeta(game_state, child_depth, alpha, beta, ply + 1, tt, rep_stack);
+                sc = alphabeta(game_state, child_depth, alpha, beta, ply + 1, tt, rep_stack, true);
             }
             sc
         };
