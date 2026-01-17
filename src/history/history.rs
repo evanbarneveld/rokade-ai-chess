@@ -125,14 +125,14 @@ impl History {
         }
     }
 
-    pub fn get_rep_stack(&self) -> Vec<u64> {
-        let mut stack = Vec::with_capacity(self.plies.len() + 1);
+    pub fn get_rep_stack(&self) -> crate::search::state::rep_stack::RepetitionStack {
+        let mut keys = Vec::with_capacity(self.plies.len() + 1);
         if let Some(h) = self.starting_zobrist {
-            stack.push(h);
+            keys.push(h);
         }
         for p in &self.plies {
-            stack.push(p.4);
+            keys.push(p.4);
         }
-        stack
+        crate::search::state::rep_stack::RepetitionStack::from_vec(keys)
     }
 }

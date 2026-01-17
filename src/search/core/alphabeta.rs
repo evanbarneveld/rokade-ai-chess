@@ -9,6 +9,7 @@ use crate::search::integration::telemetry::bump_node;
 use crate::search::integration::time_control::time_is_up;
 use crate::search::state::tt::{decode_move, encode_move, from_tt_score, to_tt_score, Bound, TranspositionTable, MATE_VALUE};
 use crate::search::state::zobrist::compute_zobrist_full;
+use crate::search::state::rep_stack::RepetitionStack;
 
 const HUNDRED_HALF_MOVES: u32 = 100;
 
@@ -26,7 +27,7 @@ pub fn alphabeta(
     mut beta: i32,
     ply: i32,
     tt: &mut TranspositionTable,
-    rep_stack: &mut Vec<u64>,
+    rep_stack: &mut RepetitionStack,
 ) -> i32 {
     let to_move = game_state.active_color();
     bump_node();
@@ -75,43 +76,47 @@ pub fn alphabeta(
         return result;
     }
 
-    // Null-move pruning
-    if let Some(value) = prune_null_moves(game_state, depth, alpha, beta, ply, tt, rep_stack) {
-        if pushed_rep {
-            rep_stack.pop();
-        }
-        return value;
-    }
+    // Transposition table probe (before null-move pruning for cutoff + move hint)
+    // Extract TT move hint before any mutable borrows
+    let tt_move_hint: Option<(u8, u8)> = tt.probe(key).map(|e| (e.best_from, e.best_to));
 
-    // Transposition table probe
-    if let Some(entry) = tt.probe(key)
-        && entry.depth as usize >= depth {
-        let tt_score = from_tt_score(entry.score, ply);
-        match entry.bound {
-            Bound::Exact => {
+    if let Some(entry) = tt.probe(key) {
+        if entry.depth as usize >= depth {
+            let tt_score = from_tt_score(entry.score, ply);
+            match entry.bound {
+                Bound::Exact => {
+                    if pushed_rep {
+                        rep_stack.pop();
+                    }
+                    return tt_score;
+                }
+                Bound::Lower => {
+                    if tt_score > alpha {
+                        alpha = tt_score;
+                    }
+                }
+                Bound::Upper => {
+                    if tt_score < beta {
+                        beta = tt_score;
+                    }
+                }
+            }
+            // Early cutoff after bound update
+            if alpha >= beta {
                 if pushed_rep {
                     rep_stack.pop();
                 }
                 return tt_score;
             }
-            Bound::Lower => {
-                if tt_score > alpha {
-                    alpha = tt_score;
-                }
-            }
-            Bound::Upper => {
-                if tt_score < beta {
-                    beta = tt_score;
-                }
-            }
         }
-        // Early cutoff after bound update
-        if alpha >= beta {
-            if pushed_rep {
-                rep_stack.pop();
-            }
-            return tt_score;
+    }
+
+    // Null-move pruning (after TT probe so we skip if TT already cut off)
+    if let Some(value) = prune_null_moves(game_state, depth, alpha, beta, ply, tt, rep_stack) {
+        if pushed_rep {
+            rep_stack.pop();
         }
+        return value;
     }
 
     // Generate and order moves
@@ -130,7 +135,7 @@ pub fn alphabeta(
         };
     }
 
-    let ordered_moves = order_moves(moves, game_state, tt, key, to_move, ply);
+    let ordered_moves = order_moves(moves, game_state, tt_move_hint, to_move, ply);
     let original_alpha = alpha;
     let original_beta = beta;
 
@@ -192,7 +197,7 @@ fn search_moves(
     mut beta: i32,
     ply: i32,
     tt: &mut TranspositionTable,
-    rep_stack: &mut Vec<u64>,
+    rep_stack: &mut RepetitionStack,
     to_move: Color,
 ) -> MoveSearchResult {
     let maximizing = to_move == Color::White;
@@ -226,8 +231,7 @@ fn search_moves(
         }
 
         let gives_check = game_state.mutable_board().is_side_in_check(opponent(to_move));
-        let quiet = !is_capture && game_state.board().get(to.0, to.1)
-            .is_some_and(|p| p.get_type() != PieceType::Pawn);
+        let quiet = !is_capture && promo.is_none();
         let allow_reduce = !(gives_check && child_depth <= 5);
 
         // Calculate LMR reduction
@@ -276,10 +280,12 @@ fn search_moves(
                         h.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
-            } else if quiet && current_score >= beta {
-                with_heuristics(|h| h.add_killer(ply as usize, from, to));
             }
             if current_value >= beta {
+                // Record killer move on beta cutoff for quiet moves
+                if quiet {
+                    with_heuristics(|h| h.add_killer(ply as usize, from, to));
+                }
                 break; // Beta cutoff
             }
         } else {
@@ -291,10 +297,12 @@ fn search_moves(
                         h.add_history(to_move, from, to, (depth as i32) * (depth as i32));
                     });
                 }
-            } else if quiet && current_score <= alpha {
-                with_heuristics(|h| h.add_killer(ply as usize, from, to));
             }
             if current_value <= alpha {
+                // Record killer move on alpha cutoff for quiet moves
+                if quiet {
+                    with_heuristics(|h| h.add_killer(ply as usize, from, to));
+                }
                 break; // Alpha cutoff
             }
         }
@@ -365,8 +373,7 @@ fn compute_move_order_score(
 fn order_moves(
     moves: Vec<((usize, usize), (usize, usize), Option<char>)>,
     game_state: &GameState,
-    tt: &TranspositionTable,
-    key: u64,
+    tt_move_hint: Option<(u8, u8)>,
     to_move: Color,
     ply: i32,
 ) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
@@ -376,9 +383,9 @@ fn order_moves(
 
     let mut ordered = moves;
 
-    // Try TT move first
-    if let Some(entry) = tt.probe(key) {
-        let bm = decode_move(entry.best_from, entry.best_to);
+    // Try TT move first (use pre-extracted hint, available even if depth was insufficient)
+    if let Some((best_from, best_to)) = tt_move_hint {
+        let bm = decode_move(best_from, best_to);
         if let Some(pos) = ordered.iter().position(|(f, t, _)| (*f, *t) == bm) {
             let first = ordered.remove(pos);
             ordered.insert(0, first);

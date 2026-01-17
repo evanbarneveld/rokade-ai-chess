@@ -5,6 +5,7 @@ use crate::state::game_state::GameState;
 use crate::search::management::see::see_dest_estimate;
 use crate::search::integration::time_control::time_is_up;
 use crate::search::state::zobrist::compute_zobrist_full;
+use crate::search::state::rep_stack::RepetitionStack;
 
 // Tighter margins with a stronger static evaluator
 const FUT_MARGIN: i32 = 40;
@@ -16,7 +17,7 @@ pub fn qsearch(
     game_state: &mut GameState,
     mut alpha: i32,
     mut beta: i32,
-    rep_stack: &mut Vec<u64>,
+    rep_stack: &mut RepetitionStack,
 ) -> i32 {
     let to_move = game_state.active_color();
     // If quiescence is disabled, return a static evaluation immediately.

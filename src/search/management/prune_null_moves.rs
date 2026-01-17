@@ -1,6 +1,7 @@
 use crate::piece::pieces::{Color, PieceType};
 use crate::search::core::alphabeta::alphabeta;
 use crate::search::state::tt::TranspositionTable;
+use crate::search::state::rep_stack::RepetitionStack;
 use crate::search::core::advanced_search::NULL_MOVE_PRUNING_ENABLED;
 use crate::state::game_state::GameState;
 
@@ -14,7 +15,7 @@ pub fn prune_null_moves(
     beta: i32,
     ply: i32,
     tt: &mut TranspositionTable,
-    rep_stack: &mut Vec<u64>,
+    rep_stack: &mut RepetitionStack,
 ) -> Option<i32> {
     if !NULL_MOVE_PRUNING_ENABLED {
         return None;
