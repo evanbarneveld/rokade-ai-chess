@@ -79,6 +79,23 @@ fn test_bad_bishop_move2() {
     assert_ne!(san_move, "Bf4"); //bad move, losing either bishop or knight
 }
 
+#[test]
+#[serial]
+fn test_bad_queen_move2() {
+    // in this position the engine blunders the black queen by move Qc6
+    // since, now white can capture the queen with dxc6
+    let fen = "rnb1kb1r/pppq1ppp/5n2/1B1P4/3P1p2/2N2N2/PPP2PPP/R2Q1RK1 b kq - 2 9";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Qc6"); //bad move, blundering the queen
+}
+
 
 #[test]
 #[serial]

@@ -389,7 +389,13 @@ pub fn apply_destination_see_penalties(
         // Non-checking moves: simple SEE penalty
         let see = see_after(post_after, side, to, captured);
         if see < 0 {
-            let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP);
+            // Scale penalty by piece importance, don't cap too low for queen/rook blunders
+            let moved_pt = base_board.get(from.0, from.1).map(|p| p.get_type());
+            let pen = match moved_pt {
+                Some(PieceType::Queen) => ((-see) * 6).clamp(600, 6000),
+                Some(PieceType::Rook) => ((-see) * 4).clamp(SEE_PENALTY_MIN_CP, 3000),
+                _ => (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP),
+            };
             delta += apply_for_side(-pen, side);
             if !is_capture && moved_is_pawn {
                 delta += apply_for_side(-SEE_PENALTY_MIN_CP, side);
