@@ -1,21 +1,7 @@
 # Chess Engine Fixes - Thread Resolution to Attack Detection
 
 
-## Move Generation (move_generator.rs)
 
-### Fix 4.2: Extract shared promotion logic
-**Location**: Lines 50-65, 120-140
-**Issue**: Duplicate code between two functions
-**Action**: Create shared helper function for promotion handling
-**Priority**: Low (refactoring)
-
-### Fix 4.3: Consider pseudo-legal generation
-**Location**: Entire file
-**Issue**: Full validation per potential move is expensive
-**Action**: Generate pseudo-legal moves, then filter with legality check
-**Priority**: Medium (performance)
-
----
 
 ## Attack Detection (square_attacked.rs)
 

@@ -35,12 +35,12 @@ Done (=reviewed/fixed/tested)
 [X] Mobility & Activity,src/board/evaluator.rs
 [X] Hanging Pieces,src/board/evaluator.rs
 
-[ ] Threat Resolution,src/search/evaluation/root_heuristics/threat_resolution.rs
-[ ] Knight Evacuation,src/search/evaluation/root_heuristics/knight_evacuation.rs
-[ ] Repetition Avoidance,src/search/evaluation/repetition.rs
-[ ] Move Generation,src/search/management/move_generator.rs
-[ ] Board Representation,src/board/board.rs
-[ ] Attack Detection,src/board/checks/square_attacked.rs
+[X] Threat Resolution,src/search/evaluation/root_heuristics/threat_resolution.rs
+[X] Knight Evacuation,src/search/evaluation/root_heuristics/knight_evacuation.rs
+[X] Repetition Avoidance,src/search/evaluation/repetition.rs
+[X] Move Generation,src/search/management/move_generator.rs
+[X] Board Representation,src/board/board.rs
+[X] Attack Detection,src/board/checks/square_attacked.rs
 
 [ ] Opening Book,src/book/book.rs
 [ ] Time Management,src/search/integration/time_control.rs

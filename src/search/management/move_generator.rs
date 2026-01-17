@@ -133,6 +133,23 @@ fn is_promotion(to: (usize, usize), active_color: Color) -> bool {
         || (active_color == Color::Black && to.0 == 0)
 }
 
+/// Try to make a move and check if it's legal (doesn't leave king in check).
+/// Returns true if the move is legal.
+/// This is a lightweight wrapper around the move + legality check to make the intent clear.
+#[inline]
+fn try_move_and_check_legality(
+    game_state: &GameState,
+    from: (usize, usize),
+    to: (usize, usize),
+    is_capture: bool,
+    promo_piece: Option<Piece>,
+    active_color: Color,
+) -> bool {
+    let mut gs_var = *game_state;
+    PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
+        && !gs_var.mutable_board().is_side_in_check(active_color)
+}
+
 pub fn find_all_valid_moves(
     game_state: &mut GameState,
 ) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
@@ -174,21 +191,19 @@ pub fn find_all_valid_moves(
             let is_pawn_promotion = piece_type == PieceType::Pawn && is_promotion(to, active_color);
 
             if is_pawn_promotion {
+                // Generate all 4 promotion options and filter by legality
                 let promo_chars = ['q', 'r', 'b', 'n'];
                 for &pc in promo_chars.iter() {
-                    let mut gs_var = *game_state;
                     let promo_piece = Some(Piece::new(promo_char_to_piece_type(pc), active_color));
-                    if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
-                         && !gs_var.mutable_board().is_side_in_check(active_color) {
-                             result.push((from, to, Some(pc)));
-                         }
+                    if try_move_and_check_legality(game_state, from, to, is_capture, promo_piece, active_color) {
+                        result.push((from, to, Some(pc)));
+                    }
                 }
             } else {
-                let mut gs_var = *game_state;
-                if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
-                    && !gs_var.mutable_board().is_side_in_check(active_color) {
-                        result.push((from, to, None));
-                    }
+                // Regular move - check legality
+                if try_move_and_check_legality(game_state, from, to, is_capture, None, active_color) {
+                    result.push((from, to, None));
+                }
             }
         }
     }
@@ -236,6 +251,7 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                 let is_pawn_promotion = piece_type == PieceType::Pawn && is_promotion(to, active_color);
 
                 if is_pawn_promotion {
+                    // Generate all 4 promotion options and filter by legality
                     let promo_types = [
                         PieceType::Queen,
                         PieceType::Rook,
@@ -243,24 +259,21 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                         PieceType::Knight,
                     ];
                     for pt in promo_types.iter() {
-                        let mut gs_var = *game_state;
                         let promo_piece = Some(Piece::new(*pt, active_color));
-                        if PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
-                            && !gs_var.mutable_board().is_side_in_check(active_color) {
-                                out.push(PerftMove {
-                                    from,
-                                    to,
-                                    is_capture,
-                                    promo: piece_type_to_promo_char(*pt)
-                                });
-                            }
+                        if try_move_and_check_legality(game_state, from, to, is_capture, promo_piece, active_color) {
+                            out.push(PerftMove {
+                                from,
+                                to,
+                                is_capture,
+                                promo: piece_type_to_promo_char(*pt)
+                            });
+                        }
                     }
                 } else {
-                    let mut gs_var = *game_state;
-                    if PieceMover::move_piece(&mut gs_var, from, to, is_capture, None)
-                        && !gs_var.mutable_board().is_side_in_check(active_color) {
-                            out.push(PerftMove { from, to, is_capture, promo: None });
-                        }
+                    // Regular move - check legality
+                    if try_move_and_check_legality(game_state, from, to, is_capture, None, active_color) {
+                        out.push(PerftMove { from, to, is_capture, promo: None });
+                    }
                 }
             }
         }
