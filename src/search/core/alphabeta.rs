@@ -1,7 +1,8 @@
 use std::sync::{Mutex, OnceLock};
-use crate::piece::pieces::{Color, PieceType};
+use crate::piece::pieces::{Color, Piece, PieceType, piece_value_cp};
 use crate::search::evaluation::heuristics::SearchHeuristics;
 use crate::search::management::prune_null_moves::prune_null_moves;
+use crate::search::management::see::see_dest_estimate;
 use crate::search::core::qsearch::qsearch;
 use crate::search::core::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, SEARCH_ABORTED};
 use crate::state::game_state::GameState;
@@ -234,6 +235,7 @@ fn search_moves(
         let gives_check = game_state.mutable_board().is_side_in_check(opponent(to_move));
         let quiet = !is_capture && promo.is_none();
         let allow_reduce = !(gives_check && child_depth <= 5);
+        let captured_piece = u.board_undo.captured;
 
         // Calculate LMR reduction
         let reduction = if is_first_move {
@@ -243,6 +245,7 @@ fn search_moves(
                 child_depth, move_index, quiet, gives_check, allow_reduce,
                 to_move, from, to, game_state.board(),
                 game_state.board().game_phase_light(),
+                captured_piece,
             )
         };
         let reduced_depth = child_depth.saturating_sub(reduction);
@@ -447,7 +450,7 @@ fn order_moves(
 // LATE MOVE REDUCTION (LMR)
 // ============================================================
 
-/// Calculate the reduction depth for LMR
+/// Calculate the reduction depth for LMR using logarithmic scaling
 fn calculate_lmr_reduction(
     child_depth: usize,
     move_index: i32,
@@ -459,31 +462,45 @@ fn calculate_lmr_reduction(
     to: (usize, usize),
     board: &crate::board::Board,
     phase: i32,
+    captured: Option<Piece>,
 ) -> usize {
     if !crate::search::core::advanced_search::LMR_ENABLED {
         return 0;
     }
 
-    if !is_quiet || child_depth < 3 || move_index < 4 || !allow_reduce {
+    // Check if this is a bad capture (negative SEE) that should be reduced
+    let is_bad_capture = if !is_quiet && captured.is_some() {
+        let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
+        let see = see_dest_estimate(board, to_move, to, cap_val);
+        see < 0
+    } else {
+        false
+    };
+
+    // Only reduce quiet moves or bad captures after a few moves have been searched
+    if (!is_quiet && !is_bad_capture) || child_depth < 3 || move_index < 3 || !allow_reduce {
         return 0;
     }
 
+    // Base reduction using logarithmic formula: ln(depth) * ln(move_index) * C
+    // This scales naturally with both depth and move ordering position
+    let depth_f = (child_depth as f32).ln();
+    let move_f = (move_index as f32 + 1.0).ln();
+    let base_reduction = (depth_f * move_f * 0.4).floor() as usize;
+
+    let mut r = base_reduction.max(1);
+
+    // History heuristic adjustment
     let hist = with_heuristics(|h| h.history_score(to_move, from, to));
-    let is_maximizing = to_move == Color::White;
-    let hist_good = is_good_history(hist, is_maximizing);
-
-    let mut r = 1 + ((move_index as usize) / 6).min(1);
-
-    if child_depth >= 8 {
+    if is_good_history(hist) {
+        r = r.saturating_sub(1);
+    } else if hist < 0 {
+        // Bad history: increase reduction
         r += 1;
     }
 
-    if hist_good {
-        r = r.saturating_sub(1);
-    }
-
     // Extra reduction for quiet queen moves in opening with undeveloped pieces
-    if let Some(mp) = board.get(to.0, to.1)
+    if let Some(mp) = board.get(from.0, from.1)
         && mp.get_type() == PieceType::Queen && phase >= 12 {
         let back_r = if to_move == Color::White { 0 } else { 7 };
         let mut undeveloped = 0;
@@ -512,7 +529,9 @@ fn calculate_lmr_reduction(
         }
     }
 
-    r.min(3)
+    // Cap reduction to avoid searching too shallow
+    // Never reduce more than depth - 1 (must search at least 1 ply)
+    r.min(child_depth.saturating_sub(1)).min(4)
 }
 
 // ============================================================
@@ -535,8 +554,9 @@ fn null_window(alpha: i32, beta: i32, maximizing: bool) -> (i32, i32) {
 }
 
 #[inline]
-fn is_good_history(hist: i32, maximizing: bool) -> bool {
-    if maximizing { hist > 10_000 } else { hist < -10_000 }
+fn is_good_history(hist: i32) -> bool {
+    // History scores are stored per-side and are always positive for good moves
+    hist > 10_000
 }
 
 #[inline]

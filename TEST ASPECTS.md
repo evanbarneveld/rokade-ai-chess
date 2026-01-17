@@ -30,7 +30,7 @@ Cycle (reviewed/fixed/tested)
 1 Iterative Deepening,src/search/core/advanced_search.rs
 1 Aspiration Windows,src/search/management/aspiration.rs
 1 Null Move Pruning,src/search/management/prune_null_moves.rs
-0 Late Move Reduction,src/search/core/alphabeta.rs
+1 Late Move Reduction,src/search/core/alphabeta.rs
 0 Futility Pruning,src/search/core/qsearch.rs
 0 Delta Pruning,src/search/core/qsearch.rs
 0 SEE Pruning,src/board/see.rs
@@ -63,7 +63,8 @@ Cycle (reviewed/fixed/tested)
 
 More aspects:
 
-0 |Piece development
+0 Piece development
+0 Personalization, use persona's that define parameters that affect playing style
 
 
 Search Algorithms
