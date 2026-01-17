@@ -28,11 +28,11 @@ pub fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) ->
 /// Self-hanging penalty aggregate OR check tie-break with mobility bonus.
 #[inline]
 pub fn self_hang_or_check_mobility(
-    _base_board: &Board,
+    base_board: &Board,
     post_after: &Board,
     side: Color,
     _from: (usize, usize),
-    _to: (usize, usize),
+    to: (usize, usize),
     gives_check: bool,
     opp: Color,
 ) -> i32 {
@@ -48,7 +48,15 @@ pub fn self_hang_or_check_mobility(
                 if !is_square_attacked_by_opponent(&mut post_for_query, (r, c), side) {
                     continue;
                 }
-                let see = see_dest_estimate(post_after, side, (r, c), 0);
+                // If this square is where we just moved (a capture), account for the captured value
+                let captured_value = if (r, c) == to {
+                    base_board.get(r, c).map(|captured_piece| {
+                        crate::piece::pieces::piece_value_cp(captured_piece.get_type())
+                    }).unwrap_or(0)
+                } else {
+                    0
+                };
+                let see = see_dest_estimate(post_after, side, (r, c), captured_value);
                 if see < 0 {
                     let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
                     total_penalty += pen;

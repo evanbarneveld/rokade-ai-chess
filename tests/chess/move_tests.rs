@@ -79,6 +79,26 @@ fn test_bad_bishop_move2() {
     assert_ne!(san_move, "Bf4"); //bad move, losing either bishop or knight
 }
 
+
+#[test]
+#[serial]
+fn test_knight_should_capture_queen() {
+    // in this position the engine does not generate the move Ne6, capturing the black queen
+    // on c7.
+    // instead it sacrifices the queen with move Qd6 (a very bad move)
+    let fen = "r1b4r/1pN1kpb1/1n2qn1p/p7/2p1p1p1/2P1N1B1/PPBQ1PPP/R4RK1 w - - 6 42";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Qd6+"); //bad move, losing the queen
+}
+
+
 #[test]
 #[serial]
 fn test_bad_rook_move() {
@@ -241,30 +261,6 @@ fn test_queen_losing_move() {
     // This queen can be captured immediately by the white bishop on b5
     // therefore, this is a very bad move that must be avoided
 
-    /*
-    Bad analysis done by our chess engine:
-
-    FEN: r1bnkb1r/pppqpp1p/3p1np1/1B1P4/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 w kq - 5 9
-
-    Chess:
-     1	00:00	0	0	-211.23	Nc6-a5
-     2	00:00	738	23k	-211.23	Nc6-a5 Bb5xd7+
-     3	00:00	3k	35k	-211.23	Nc6-a5 Bb5xd7+ Bc8xd7
-     4	00:01	41k	-211.48	Nc6-a5 Bb5xd7+ Bc8xd7 b2-b3
-     5	00:02	121k	57k	-211.98	Nc6-d8 Bb5xd7+ Bc8xd7 Qd1-d4
-     5	00:02	122k	57k	-211.98	Nc6-d8
-
-
-    Here is way better analysis done by AnMon chess in the same position
-
-    FEN: r1b1kb1r/pppq1p1p/2np1np1/1B1Pp3/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 w kq e6 0 9
-
-    AnMon 5.75:
-    1+	00:00	3	13	-2.89	b7xc6
-    1	00:00	4	18	-2.89	b7xc6
-    2	00:00	106	452	-2.86	b7xc6 Bb5-c4
-    */
-
     let fen = "r1b1kb1r/pppqpp1p/2np1np1/1B1P4/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 b kq - 4 8";
     let mut game = Chess::new();
     game.set_starting_fen(fen).expect("bad fen");
@@ -283,21 +279,6 @@ fn test_unnecessary_king_move_losing_castling_rights() {
     // This loses castling rights. It is best to capture the white bishop with Bxd7.
     // Therefore, the king move is not the best option here and must be avoided.
 
-    /*
-
-    Bad analysis done by our chess engine:
-
-    FEN: r1bn1b1r/pppkpp1p/3p1np1/3P4/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 w - - 0 10
-
-    Chess:
-    1	00:00	 0	0	-2.25	Ke8xd7
-    2	00:00	 6	6k	-2.35	Ke8xd7 Qd1-e2
-    3	00:00	 12	12k	-2.35	Ke8xd7 Qd1-e2 Nf6-g4
-    4	00:00	 19	19k	-2.35	Ke8xd7 Qd1-e2 Nf6-g4 Qe2-b5+
-    5	00:00	 37	37k	-2.35	Ke8xd7 Qd1-e2 Nf6-g4 Qe2-b5+ c7-c6
-    5	00:00	 46	0	-2.35	Ke8xd7
-    */
-
     let fen = "r1bnkb1r/pppBpp1p/3p1np1/3P4/4P3/P1N2N2/1PP2PPP/R1BQ1RK1 b kq - 0 9 ";
     let mut game = Chess::new();
     game.set_starting_fen(fen).expect("bad fen");
@@ -308,28 +289,3 @@ fn test_unnecessary_king_move_losing_castling_rights() {
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Nd8"); //bad move
 }
-
-/*
-
-In case a new failing test is added, use this prompt for AI code gen:
-
-test '<name-of-test>' is failing.
-See the comments in the test: it explains what happens.
-
-There is also the analysis of our chess engine.
-Depending on the test, I may have added a good analysis of another
-existing chess engine that does a better job in this position.
-
-Please fix the code of the chess engine.
-Always prefer a generic solution, rather than a specific one.
-The other tests should keep working off course.
-Execute the test without asking.
-Change code without asking. I will review the code changes once the test works.
-If the test still doesn't work after 5 attempts, ask me what I want to do.
-
-If the test is working, run all tests in move_tests.rs to see if there is a regression.
-Let me know if all tests work, very clearly. For example:
-
-Hey Erik, all tests in move_tests.rs succeed!
-
-*/

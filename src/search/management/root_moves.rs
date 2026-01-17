@@ -184,7 +184,7 @@ pub fn adjust_root_score(
     adjusted += knight_evacuations_priority(base_board, side, from, to, gives_check);
 
     // 4. Capture bonus
-    let cap_bonus = if let Some(captured) = base_board.get(to.0, to.1) {
+    let _cap_bonus = if let Some(captured) = base_board.get(to.0, to.1) {
         let b = capture_value_cp(captured.get_type()) / ROOT_CAPTURE_BONUS_DIV;
         adjusted += b;
         b
