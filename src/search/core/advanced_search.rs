@@ -261,47 +261,93 @@ pub fn find_best_move(
     }
 
     // Final selection based on playing_strength from the last iteration
+    // Use TT-cached scores from iterative deepening to avoid expensive re-evaluation
     if let Some((_bf, _bt, _bpromo, sc, used_depth)) = chosen
         && playing_strength < MAX_PLAYING_STRENGTH {
-            // Re-evaluate top K moves for stochastic selection at final depth
+            // Collect scores from TT for all root moves (already evaluated during iterative deepening)
             let mut scored_with_promo: Vec<((usize, usize), (usize, usize), Option<char>, i32)> = Vec::new();
+
+            // Apply evaluation noise if not in deterministic mode
+            use crate::search::integration::playing_strength::strength_noise_sigma;
+            use rand::{rng, Rng};
+            let apply_noise = !crate::search::is_deterministic() && playing_strength < 1000;
+            let sigma = if apply_noise { strength_noise_sigma(playing_strength) } else { 0 };
+
             for &(from, to, promo) in &root_moves {
-                let (sr, is_capture, moved_is_pawn) = evaluate_after_root_move(
-                    &mut gs,
-                    from,
-                    to,
-                    promo,
-                    used_depth,
-                    MIN_EVAL_VALUE + 1,
-                    MAX_EVAL_VALUE - 1,
-                    &mut tt,
-                    history,
-                );
-                let adj = adjusted_root_eval_for_move(
-                    gs.board(),
-                    active_color,
-                    from,
-                    to,
-                    gs.half_move_clock(),
-                    sr,
-                    is_capture,
-                    moved_is_pawn,
-                );
-                scored_with_promo.push((from, to, promo, adj));
+                // Try to get score from TT instead of re-evaluating
+                use crate::search::state::zobrist::compute_zobrist_full;
+                use crate::piece::piece_mover::PieceMover;
+
+                let mut temp_gs = gs;
+                let is_capture = temp_gs.board().get(to.0, to.1).is_some();
+                let moved_piece = temp_gs.board().get(from.0, from.1);
+                let moved_is_pawn = moved_piece.map(|p| p.get_type() == PieceType::Pawn).unwrap_or(false);
+
+                let promotion_piece = if let Some(promo_char) = promo {
+                    Piece::from_fen_char(promo_char)
+                } else {
+                    None
+                };
+
+                if PieceMover::move_piece(&mut temp_gs, from, to, is_capture, promotion_piece) {
+                    temp_gs.switch_player_turn();
+                    let key = compute_zobrist_full(
+                        temp_gs.board(),
+                        temp_gs.active_color(),
+                        &temp_gs.castling_rights(),
+                        temp_gs.en_passant_target(),
+                    );
+
+                    // Look up in TT; if not found, use a heuristic estimate
+                    let score_raw = if let Some(entry) = tt.probe(key) {
+                        use crate::search::state::tt::from_tt_score;
+                        -from_tt_score(entry.score, 0) // Negate because it's from opponent's perspective
+                    } else {
+                        // Fallback: simple static evaluation if not in TT
+                        use crate::board::evaluator::evaluate_position;
+                        let eval = evaluate_position(temp_gs.board(), active_color);
+                        if active_color == Color::Black { -eval } else { eval }
+                    };
+
+                    let mut adj = adjusted_root_eval_for_move(
+                        gs.board(),
+                        active_color,
+                        from,
+                        to,
+                        gs.half_move_clock(),
+                        score_raw,
+                        is_capture,
+                        moved_is_pawn,
+                    );
+
+                    // Apply evaluation noise to introduce positional misjudgment at lower strengths
+                    if apply_noise && sigma > 0 {
+                        // Box-Muller transform for Gaussian noise
+                        let u1: f32 = rng().random::<f32>();
+                        let u2: f32 = rng().random::<f32>();
+                        let z0 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
+                        let noise = (z0 * sigma as f32) as i32;
+                        adj += noise;
+                    }
+
+                    scored_with_promo.push((from, to, promo, adj));
+                }
             }
 
-            scored_with_promo.sort_by_key(|m| m.3);
-            if active_color == Color::White {
-                scored_with_promo.reverse();
-            }
+            if !scored_with_promo.is_empty() {
+                scored_with_promo.sort_by_key(|m| m.3);
+                if active_color == Color::White {
+                    scored_with_promo.reverse();
+                }
 
-            if let Some((from, to, promo_opt)) = select_move_based_using_strength_promo(&scored_with_promo, playing_strength) {
-                let sc_final = scored_with_promo
-                    .iter()
-                    .find(|e| e.0 == from && e.1 == to && e.2 == promo_opt)
-                    .map(|e| e.3)
-                    .unwrap_or(sc);
-                chosen = Some((from, to, promo_opt, sc_final, used_depth));
+                if let Some((from, to, promo_opt)) = select_move_based_using_strength_promo(&scored_with_promo, playing_strength) {
+                    let sc_final = scored_with_promo
+                        .iter()
+                        .find(|e| e.0 == from && e.1 == to && e.2 == promo_opt)
+                        .map(|e| e.3)
+                        .unwrap_or(sc);
+                    chosen = Some((from, to, promo_opt, sc_final, used_depth));
+                }
             }
         }
 
