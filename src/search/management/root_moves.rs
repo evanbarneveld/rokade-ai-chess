@@ -22,6 +22,7 @@ use crate::search::evaluation::root_heuristics::{
     king_safety_root_heuristics,
     self_hang_or_check_mobility,
     queen_kingside_pressure_bonus,
+    opponent_knight_check_fork_penalty,
 };
 use crate::search::evaluation::root_heuristics::utils::{apply_for_side, ROOT_CAPTURE_BONUS_DIV};
 
@@ -146,6 +147,7 @@ pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), 
 /// 7. King safety
 /// 8. Self-hanging penalty / check mobility bonus
 /// 9. Queen kingside pressure
+/// 10. Opponent knight check/fork opportunities
 #[inline]
 pub fn adjust_root_score(
     base_board: &Board,
@@ -206,6 +208,9 @@ pub fn adjust_root_score(
 
     // 8. Queen kingside pressure
     adjusted += queen_kingside_pressure_bonus(base_board, side, from, to);
+
+    // 9. Opponent knight check/fork opportunities
+    adjusted += opponent_knight_check_fork_penalty(&post_after, side, to);
 
     adjusted
 }

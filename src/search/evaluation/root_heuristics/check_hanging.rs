@@ -38,6 +38,7 @@ pub fn self_hang_or_check_mobility(
 ) -> i32 {
     // Scan our pieces for hanging penalties
     let mut total_penalty: i32 = 0;
+    let mut hanging_pieces_found = 0;
     for r in 0..8 {
         for c in 0..8 {
             if let Some(p) = post_after.get(r, c) {
@@ -58,20 +59,28 @@ pub fn self_hang_or_check_mobility(
                 };
                 let see = see_dest_estimate(post_after, side, (r, c), captured_value);
                 if see < 0 {
-                    let pen = (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2;
+                    hanging_pieces_found += 1;
+                    // Scale penalty based on piece type - don't cap too low for valuable pieces
+                    let pen = match p.get_type() {
+                        PieceType::Queen => ((-see) * 8).clamp(400, 6000),
+                        PieceType::Rook => ((-see) * 3).clamp(300, 2000),
+                        PieceType::Knight | PieceType::Bishop => ((-see) * 2).clamp(SEE_PENALTY_MIN_CP, 800),
+                        _ => (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2,
+                    };
                     total_penalty += pen;
-                    if p.get_type() == PieceType::Queen {
-                        let q_extra = ((-see) * 12).clamp(40, 120);
-                        total_penalty += q_extra;
-                    }
                 }
             }
         }
     }
 
-    let agg_cap: i32 = 1000;
+    // If multiple pieces are hanging, apply additional penalty for exposing multiple weaknesses
+    if hanging_pieces_found > 1 {
+        total_penalty += 100 * (hanging_pieces_found - 1);
+    }
+
+    // Don't cap hanging penalties - they should fully reflect the material at risk
     let hang_pen = if total_penalty > 0 {
-        -total_penalty.min(agg_cap)
+        -total_penalty
     } else {
         0
     };
