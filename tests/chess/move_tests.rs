@@ -491,15 +491,6 @@ fn read_fen_and_generate_best_move(fen: &str) -> (Chess, History, String) {
     (game, history, san_move)
 }
 
-
-/*
-The chess engine needs to be further improved because the engine still makes some blunders.
-That is what test `<test>` shows. It shows that the engine makes a blunder, and it also shows what a much better move would be.
-
-You must read ARCHITECTURE.md before you attempt to fix blunders in the engine.
-But be aware that the blunder happens because of suboptimal bonus/penalty values, clamping of these values, conditions in the heuristics and/or thread resolution.
-*/
-
 /*
 please fix a bug in the chess engine. test `<test>` shows the existence of this bug.
 There is a complex situation on the chessboard, and advanced analysis has calculated a good move,
