@@ -23,6 +23,7 @@ use crate::search::evaluation::root_heuristics::{
     self_hang_or_check_mobility,
     queen_kingside_pressure_bonus,
     opponent_knight_check_fork_penalty,
+    critical_square_defense_bonus,
 };
 use crate::search::evaluation::root_heuristics::utils::{apply_for_side, ROOT_CAPTURE_BONUS_DIV};
 
@@ -148,6 +149,7 @@ pub fn root_move_bonus(board: &Board, from: (usize, usize), to: (usize, usize), 
 /// 8. Self-hanging penalty / check mobility bonus
 /// 9. Queen kingside pressure
 /// 10. Opponent knight check/fork opportunities
+/// 11. Critical square defense (f7/f2)
 #[inline]
 pub fn adjust_root_score(
     base_board: &Board,
@@ -184,47 +186,52 @@ pub fn adjust_root_score(
 
     // Fix: Don't heavily penalize quiet pawn moves that attack opponent pieces
     // The threat heuristic may incorrectly penalize these moves
-    if moved_is_pawn && !is_capture && threat_delta > 150 {
+    // Also give bonus for pawn attacks on valuable pieces
+    if moved_is_pawn && !is_capture {
         let pawn_rank_dir = if side == Color::White { 1i32 } else { -1i32 };
         // Check if this pawn move attacks an opponent piece
-        let attacks_enemy = {
-            let mut attacks = false;
-            for &dc in &[-1i32, 1i32] {
-                let attack_r = (to.0 as i32) + pawn_rank_dir;
-                let attack_c = (to.1 as i32) + dc;
-                if attack_r >= 0 && attack_r < 8 && attack_c >= 0 && attack_c < 8 {
-                    if let Some(p) = post_after.get(attack_r as usize, attack_c as usize) {
-                        if p.get_color() != side {
-                            attacks = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            attacks
-        };
-        if attacks_enemy {
-            // Reduce the penalty significantly for pawn moves that create threats
-            threat_delta = 0; // Completely ignore the penalty for threat-creating pawn moves
+        let mut attacks_valuable_enemy = false;
+        let mut max_attacked_value = 0;
 
-            // Give a bonus for attacking valuable pieces (knights, bishops, rooks, queens)
-            for &dc in &[-1i32, 1i32] {
-                let attack_r = (to.0 as i32) + pawn_rank_dir;
-                let attack_c = (to.1 as i32) + dc;
-                if attack_r >= 0 && attack_r < 8 && attack_c >= 0 && attack_c < 8 {
-                    if let Some(p) = post_after.get(attack_r as usize, attack_c as usize) {
-                        if p.get_color() != side {
-                            let value_bonus = match p.get_type() {
-                                PieceType::Knight | PieceType::Bishop => -150, // Good bonus
-                                PieceType::Rook => -200,
-                                PieceType::Queen => -300,
-                                _ => 0,
-                            };
-                            adjusted += value_bonus;
+        for &dc in &[-1i32, 1i32] {
+            let attack_r = (to.0 as i32) + pawn_rank_dir;
+            let attack_c = (to.1 as i32) + dc;
+            if attack_r >= 0 && attack_r < 8 && attack_c >= 0 && attack_c < 8 {
+                if let Some(p) = post_after.get(attack_r as usize, attack_c as usize) {
+                    if p.get_color() != side {
+                        let piece_value = match p.get_type() {
+                            PieceType::Knight | PieceType::Bishop => 2,
+                            PieceType::Rook => 4,
+                            PieceType::Queen => 7,
+                            PieceType::Pawn => {
+                                // Give bonus for attacking advanced enemy pawns
+                                // Pawns can't retreat, making them better targets than pieces
+                                // Only consider pawns on rank 5 (row 4) as high-value targets
+                                let pawn_row = attack_r as usize;
+                                if pawn_row == 4 { 3 } else if pawn_row == 3 { 1 } else { 0 }
+                            },
+                            _ => 0,
+                        };
+                        if piece_value > 0 {
+                            attacks_valuable_enemy = true;
+                            max_attacked_value = max_attacked_value.max(piece_value);
                         }
                     }
                 }
             }
+        }
+
+        if attacks_valuable_enemy {
+            // If threat_delta is large, reduce it for threat-creating pawn moves
+            if threat_delta > 150 {
+                threat_delta = 0; // Ignore the penalty for threat-creating pawn moves
+            }
+
+            // Give a small bonus for attacking valuable pieces
+            // Scale bonus by the value of the piece being attacked
+            let value_bonus = max_attacked_value * 100; // 200 for minor, 300 for adv pawn, 400 for rook, 700 for queen
+            let bonus_applied = apply_for_side(value_bonus, side);
+            adjusted += bonus_applied;
         }
     }
 
@@ -260,6 +267,10 @@ pub fn adjust_root_score(
     // 9. Opponent knight check/fork opportunities
     let knight_penalty = opponent_knight_check_fork_penalty(&post_after, side, to);
     adjusted += knight_penalty;
+
+    // 10. Critical square defense (f7/f2)
+    let critical_defense = critical_square_defense_bonus(base_board, &post_after, side, from, to);
+    adjusted += critical_defense;
 
     adjusted
 }

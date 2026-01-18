@@ -11,6 +11,7 @@ pub mod king_safety;
 pub mod check_hanging;
 pub mod queen_pressure;
 pub mod opponent_tactics;
+pub mod critical_defense;
 
 // Re-export commonly used items
 pub use utils::simulate_move;
@@ -21,3 +22,4 @@ pub use king_safety::king_safety_root_heuristics;
 pub use check_hanging::self_hang_or_check_mobility;
 pub use queen_pressure::queen_kingside_pressure_bonus;
 pub use opponent_tactics::opponent_knight_check_fork_penalty;
+pub use critical_defense::critical_square_defense_bonus;

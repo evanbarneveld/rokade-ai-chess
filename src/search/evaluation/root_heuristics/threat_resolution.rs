@@ -195,6 +195,22 @@ pub fn threat_resolution_and_evacuation(
             is_square_attacked_by_opponent(&mut tmp2, (tr, tc), side)
         };
 
+    // Check if this is a "genuine" threat - smallest attacker has equal or lesser value
+        // AND the piece is not well-defended (SEE < 0 means capturing would lose material)
+        let piece_val = piece_value_cp(pt);
+        let is_genuine_threat = if let Some((_, attacker)) = find_smallest_attacker(base_board, (tr, tc), opp) {
+            // Attacker value must be <= piece value for a genuine threat
+            if piece_value_cp(attacker.get_type()) > piece_val {
+                false
+            } else {
+                // Also check SEE - if SEE >= 0, the piece is well-defended
+                let see = see_dest_estimate(base_board, opp, (tr, tc), 0);
+                see > 0 // Only genuine if capturing would gain material (SEE > 0)
+            }
+        } else {
+            false
+        };
+
         if (tr, tc) == from {
             // We moved the threatened piece - calculate evacuation bonus
             let see_new = see_dest_estimate(post_after, side, to, 0);
@@ -237,9 +253,16 @@ pub fn threat_resolution_and_evacuation(
 
             delta += apply_for_side(evac_bonus, side);
         } else {
-            // We did NOT move the threatened piece - apply penalties only if piece remains threatened
+            // We did NOT move the threatened piece - apply penalties only if:
+            // 1. Piece remains threatened after our move
+            // 2. The threat is genuine (attacker can profitably capture)
             if !still_attacked {
                 continue; // Piece no longer threatened after our move (e.g., we blocked the attack)
+            }
+
+            // Skip penalty if the threat is not genuine (piece is well-defended)
+            if !is_genuine_threat {
+                continue;
             }
 
             // Knight-specific penalty for ignoring pawn threats when safe squares exist

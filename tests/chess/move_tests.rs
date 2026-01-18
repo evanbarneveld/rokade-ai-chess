@@ -408,7 +408,7 @@ fn test_blunder_move_4() {
 fn test_blunder_move_5() {
     let fen = "r1bqkb1r/ppppn1pp/5p2/1N2n3/1PBN1B2/P7/2P1QPPP/R4RK1 b kq - 1 13";
 
-    let (mut game, history, san_move) = readFenAndGenerateBestMove(fen);
+    let (mut game, history, san_move) = read_fen_and_generate_best_move(fen);
     println!("Selected move: {:?}", san_move);
 
     // Debug: rank root moves with adjusted scores
@@ -427,7 +427,7 @@ fn test_blunder_move_5() {
 fn test_blunder_move_6() {
     let fen = "r1bqkb1r/2p2ppp/p1n2n2/4p1N1/1p1Pp3/1B6/PPP1NPPP/R1BQK2R b KQkq - 1 9";
 
-    let (mut game, history, san_move) = readFenAndGenerateBestMove(fen);
+    let (mut game, history, san_move) = read_fen_and_generate_best_move(fen);
     println!("Selected move: {:?}", san_move);
 
     // Debug: rank root moves with adjusted scores
@@ -441,7 +441,7 @@ fn test_blunder_move_6() {
     assert_eq!(san_move, "Be6"); //considered the best move according to analysis
 }
 
-fn readFenAndGenerateBestMove(fen: &str) -> (Chess, History, String) {
+fn read_fen_and_generate_best_move(fen: &str) -> (Chess, History, String) {
     let mut game = Chess::new();
     game.set_starting_fen(fen).expect("bad fen");
     set_deterministic(true);
@@ -452,10 +452,23 @@ fn readFenAndGenerateBestMove(fen: &str) -> (Chess, History, String) {
     (game, history, san_move)
 }
 
+
+/*
+The chess engine needs to be further improved because the engine still makes some blunders.
+That is what test '<test>' shows. It shows that the engine makes a blunder and it also
+shows what a much better move would be.
+
+This happens because of sub-optimal bonus/penalty values and conditions in the heuristics and/or thread resolution.
+Check out ARCHITECTURE.md for more information on the chess engine before you make any changes.
+ */
+
 /*
 please fix a bug in the chess engine. test `<test>` shows the existence of this bug.
 There is a complex situation on the chessboard, and advanced analysis has calculated a good move,
 see remarks in the test. This engine, however, selects a much worse move, see remarks in the test.
 Also, check out ARCHITECTURE.md for more information on the chess engine. Read this before you
 attempt to fix bugs in the engine.
+The problem is most likely related to different bonus/penalty values and conditions in the
+heuristics and/or thread resolution. The problem is not related to wrong interpreting of (relative) score values.
  */
+

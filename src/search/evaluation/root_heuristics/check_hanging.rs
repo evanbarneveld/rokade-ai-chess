@@ -28,7 +28,7 @@ pub fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) ->
 /// Self-hanging penalty aggregate OR check tie-break with mobility bonus.
 #[inline]
 pub fn self_hang_or_check_mobility(
-    base_board: &Board,
+    _base_board: &Board,
     post_after: &Board,
     side: Color,
     _from: (usize, usize),
@@ -41,6 +41,11 @@ pub fn self_hang_or_check_mobility(
     let mut hanging_pieces_found = 0;
     for r in 0..8 {
         for c in 0..8 {
+            // Skip the destination square - it's already handled by apply_destination_see_penalties
+            // to avoid double-counting the SEE penalty for the moved piece
+            if (r, c) == to {
+                continue;
+            }
             if let Some(p) = post_after.get(r, c) {
                 if p.get_color() != side {
                     continue;
@@ -49,15 +54,7 @@ pub fn self_hang_or_check_mobility(
                 if !is_square_attacked_by_opponent(&mut post_for_query, (r, c), side) {
                     continue;
                 }
-                // If this square is where we just moved (a capture), account for the captured value
-                let captured_value = if (r, c) == to {
-                    base_board.get(r, c).map(|captured_piece| {
-                        crate::piece::pieces::piece_value_cp(captured_piece.get_type())
-                    }).unwrap_or(0)
-                } else {
-                    0
-                };
-                let see = see_dest_estimate(post_after, side, (r, c), captured_value);
+                let see = see_dest_estimate(post_after, side, (r, c), 0);
                 if see < 0 {
                     hanging_pieces_found += 1;
                     // Scale penalty based on piece type - don't cap too low for valuable pieces

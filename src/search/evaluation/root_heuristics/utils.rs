@@ -18,10 +18,11 @@ pub const ENDGAME_CAPTURE_SCALE_BONUS_CP: i32 = 15;
 pub const ENDGAME_NONCAP_SCALE_PENALTY_CP: i32 = 8;
 
 // Check and mobility bonuses (by opponent reply count)
-pub const CHECK_TIEBREAK_BASE: i32 = 1;
-pub const CHECK_MOBILITY_BONUS_0: i32 = 5;
-pub const CHECK_MOBILITY_BONUS_1_2: i32 = 2;
-pub const CHECK_MOBILITY_BONUS_3_5: i32 = 1;
+// Increased to make giving check more valuable in close positions
+pub const CHECK_TIEBREAK_BASE: i32 = 10;
+pub const CHECK_MOBILITY_BONUS_0: i32 = 50;
+pub const CHECK_MOBILITY_BONUS_1_2: i32 = 20;
+pub const CHECK_MOBILITY_BONUS_3_5: i32 = 10;
 
 // King safety
 pub const KING_CAPTURE_ROOT_PENALTY: i32 = 5;
