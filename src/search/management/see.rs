@@ -392,6 +392,9 @@ pub fn apply_destination_see_penalties(
                 Some(PieceType::Rook) => ((-see) * 4).clamp(SEE_PENALTY_MIN_CP, 3000),
                 _ => (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP),
             };
+            // Penalty makes score worse for the moving side
+            // For White: reduce score (negative penalty from White's perspective)
+            // For Black: increase score (positive penalty from White's perspective = worse for Black)
             delta += apply_for_side(-pen, side);
             if !is_capture && moved_is_pawn {
                 delta += apply_for_side(-SEE_PENALTY_MIN_CP, side);
@@ -418,7 +421,8 @@ pub fn apply_destination_see_penalties(
 
     // Additional penalty for minors attacked by pawn after check
     if let Some(pt) = moved_pt {
-        delta += apply_for_side(-pawn_attacked_minor_penalty(post_after, side, to, pt), side);
+        let pawn_pen = pawn_attacked_minor_penalty(post_after, side, to, pt);
+        delta += apply_for_side(-pawn_pen, side);
     }
 
     // Check if opponent king can safely capture the checking piece

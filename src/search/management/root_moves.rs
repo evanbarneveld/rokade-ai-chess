@@ -283,6 +283,13 @@ pub fn adjusted_root_eval_for_move(
         base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw,
     );
 
+    // For Black, negate the heuristic adjustments to maintain White-perspective scoring
+    // adjust_root_score returns side-relative adjustments, but we need White-perspective
+    if side == Color::Black {
+        let adjustment = adj - score_raw;
+        adj = score_raw - adjustment;
+    }
+
     // Calculate the heuristic adjustment
     let heuristic_delta = adj - score_raw;
 
@@ -297,8 +304,9 @@ pub fn adjusted_root_eval_for_move(
             } else {
                 adj = adj.max(score_raw);
             }
-        } else if score_raw == 0 {
-            // Don't drag draw scores down too much, but allow significant penalties (like suicidal checks)
+        } else if score_raw == 0 && side == Color::White {
+            // Don't drag draw scores down too much for White, but allow significant penalties (like suicidal checks)
+            // For Black, adjustments are already negated so this clamping shouldn't apply
             adj = adj.max(-500);
         }
     }
