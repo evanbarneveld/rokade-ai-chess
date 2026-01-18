@@ -427,7 +427,7 @@ fn test_blunder_move_5() {
 }
 
 /*
-please fix a bug in the chess engine. test `test_blunder_move_5` shows the existence of this bug.
+please fix a bug in the chess engine. test `<test>` shows the existence of this bug.
 There is a complex situation on the chessboard, and advanced analysis has calculated a good move,
-see remarks in the test. This engine however selects a much worse move, see remarkts in the test.
+see remarks in the test. This engine, however, selects a much worse move, see remarks in the test.
  */

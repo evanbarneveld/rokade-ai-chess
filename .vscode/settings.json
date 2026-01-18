@@ -1,0 +1,15 @@
+{
+  "files.associations": {
+    "ARCHITECTURE.md": "markdown"
+  },
+  "[markdown]": {
+    "editor.quickSuggestions": {
+      "other": false,
+      "comments": false,
+      "strings": false
+    }
+  },
+  "rust-analyzer.checkOnSave": {
+    "extraArgs": ["--exclude", "ARCHITECTURE.md"]
+  }
+}
