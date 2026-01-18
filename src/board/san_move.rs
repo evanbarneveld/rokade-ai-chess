@@ -84,7 +84,7 @@ fn file_char(col: usize) -> char {
 #[inline]
 fn rank_char(row: usize) -> char {
     // internal row 0..7 == ranks 1..8
-    char::from_u32((row as u32) + 1).unwrap()
+    (b'1' + (row as u8)) as char
 }
 
 // Determine if the position after (from->to) is checked or mate, and return "", "+" or "#"
