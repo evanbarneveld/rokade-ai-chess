@@ -45,6 +45,7 @@ pub(crate) fn evaluate_root_for_bounds(
     tt: &mut TranspositionTable,
     game_state: &mut GameState,
     history: &History,
+    mut collect_all_scores: Option<&mut Vec<(((usize, usize), (usize, usize), Option<char>), i32, i32)>>,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
     let mut best_from_to_promo: Option<((usize, usize), (usize, usize), Option<char>)> = None;
     let mut best_score_raw = if active_color == Color::White {
@@ -92,6 +93,8 @@ pub(crate) fn evaluate_root_for_bounds(
     if enable_parallel {
         // 1) Search the first (best-ordered) move serially to establish PV and bounds
         let &(pv_from, pv_to, pv_promo) = ordered.first().unwrap();
+        let pv_adjusted;
+        let pv_score_raw;
         {
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
                 game_state,
@@ -123,6 +126,13 @@ pub(crate) fn evaluate_root_for_bounds(
             best_from_to_promo = Some((pv_from, pv_to, pv_promo));
             best_adjusted = adjusted;
             best_score_raw = score_raw;
+            pv_adjusted = adjusted;
+            pv_score_raw = score_raw;
+        }
+
+        // Collect PV move score if requested
+        if let Some(collector) = collect_all_scores.as_deref_mut() {
+            collector.push(((pv_from, pv_to, pv_promo), pv_adjusted, pv_score_raw));
         }
 
         // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
@@ -130,7 +140,7 @@ pub(crate) fn evaluate_root_for_bounds(
         let a_loc = a;
         let b_loc = b;
         let side = active_color;
-        let results = ordered[1..]
+        let parallel_results: Vec<_> = ordered[1..]
             .par_iter()
             .map(|&(from, to, promo)| {
                 // local TT per task
@@ -177,40 +187,40 @@ pub(crate) fn evaluate_root_for_bounds(
                 );
                 (from, to, promo, adjusted, score_raw)
             })
-            .reduce(
-                || {
-                    // Identity: invalid move placeholder not used; return extreme sentinel
-                    (
-                        (0usize, 0usize),
-                        (0usize, 0usize),
-                        None,
-                        if side == Color::White {
-                            MIN_EVAL_VALUE
-                        } else {
-                            MAX_EVAL_VALUE
-                        },
-                        if side == Color::White {
-                            MIN_EVAL_VALUE
-                        } else {
-                            MAX_EVAL_VALUE
-                        },
-                    )
-                },
-                |acc, x| {
-                    if x.4 == SEARCH_ABORTED {
-                        return x;
-                    }
-                    if acc.4 == SEARCH_ABORTED {
-                        return acc;
-                    }
-                    let better = if side == Color::White {
-                        x.3 > acc.3
-                    } else {
-                        x.3 < acc.3
-                    };
-                    if better { x } else { acc }
-                },
-            );
+            .collect();
+
+        // Collect all parallel move scores if requested
+        if let Some(collector) = collect_all_scores.as_deref_mut() {
+            for &(from, to, promo, adj, raw) in &parallel_results {
+                if raw != SEARCH_ABORTED {
+                    collector.push(((from, to, promo), adj, raw));
+                }
+            }
+        }
+
+        // Find best move from parallel results
+        let results = parallel_results.into_iter()
+            .reduce(|acc, x| {
+                if x.4 == SEARCH_ABORTED {
+                    return x;
+                }
+                if acc.4 == SEARCH_ABORTED {
+                    return acc;
+                }
+                let better = if side == Color::White {
+                    x.3 > acc.3
+                } else {
+                    x.3 < acc.3
+                };
+                if better { x } else { acc }
+            })
+            .unwrap_or((
+                (0usize, 0usize),
+                (0usize, 0usize),
+                None,
+                if side == Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE },
+                if side == Color::White { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE },
+            ));
 
         // Update best with parallel results if better
         let (pf, pt, ppromo, padj, praw) = results;
@@ -271,6 +281,11 @@ pub(crate) fn evaluate_root_for_bounds(
                 promo,
                 score_raw,
             );
+
+            // Collect move score if requested
+            if let Some(collector) = collect_all_scores.as_deref_mut() {
+                collector.push(((from, to, promo), adjusted, score_raw));
+            }
 
             // Track best
             let better = if active_color == Color::White {

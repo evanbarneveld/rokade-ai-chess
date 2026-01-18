@@ -351,7 +351,7 @@ fn test_blunder_move_2() {
     assert_eq!(san_move, "Nxd5"); //considered the best move according to analysis
 }
 
-//#[test]
+#[test]
 #[serial]
 fn test_blunder_move_3() {
     let fen = "r1bqkbnr/pppp1ppp/8/4P3/1nBN1B2/2N5/PPP2PPP/R2Q1RK1 b kq - 4 9";
@@ -365,7 +365,7 @@ fn test_blunder_move_3() {
     println!("Selected move: {:?}", san_move);
 
     // Debug: rank root moves with adjusted scores
-    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4);
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 6);
     println!("Root ranks (SAN, adj, raw):");
     for (san, adj, raw) in &ranks {
         println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);

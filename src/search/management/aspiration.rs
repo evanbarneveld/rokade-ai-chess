@@ -35,6 +35,7 @@ pub(crate) fn probe_with_aspiration(
     tt: &mut TranspositionTable,
     game_state: &mut GameState,
     history: &History,
+    collect_all_scores: Option<&mut Vec<(((usize, usize), (usize, usize), Option<char>), i32, i32)>>,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
     let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
 
@@ -51,6 +52,7 @@ pub(crate) fn probe_with_aspiration(
             tt,
             game_state,
             history,
+            None, // Don't collect on intermediate aspiration attempts
         );
 
         if best_raw == SEARCH_ABORTED {
@@ -73,8 +75,23 @@ pub(crate) fn probe_with_aspiration(
             if tried < 3 { continue; }
             // After 3 tries still failing high, fall back to full-width search
         } else {
-            // Score is within bounds - return the result directly
-            return (_mv, _best_adj, best_raw);
+            // Score is within bounds - collect scores on final successful search
+            if collect_all_scores.is_some() {
+                let (mv_final, adj_final, raw_final) = evaluate_root_for_bounds(
+                    active_color,
+                    root_moves,
+                    depth_now,
+                    a,
+                    b,
+                    tt,
+                    game_state,
+                    history,
+                    collect_all_scores,
+                );
+                return (mv_final, adj_final, raw_final);
+            } else {
+                return (_mv, _best_adj, best_raw);
+            }
         }
 
         // At this point we have tried a few widened windows but still failed to land inside bounds.
@@ -89,6 +106,7 @@ pub(crate) fn probe_with_aspiration(
             tt,
             game_state,
             history,
+            collect_all_scores, // Collect on final full-width search
         );
         if best_raw2 == SEARCH_ABORTED {
             return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);

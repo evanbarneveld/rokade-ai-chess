@@ -6,10 +6,9 @@ use crate::search::integration::playing_strength::select_move_based_using_streng
 
 // Re-export find_all_valid_moves for backward compatibility
 pub use crate::search::management::move_generator::find_all_valid_moves;
-use crate::search::evaluation::repetition::apply_repetition_avoidance_bias;
 use crate::search::evaluation::root_evaluator::evaluate_root_for_bounds;
 use crate::search::management::root_moves::{
-    adjusted_root_eval_for_move, build_pv_for_root, evaluate_after_root_move, get_root_moves,
+    adjusted_root_eval_for_move, build_pv_for_root, get_root_moves,
 };
 use crate::search::integration::threading::init_rayon_pool_if_needed;
 use crate::search::integration::uci_feedback::emit_info;
@@ -76,6 +75,50 @@ pub fn find_best_move(
     history: &History,
     search_depth: usize,
     playing_strength: usize,
+) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
+    find_best_move_internal(game_state, history, search_depth, playing_strength, None)
+}
+
+/// Find the best move and return all root moves ranked by score.
+/// Returns a vector of (SAN, adjusted_score, raw_score) sorted by preference for the side to move.
+/// Uses full iterative deepening and all search optimizations, making it much faster than debug_rank_root_moves.
+pub fn find_best_move_with_ranking(
+    game_state: &GameState,
+    history: &History,
+    search_depth: usize,
+) -> Vec<(String, i32, i32)> {
+    let mut all_scores = Vec::new();
+    find_best_move_internal(game_state, history, search_depth, MAX_PLAYING_STRENGTH, Some(&mut all_scores));
+
+    // Convert moves to SAN notation
+    let active_color = game_state.active_color();
+    let mut result: Vec<(String, i32, i32)> = all_scores
+        .into_iter()
+        .map(|((from, to, promo), adj, raw)| {
+            let san = convert_move_to_san(*game_state, Some((from, to, promo))).unwrap_or_else(|| {
+                format!("{}{}", crate::piece::as_square_str(from), crate::piece::as_square_str(to))
+            });
+            (san, adj, raw)
+        })
+        .collect();
+
+    // Sort by adjusted score (descending for White, ascending for Black)
+    if active_color == Color::White {
+        result.sort_by(|a, b| b.1.cmp(&a.1));
+    } else {
+        result.sort_by(|a, b| a.1.cmp(&b.1));
+    }
+
+    result
+}
+
+/// Internal implementation that optionally collects all move rankings
+fn find_best_move_internal(
+    game_state: &GameState,
+    history: &History,
+    search_depth: usize,
+    playing_strength: usize,
+    mut all_move_scores: Option<&mut Vec<(((usize, usize), (usize, usize), Option<char>), i32, i32)>>,
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     init_rayon_pool_if_needed();
 
@@ -171,6 +214,8 @@ pub fn find_best_move(
             tt.next_age();
             // Reset aspiration window at the start of each iteration
             let mut window: i32 = ASP_WINDOW_INIT_CP;
+            // Only collect scores on final depth iteration
+            let should_collect = depth_now == effective_depth && all_move_scores.is_some();
             let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
                 probe_with_aspiration(
                     active_color,
@@ -181,6 +226,7 @@ pub fn find_best_move(
                     &mut tt,
                     &mut gs,
                     history,
+                    if should_collect { all_move_scores.as_deref_mut() } else { None },
                 )
             } else {
                 evaluate_root_for_bounds(
@@ -192,6 +238,7 @@ pub fn find_best_move(
                     &mut tt,
                     &mut gs,
                     history,
+                    if should_collect { all_move_scores.as_deref_mut() } else { None },
                 )
             };
 
@@ -234,6 +281,7 @@ pub fn find_best_move(
                 &mut tt,
                 &mut gs,
                 history,
+                all_move_scores.as_deref_mut(),
             )
         } else {
             evaluate_root_for_bounds(
@@ -245,6 +293,7 @@ pub fn find_best_move(
                 &mut tt,
                 &mut gs,
                 history,
+                all_move_scores.as_deref_mut(),
             )
         };
 
@@ -359,68 +408,14 @@ pub fn find_best_move(
 
 /// Debug helper: rank root moves for the current position, returning (SAN, adjusted_score, raw_score)
 /// Sorted by side to move preference (White: descending; Black: ascending).
+///
+/// This function now uses the optimized production search with iterative deepening and all
+/// search enhancements, making it much faster than the previous implementation.
+/// The depth > 5 restriction has been removed.
 pub fn debug_rank_root_moves(
     game_state: &GameState,
     history: &History,
     depth: usize,
 ) -> Vec<(String, i32, i32)> {
-    if depth > 5 {
-        panic!("debug_rank_root_moves() called with depth > 5");
-    }
-    let mut gs = *game_state;
-    let active_color = gs.active_color();
-    let gen_moves = find_all_valid_moves(&mut gs);
-    let mut v = Vec::with_capacity(gen_moves.len());
-    get_root_moves(&mut gs, history, active_color, &gen_moves, &mut v);
-    let root = v;
-
-    let mut tt = get_tt_mutex().lock().unwrap();
-    if crate::search::is_deterministic() {
-        tt.clear();
-    }
-
-    let mut out: Vec<(String,i32,i32)> = Vec::with_capacity(root.len());
-    for (from, to, promo) in root {
-        let (raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
-            &mut gs,
-            from,
-            to,
-            promo,
-            depth.max(1),
-            MIN_EVAL_VALUE + 1,
-            MAX_EVAL_VALUE - 1,
-            &mut tt,
-            history,
-        );
-        let mut adj = adjusted_root_eval_for_move(
-            gs.board(),
-            active_color,
-            from,
-            to,
-            gs.half_move_clock(),
-            raw,
-            is_capture,
-            moved_is_pawn,
-        );
-        adj = apply_repetition_avoidance_bias(
-            adj,
-            &gs,
-            history,
-            active_color,
-            from,
-            to,
-            promo,
-            raw,
-        );
-        let san = convert_move_to_san(gs, Some((from, to, promo))).unwrap_or_else(|| {
-            format!("{}{}", crate::piece::as_square_str(from), crate::piece::as_square_str(to))
-        });
-        out.push((san, adj, raw));
-    }
-    if active_color == Color::White {
-        out.sort_by(|a,b| b.1.cmp(&a.1));
-    } else {
-        out.sort_by(|a,b| a.1.cmp(&b.1));
-    }
-    out
+    find_best_move_with_ranking(game_state, history, depth)
 }
