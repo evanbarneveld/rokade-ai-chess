@@ -48,10 +48,14 @@ pub(crate) fn evaluate_root_for_bounds(
     mut collect_all_scores: Option<&mut Vec<(((usize, usize), (usize, usize), Option<char>), i32, i32)>>,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
     let mut best_from_to_promo: Option<((usize, usize), (usize, usize), Option<char>)> = None;
-    // Since we now always maximize adjusted scores (White-perspective for both sides),
-    // initialize to MIN_EVAL_VALUE
+    // Adjusted scores are in White-perspective:
+    // White maximizes (start from MIN), Black minimizes (start from MAX)
     let mut best_score_raw = MIN_EVAL_VALUE;
-    let mut best_adjusted = best_score_raw;
+    let mut best_adjusted = if active_color == Color::White {
+        MIN_EVAL_VALUE
+    } else {
+        MAX_EVAL_VALUE
+    };
 
     // Order: if TT has a move at root, try to place it first, then apply light opening-aware tie-breakers
     let mut ordered: Vec<((usize, usize), (usize, usize), Option<char>)> = root_moves.to_vec();
@@ -197,7 +201,7 @@ pub(crate) fn evaluate_root_for_bounds(
         }
 
         // Find best move from parallel results
-        // Since adjustments are now in White-perspective for both sides, always pick higher scores
+        // Adjustments are in White-perspective: White maximizes, Black minimizes
         let results = parallel_results.into_iter()
             .reduce(|acc, x| {
                 if x.4 == SEARCH_ABORTED {
@@ -206,7 +210,11 @@ pub(crate) fn evaluate_root_for_bounds(
                 if acc.4 == SEARCH_ABORTED {
                     return acc;
                 }
-                let better = x.3 > acc.3;
+                let better = if side == Color::White {
+                    x.3 > acc.3  // White wants higher scores
+                } else {
+                    x.3 < acc.3  // Black wants lower scores
+                };
                 if better { x } else { acc }
             })
             .unwrap_or((
@@ -224,7 +232,11 @@ pub(crate) fn evaluate_root_for_bounds(
         }
         // Ignore identity placeholder
         if !(pf == (0, 0) && pt == (0, 0)) {
-            let better = padj > best_adjusted;
+            let better = if side == Color::White {
+                padj > best_adjusted  // White wants higher scores
+            } else {
+                padj < best_adjusted  // Black wants lower scores
+            };
             if better {
                 best_from_to_promo = Some((pf, pt, ppromo));
                 best_adjusted = padj;
@@ -279,9 +291,12 @@ pub(crate) fn evaluate_root_for_bounds(
             }
 
             // Track best
-            // Since adjustments are now in White-perspective for both sides,
-            // both White and Black want higher adjusted scores
-            let better = adjusted > best_adjusted;
+            // Adjustments are in White-perspective: White maximizes, Black minimizes
+            let better = if active_color == Color::White {
+                adjusted > best_adjusted  // White wants higher scores
+            } else {
+                adjusted < best_adjusted  // Black wants lower scores
+            };
 
             if better || best_from_to_promo.is_none() {
                 best_from_to_promo = Some((from, to, promo));

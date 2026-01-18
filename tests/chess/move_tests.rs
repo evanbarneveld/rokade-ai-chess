@@ -402,7 +402,7 @@ fn test_blunder_move_4() {
     assert_eq!(san_move, "Nxd4"); //considered the best move according to analysis
 }
 
-//#[test]
+#[test]
 #[serial]
 fn test_blunder_move_5() {
     let fen = "r1bqkb1r/ppppn1pp/5p2/1N2n3/1PBN1B2/P7/2P1QPPP/R4RK1 b kq - 1 13";
@@ -425,3 +425,9 @@ fn test_blunder_move_5() {
     assert_ne!(san_move, "N5c6"); //considered a blunder
     assert_eq!(san_move, "a6"); //considered the best move according to analysis
 }
+
+/*
+please fix a bug in the chess engine. test `test_blunder_move_5` shows the existence of this bug.
+There is a complex situation on the chessboard, and advanced analysis has calculated a good move,
+see remarks in the test. This engine however selects a much worse move, see remarkts in the test.
+ */

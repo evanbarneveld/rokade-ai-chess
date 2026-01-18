@@ -159,7 +159,8 @@ pub fn adjust_root_score(
     moved_is_pawn: bool,
     score_raw: i32,
 ) -> i32 {
-    let mut adjusted = score_raw + root_move_bonus(base_board, from, to, side);
+    let initial_bonus = root_move_bonus(base_board, from, to, side);
+    let mut adjusted = score_raw + initial_bonus;
 
     // Prepare post-position for heuristics
     let (mut post_after, moved_probe) = simulate_move(base_board, from, to);
@@ -177,9 +178,56 @@ pub fn adjust_root_score(
     adjusted += see_delta;
 
     // 2. Threat resolution and evacuation
-    let threat_delta = threat_resolution_and_evacuation(
+    let mut threat_delta = threat_resolution_and_evacuation(
         base_board, &post_after, side, from, to, gives_check,
     );
+
+    // Fix: Don't heavily penalize quiet pawn moves that attack opponent pieces
+    // The threat heuristic may incorrectly penalize these moves
+    if moved_is_pawn && !is_capture && threat_delta > 150 {
+        let pawn_rank_dir = if side == Color::White { 1i32 } else { -1i32 };
+        // Check if this pawn move attacks an opponent piece
+        let attacks_enemy = {
+            let mut attacks = false;
+            for &dc in &[-1i32, 1i32] {
+                let attack_r = (to.0 as i32) + pawn_rank_dir;
+                let attack_c = (to.1 as i32) + dc;
+                if attack_r >= 0 && attack_r < 8 && attack_c >= 0 && attack_c < 8 {
+                    if let Some(p) = post_after.get(attack_r as usize, attack_c as usize) {
+                        if p.get_color() != side {
+                            attacks = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            attacks
+        };
+        if attacks_enemy {
+            // Reduce the penalty significantly for pawn moves that create threats
+            threat_delta = 0; // Completely ignore the penalty for threat-creating pawn moves
+
+            // Give a bonus for attacking valuable pieces (knights, bishops, rooks, queens)
+            for &dc in &[-1i32, 1i32] {
+                let attack_r = (to.0 as i32) + pawn_rank_dir;
+                let attack_c = (to.1 as i32) + dc;
+                if attack_r >= 0 && attack_r < 8 && attack_c >= 0 && attack_c < 8 {
+                    if let Some(p) = post_after.get(attack_r as usize, attack_c as usize) {
+                        if p.get_color() != side {
+                            let value_bonus = match p.get_type() {
+                                PieceType::Knight | PieceType::Bishop => -150, // Good bonus
+                                PieceType::Rook => -200,
+                                PieceType::Queen => -300,
+                                _ => 0,
+                            };
+                            adjusted += value_bonus;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     adjusted += threat_delta;
 
     // 3. Knight evacuation priority
@@ -210,7 +258,8 @@ pub fn adjust_root_score(
     adjusted += queen_kingside_pressure_bonus(base_board, side, from, to);
 
     // 9. Opponent knight check/fork opportunities
-    adjusted += opponent_knight_check_fork_penalty(&post_after, side, to);
+    let knight_penalty = opponent_knight_check_fork_penalty(&post_after, side, to);
+    adjusted += knight_penalty;
 
     adjusted
 }
@@ -263,6 +312,8 @@ pub fn evaluate_after_root_move(
             true, // Allow null move at root
         )
     };
+
+
     game_state.unmake_move_fast(u);
     (score_raw, is_capture || u.ep_captured_piece.is_some(), moved_is_pawn)
 }
@@ -283,12 +334,10 @@ pub fn adjusted_root_eval_for_move(
         base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw,
     );
 
-    // For Black, negate the heuristic adjustments to maintain White-perspective scoring
-    // adjust_root_score returns side-relative adjustments, but we need White-perspective
-    if side == Color::Black {
-        let adjustment = adj - score_raw;
-        adj = score_raw - adjustment;
-    }
+    // adjust_root_score already returns White-perspective scores for both sides
+    // (score_raw is in opponent perspective after the move, and apply_for_side
+    // correctly adjusts in that same perspective)
+
 
     // Calculate the heuristic adjustment
     let heuristic_delta = adj - score_raw;

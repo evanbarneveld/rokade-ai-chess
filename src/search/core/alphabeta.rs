@@ -87,26 +87,33 @@ pub fn alphabeta(
     if let Some(entry) = tt.probe(key) {
         if entry.depth as usize >= depth {
             let tt_score = from_tt_score(entry.score, ply);
-            match entry.bound {
-                Bound::Exact => {
-                    if pushed_rep {
-                        rep_stack.pop();
+
+            // Don't trust cached 0 scores near the root - they may be stale or imprecise
+            // Force re-evaluation to get more accurate scores for move ordering
+            let use_cached = !(tt_score == 0 && ply <= 3 && depth >= 3);
+
+            if use_cached {
+                match entry.bound {
+                    Bound::Exact => {
+                        if pushed_rep {
+                            rep_stack.pop();
+                        }
+                        return tt_score;
                     }
-                    return tt_score;
-                }
-                Bound::Lower => {
-                    if tt_score > alpha {
-                        alpha = tt_score;
+                    Bound::Lower => {
+                        if tt_score > alpha {
+                            alpha = tt_score;
+                        }
                     }
-                }
-                Bound::Upper => {
-                    if tt_score < beta {
-                        beta = tt_score;
+                    Bound::Upper => {
+                        if tt_score < beta {
+                            beta = tt_score;
+                        }
                     }
                 }
             }
             // Early cutoff after bound update
-            if alpha >= beta {
+            if use_cached && alpha >= beta {
                 if pushed_rep {
                     rep_stack.pop();
                 }
