@@ -1,6 +1,7 @@
 use chess::Chess;
 use chess::generator::move_generator::generate_move_as_san;
 use serial_test::serial;
+use chess::history::history::History;
 use chess::search::core::advanced_search::{debug_rank_root_moves, DEFAULT_SEARCH_DEPTH};
 use chess::search::set_deterministic;
 
@@ -397,7 +398,7 @@ fn test_blunder_move_4() {
         println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);
     }
     */
-    
+
     assert_ne!(san_move, "Nxe5"); //considered a blunder
     assert_eq!(san_move, "Nxd4"); //considered the best move according to analysis
 }
@@ -406,13 +407,8 @@ fn test_blunder_move_4() {
 #[serial]
 fn test_blunder_move_5() {
     let fen = "r1bqkb1r/ppppn1pp/5p2/1N2n3/1PBN1B2/P7/2P1QPPP/R4RK1 b kq - 1 13";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen).expect("bad fen");
-    set_deterministic(true);
-    //get the best move
-    let history = game.get_history().clone();
 
-    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
+    let (mut game, history, san_move) = readFenAndGenerateBestMove(fen);
     println!("Selected move: {:?}", san_move);
 
     // Debug: rank root moves with adjusted scores
@@ -426,8 +422,40 @@ fn test_blunder_move_5() {
     assert_eq!(san_move, "a6"); //considered the best move according to analysis
 }
 
+#[test]
+#[serial]
+fn test_blunder_move_6() {
+    let fen = "r1bqkb1r/2p2ppp/p1n2n2/4p1N1/1p1Pp3/1B6/PPP1NPPP/R1BQK2R b KQkq - 1 9";
+
+    let (mut game, history, san_move) = readFenAndGenerateBestMove(fen);
+    println!("Selected move: {:?}", san_move);
+
+    // Debug: rank root moves with adjusted scores
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 7);
+    println!("Root ranks (SAN, adj, raw):");
+    for (san, adj, raw) in &ranks {
+        println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);
+    }
+
+    assert_ne!(san_move, "exd4"); //considered a blunder
+    assert_eq!(san_move, "Be6"); //considered the best move according to analysis
+}
+
+fn readFenAndGenerateBestMove(fen: &str) -> (Chess, History, String) {
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
+    (game, history, san_move)
+}
+
 /*
 please fix a bug in the chess engine. test `<test>` shows the existence of this bug.
 There is a complex situation on the chessboard, and advanced analysis has calculated a good move,
 see remarks in the test. This engine, however, selects a much worse move, see remarks in the test.
+Also, check out ARCHITECTURE.md for more information on the chess engine. Read this before you
+attempt to fix bugs in the engine.
  */
