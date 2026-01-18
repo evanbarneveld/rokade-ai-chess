@@ -76,6 +76,7 @@ pub fn self_hang_or_check_mobility(
     }
 
     // Don't cap hanging penalties - they should fully reflect the material at risk
+    // EXCEPT when the move gives check - then the opponent must respond to check first
     let hang_pen = if total_penalty > 0 {
         -total_penalty
     } else {
@@ -87,7 +88,35 @@ pub fn self_hang_or_check_mobility(
     if gives_check {
         check_bonus += CHECK_TIEBREAK_BASE;
         check_bonus += check_mobility_bonus_for_side(post_after, opp);
+
+        // Large bonus for advanced pawn checks (near promotion)
+        // These are often winning tactics that should be prioritized
+        if let Some(piece) = post_after.get(to.0, to.1) {
+            if piece.get_type() == PieceType::Pawn {
+                let pawn_rank = to.0;
+                // For White: rank 6 (row 6) or 7 (row 7) near promotion
+                // For Black: rank 1 (row 1) or 2 (row 2) near promotion
+                let is_advanced = match side {
+                    Color::White => pawn_rank >= 6,
+                    Color::Black => pawn_rank <= 1,
+                };
+                if is_advanced {
+                    // Very large bonus for advanced pawn check
+                    // This should outweigh most other considerations
+                    check_bonus += 2000;
+                }
+            }
+        }
     }
 
-    apply_for_side(hang_pen + check_bonus, side)
+    // If we give check, reduce hanging piece penalties significantly
+    // because opponent must respond to check before capturing hanging pieces
+    let adjusted_hang_pen = if gives_check && hang_pen < 0 {
+        // Reduce hanging penalties by 80% when giving check
+        hang_pen / 5
+    } else {
+        hang_pen
+    };
+
+    apply_for_side(adjusted_hang_pen + check_bonus, side)
 }

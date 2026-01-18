@@ -461,6 +461,25 @@ fn test_blunder_move_7() {
     assert_eq!(san_move, "d2+"); //considered the best move according to analysis
 }
 
+//#[test]
+#[serial]
+fn test_blunder_move_8() {
+    let fen = "r1b1kb1r/2B5/p1n4p/5pp1/1p1qn3/1B2R3/PP1p1PPP/1R1Q1NK1 b kq - 1 20";
+
+    let (mut game, history, san_move) = read_fen_and_generate_best_move(fen);
+    println!("Selected move: {:?}", san_move);
+
+    // Debug: rank root moves with adjusted scores
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 7);
+    println!("Root ranks (SAN, adj, raw):");
+    for (san, adj, raw) in &ranks {
+        println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);
+    }
+
+    assert_ne!(san_move, "f4"); //considered a blunder
+    assert_eq!(san_move, "Kd7"); //considered the best move according to analysis
+}
+
 fn read_fen_and_generate_best_move(fen: &str) -> (Chess, History, String) {
     let mut game = Chess::new();
     game.set_starting_fen(fen).expect("bad fen");
@@ -475,12 +494,11 @@ fn read_fen_and_generate_best_move(fen: &str) -> (Chess, History, String) {
 
 /*
 The chess engine needs to be further improved because the engine still makes some blunders.
-That is what test '<test>' shows. It shows that the engine makes a blunder and it also
-shows what a much better move would be.
+That is what test `<test>` shows. It shows that the engine makes a blunder, and it also shows what a much better move would be.
 
-This happens because of sub-optimal bonus/penalty values and conditions in the heuristics and/or thread resolution.
-Check out ARCHITECTURE.md for more information on the chess engine before you make any changes.
- */
+You must read ARCHITECTURE.md before you attempt to fix blunders in the engine.
+But be aware that the blunder happens because of suboptimal bonus/penalty values, clamping of these values, conditions in the heuristics and/or thread resolution.
+*/
 
 /*
 please fix a bug in the chess engine. test `<test>` shows the existence of this bug.

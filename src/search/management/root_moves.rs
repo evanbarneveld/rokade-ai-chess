@@ -355,7 +355,8 @@ pub fn adjusted_root_eval_for_move(
 
     // Safety: don't let heuristics turn a losing move into a winning one
     // EXCEPT for critical tactical penalties like ignoring promotion threats
-    let is_critical_penalty = heuristic_delta.abs() > 1000; // Promotion threat penalty is -1200
+    // Only allow bypassing clamps for large NEGATIVE adjustments (penalties), not positive ones
+    let is_critical_penalty = heuristic_delta < -1000; // Promotion threat penalty is -1200
 
     if !is_critical_penalty {
         if score_raw < 0 {
@@ -364,10 +365,16 @@ pub fn adjusted_root_eval_for_move(
             } else {
                 adj = adj.max(score_raw);
             }
-        } else if score_raw == 0 && side == Color::White {
-            // Don't drag draw scores down too much for White, but allow significant penalties (like suicidal checks)
-            // For Black, adjustments are already negated so this clamping shouldn't apply
-            adj = adj.max(-500);
+        } else if score_raw == 0 {
+            // Clamp adjustments for both colors when raw score is 0
+            // This prevents heuristics from making blunder moves look artificially good
+            if side == Color::White {
+                // Don't drag draw scores down too much for White
+                adj = adj.max(-500);
+            } else {
+                // Don't drag draw scores up too much for Black (symmetric to White's clamping)
+                adj = adj.min(500);
+            }
         }
     }
     adj
