@@ -23,7 +23,7 @@ use crate::search::evaluation::root_heuristics::{
     self_hang_or_check_mobility,
     queen_kingside_pressure_bonus,
 };
-use crate::search::evaluation::root_heuristics::utils::ROOT_CAPTURE_BONUS_DIV;
+use crate::search::evaluation::root_heuristics::utils::{apply_for_side, ROOT_CAPTURE_BONUS_DIV};
 
 // ============================================================
 // PUBLIC API: ROOT MOVE BONUSES & SCORING
@@ -183,10 +183,10 @@ pub fn adjust_root_score(
     // 3. Knight evacuation priority
     adjusted += knight_evacuations_priority(base_board, side, from, to, gives_check);
 
-    // 4. Capture bonus
+    // 4. Capture bonus (apply with correct sign for side)
     let _cap_bonus = if let Some(captured) = base_board.get(to.0, to.1) {
         let b = capture_value_cp(captured.get_type()) / ROOT_CAPTURE_BONUS_DIV;
-        adjusted += b;
+        adjusted += apply_for_side(b, side);
         b
     } else {
         0

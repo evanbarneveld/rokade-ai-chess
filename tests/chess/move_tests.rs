@@ -96,7 +96,6 @@ fn test_bad_queen_move2() {
     assert_ne!(san_move, "Qc6"); //bad move, blundering the queen
 }
 
-
 #[test]
 #[serial]
 fn test_knight_should_capture_queen() {
@@ -305,4 +304,46 @@ fn test_unnecessary_king_move_losing_castling_rights() {
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, TEST_MOVE_TIME, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
     assert_ne!(san_move, "Nd8"); //bad move
+}
+
+#[test]
+#[serial]
+fn test_blunder_move_1() {
+    // In this position the engine generates a move that is considered a blunder (see remarks at the end of this test)
+    // The engine should have made a better move, see remarks at the end of this test.
+    let fen = "r1b1kb1r/pppq1ppp/2np4/4P3/4PBn1/2N2N2/PPP1QPPP/R3KB1R b KQkq - 2 7";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+
+    // Debug: rank root moves with adjusted scores
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4);
+    println!("Root ranks (SAN, adj, raw):");
+    for (san, adj, raw) in &ranks {
+        println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);
+    }
+
+    assert_ne!(san_move, "d5"); //considered a blunder
+    assert_eq!(san_move, "dxe5"); //considered the best move according to analysis
+}
+
+#[test]
+#[serial]
+fn test_blunder_move_2() {
+    let fen = "r1b1kb1r/pppq1ppp/8/3PP3/1n3Bn1/P1N2N2/1PP1QPPP/R3KB1R b KQkq - 0 9";
+    let mut game = Chess::new();
+    game.set_starting_fen(fen).expect("bad fen");
+    set_deterministic(true);
+    //get the best move
+    let history = game.get_history().clone();
+
+    let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
+    println!("Selected move: {:?}", san_move);
+    assert_ne!(san_move, "Na6"); //considered a blunder
+    assert_eq!(san_move, "Nxd5"); //considered the best move according to analysis
 }

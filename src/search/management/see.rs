@@ -74,16 +74,12 @@ pub fn see_dest_estimate(
     // Negamax backwards through the gain list to find the best outcome
     // At each level, the side to move chooses between stopping or continuing
     // Standard negamax formula: gain[d-1] = -max(-gain[d-1], gain[d])
-    if depth > 1 {
-        while depth > 1 {
-            depth -= 1;
-            gain[depth - 1] = -(-gain[depth - 1]).max(gain[depth]);
-        }
-    } else if depth == 1 {
-        // Special case: one exchange occurred, apply negamax once
-        gain[0] = -(-gain[0]).max(gain[1]);
+    // Process from highest depth down to 1, updating gain[d-1] using gain[d]
+    while depth > 0 {
+        gain[depth - 1] = -(-gain[depth - 1]).max(gain[depth]);
+        depth -= 1;
     }
-    // If depth == 0, no exchanges occurred, return gain[0] as-is
+    // If depth == 0, no exchanges occurred, gain[0] is returned as-is
 
     gain[0]
 }

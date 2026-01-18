@@ -364,6 +364,9 @@ pub fn debug_rank_root_moves(
     history: &History,
     depth: usize,
 ) -> Vec<(String, i32, i32)> {
+    if depth > 5 {
+        panic!("debug_rank_root_moves() called with depth > 5");
+    }
     let mut gs = *game_state;
     let active_color = gs.active_color();
     let gen_moves = find_all_valid_moves(&mut gs);
