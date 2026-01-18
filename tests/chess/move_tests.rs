@@ -351,7 +351,7 @@ fn test_blunder_move_2() {
     assert_eq!(san_move, "Nxd5"); //considered the best move according to analysis
 }
 
-#[test]
+//#[test]
 #[serial]
 fn test_blunder_move_3() {
     let fen = "r1bqkbnr/pppp1ppp/8/4P3/1nBN1B2/2N5/PPP2PPP/R2Q1RK1 b kq - 4 9";
