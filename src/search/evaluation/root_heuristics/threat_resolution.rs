@@ -220,18 +220,20 @@ pub fn threat_resolution_and_evacuation(
             // e.g., bishop attacking pawn is not a real threat, so minimal evacuation bonus
             let threat_factor = if is_genuine_threat { 1 } else { 10 }; // 1/10th bonus for non-genuine threats
 
-            // Moving to safety gets full bonus; moving to another attacked square gets half bonus
-            let mut evac_bonus = if !still_attacked || see_new >= 0 {
-                base_evac / threat_factor
+            // Moving to safety gets full bonus; moving to another attacked square with negative SEE gets a PENALTY
+            let evac_bonus = if !still_attacked || see_new >= 0 {
+                let mut bonus = base_evac / threat_factor;
+                // Add knight-specific bonuses ONLY if we're actually moving to safety
+                if pt == PieceType::Knight {
+                    bonus += knight_evacuation_bonus(to, &knight_safe, by_pawn);
+                }
+                bonus
             } else {
-                // Even moving to an attacked square is better than leaving it hanging
-                base_evac / (2 * threat_factor)
+                // If we're moving to a square where we're still hanging (negative SEE),
+                // this is a bad move - don't give evacuation bonus and instead apply a penalty.
+                // The penalty should discourage "fake evacuations" that still lose material.
+                -base_evac / 2 // Strong penalty - half the evacuation bonus as negative
             };
-
-            // Add knight-specific bonuses
-            if pt == PieceType::Knight {
-                evac_bonus += knight_evacuation_bonus(to, &knight_safe, by_pawn);
-            }
 
             delta += apply_for_side(evac_bonus, side);
         } else {
