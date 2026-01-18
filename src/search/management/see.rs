@@ -84,11 +84,11 @@ pub fn see_dest_estimate(
     gain[0]
 }
 
-// Find the smallest (least valuable) attacker of a square for a given side.
-// This is used to simulate the most favorable exchange sequence.
-// Returns (square, piece) of the attacker, or None if no attacker exists.
+/// Find the smallest (least valuable) attacker of a square for a given side.
+/// This is used to simulate the most favorable exchange sequence.
+/// Returns (square, piece) of the attacker, or None if no attacker exists.
 #[inline]
-fn find_smallest_attacker(
+pub fn find_smallest_attacker(
     board: &Board,
     target: (usize, usize),
     attacker_color: Color,

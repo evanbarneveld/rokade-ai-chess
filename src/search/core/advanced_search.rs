@@ -375,6 +375,9 @@ pub fn debug_rank_root_moves(
     let root = v;
 
     let mut tt = get_tt_mutex().lock().unwrap();
+    if crate::search::is_deterministic() {
+        tt.clear();
+    }
 
     let mut out: Vec<(String,i32,i32)> = Vec::with_capacity(root.len());
     for (from, to, promo) in root {

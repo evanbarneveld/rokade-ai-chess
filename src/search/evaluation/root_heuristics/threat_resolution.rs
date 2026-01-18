@@ -3,7 +3,8 @@
 use crate::board::Board;
 use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::piece::pieces::{opposite_color, Color, PieceType};
-use crate::search::management::see::{attacked_by_pawn, see_dest_estimate};
+use crate::search::management::see::{attacked_by_pawn, find_smallest_attacker, see_dest_estimate};
+use crate::piece::pieces::piece_value_cp;
 
 use super::utils::{
     apply_for_side, center_score,
@@ -198,8 +199,15 @@ pub fn threat_resolution_and_evacuation(
             // We moved the threatened piece - calculate evacuation bonus
             let see_new = see_dest_estimate(post_after, side, to, 0);
 
-            // ALWAYS give evacuation bonus for moving an attacked piece
-            // Scale bonus by piece value to prioritize saving more valuable pieces
+            // Check if this is a "genuine" threat - smallest attacker has equal or lesser value
+            let piece_val = piece_value_cp(pt);
+            let is_genuine_threat = if let Some((_, attacker)) = find_smallest_attacker(base_board, (tr, tc), opp) {
+                piece_value_cp(attacker.get_type()) <= piece_val
+            } else {
+                false // No attacker found (shouldn't happen since piece is in threatened list)
+            };
+
+            // Base evacuation bonus - scale by piece value
             let base_evac = match pt {
                 PieceType::Queen => 800,
                 PieceType::Rook => 600,
@@ -208,12 +216,16 @@ pub fn threat_resolution_and_evacuation(
                 PieceType::King => 1000,
             };
 
+            // If not a genuine threat (attacker is more valuable), reduce bonus significantly
+            // e.g., bishop attacking pawn is not a real threat, so minimal evacuation bonus
+            let threat_factor = if is_genuine_threat { 1 } else { 10 }; // 1/10th bonus for non-genuine threats
+
             // Moving to safety gets full bonus; moving to another attacked square gets half bonus
             let mut evac_bonus = if !still_attacked || see_new >= 0 {
-                base_evac
+                base_evac / threat_factor
             } else {
                 // Even moving to an attacked square is better than leaving it hanging
-                base_evac / 2
+                base_evac / (2 * threat_factor)
             };
 
             // Add knight-specific bonuses
