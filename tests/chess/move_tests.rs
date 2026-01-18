@@ -389,13 +389,15 @@ fn test_blunder_move_4() {
     let san_move = generate_move_as_san(game.get_search_mode(), *game.get_game_state(), &history, DEFAULT_SEARCH_DEPTH, 3000, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
 
+    /*
     // Debug: rank root moves with adjusted scores
     let ranks = debug_rank_root_moves(game.get_game_state(), &history, 7);
     println!("Root ranks (SAN, adj, raw):");
     for (san, adj, raw) in ranks.iter().take(10) {
         println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);
     }
-
+    */
+    
     assert_ne!(san_move, "Nxe5"); //considered a blunder
     assert_eq!(san_move, "Nxd4"); //considered the best move according to analysis
 }

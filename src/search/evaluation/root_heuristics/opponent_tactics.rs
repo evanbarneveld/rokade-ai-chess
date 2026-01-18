@@ -1,8 +1,7 @@
 //! Detect opponent tactical opportunities after our moves.
 
 use crate::board::Board;
-use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
-use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
+use crate::piece::pieces::{opposite_color, Color, PieceType};
 
 use super::utils::apply_for_side;
 
