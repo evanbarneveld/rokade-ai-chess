@@ -441,6 +441,26 @@ fn test_blunder_move_6() {
     assert_eq!(san_move, "Be6"); //considered the best move according to analysis
 }
 
+//
+#[test]
+#[serial]
+fn test_blunder_move_7() {
+    let fen = "r1bqkb1r/2B2p2/p4n1p/n5p1/1p2N3/1B1p2N1/PP3PPP/2RQK2R b Kkq - 0 15";
+
+    let (mut game, history, san_move) = read_fen_and_generate_best_move(fen);
+    println!("Selected move: {:?}", san_move);
+
+    // Debug: rank root moves with adjusted scores
+    let ranks = debug_rank_root_moves(game.get_game_state(), &history, 7);
+    println!("Root ranks (SAN, adj, raw):");
+    for (san, adj, raw) in &ranks {
+        println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);
+    }
+
+    assert_ne!(san_move, "Qd4"); //considered a blunder
+    assert_eq!(san_move, "d2+"); //considered the best move according to analysis
+}
+
 fn read_fen_and_generate_best_move(fen: &str) -> (Chess, History, String) {
     let mut game = Chess::new();
     game.set_starting_fen(fen).expect("bad fen");
