@@ -1,13 +1,19 @@
-TODO's
-======
+- there is a problem: the search doesn't find any better moves at higher depths, score RAW stays 0
+- there are issues with zobrist hashing (use full!)
+- there are ussue with UCI info logging (no PV's)
+- extreme scores are reported over UCI
+- last step of UCI score needs to be negated for black
 
 - create a test that tests the bestmove using UCI commands, whereby the best move as a pawn promotion to a piece that is not a queen
 
-QUESTIONS
-=========
+Questions:
+
 - is there a fen that shows that a better move can only be found if the engine looks deeper than say 5?
 
+Add features:
 
-POSITIONS
-=========
-Positions in which the engine makes bad or unexpected moves:
+Implement sharing of the main TT with proper locking or merging the local TT's back.
+
+  ☐ Review the evaluation function are there redundant constructs?
+  ☐ Add more intelligence to the evaluator
+  ☐ Is it possible to add more positional understanding

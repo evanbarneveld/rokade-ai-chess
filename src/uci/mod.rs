@@ -330,8 +330,7 @@ pub fn run_uci() -> io::Result<()> {
                     let ms = start.elapsed().as_millis().max(1);
                     let nps = (nodes as u128 * 1000u128) / ms;
                     // Print directly to stdout; ignore logging for async updates
-                    let score_cp_from_white_perspective = if white_is_active_inner { score_cp } else { -score_cp };
-                    let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, score_cp_from_white_perspective, nodes, nps, hashfull, pv);
+                    let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, score_cp, nodes, nps, hashfull, pv);
                     write_to_stdout_and_log_with_flush("OUT", &log_text);
                 });
                 set_info_callback(Some(info_cb));

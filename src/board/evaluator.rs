@@ -15,9 +15,63 @@ const ROOK: i32 = 500;
 const QUEEN: i32 = 900;
 const KING: i32 = 0; // King material is not counted; PST handles its safety/activity
 
+// Phase weights for game phase calculation (total = 24 at start)
+const PHASE_KNIGHT: i32 = 1;
+const PHASE_BISHOP: i32 = 1;
+const PHASE_ROOK: i32 = 2;
+const PHASE_QUEEN: i32 = 4;
+
 pub struct PawnFileCounts {
     pub white: [i32; 8],
     pub black: [i32; 8],
+}
+
+pub struct FileClearance {
+    /// For each file, stores ranges that are clear of pieces
+    /// Used for rook evaluation optimization
+    pub files: [Vec<(usize, usize)>; 8],
+}
+
+impl FileClearance {
+    pub fn new(board: &Board) -> Self {
+        let mut files = [const { Vec::new() }; 8];
+
+        for col in 0..8 {
+            let mut clear_start = 0;
+            for row in 0..8 {
+                if board.get(row, col).is_some() {
+                    if row > clear_start {
+                        files[col].push((clear_start, row));
+                    }
+                    clear_start = row + 1;
+                } else if row == 7 && clear_start <= 7 {
+                    files[col].push((clear_start, 8));
+                }
+            }
+            if clear_start < 8 {
+                files[col].push((clear_start, 8));
+            }
+        }
+
+        Self { files }
+    }
+
+    #[inline]
+    pub fn is_clear_between(&self, r1: usize, r2: usize, file: usize) -> bool {
+        let start = r1.min(r2) + 1;
+        let end = r1.max(r2);
+
+        if start >= end {
+            return true;
+        }
+
+        for &(clear_start, clear_end) in &self.files[file] {
+            if clear_start <= start && clear_end >= end {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 // ============================================================
@@ -49,11 +103,8 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     score += ctx.evaluate_center_control();
     score += ctx.evaluate_space();
     score += ctx.evaluate_global_features();
+    score += ctx.evaluate_piece_interactions();
 
-    // Unstoppable passer detection (endgame only)
-    if ctx.eg > 12 {
-        score += ctx.evaluate_unstoppable_passers(side_to_move);
-    }
     apply_drawish_tweaks(&ctx.stats, score)
 }
 
@@ -86,30 +137,6 @@ pub(crate) fn material_value(piece: PieceType) -> i32 {
         PieceType::Queen => QUEEN,
         PieceType::King => KING,
     }
-}
-
-#[inline]
-pub(crate) fn game_phase(board: &Board) -> i32 {
-    const PHASE_KNIGHT: i32 = 1;
-    const PHASE_BISHOP: i32 = 1;
-    const PHASE_ROOK: i32 = 2;
-    const PHASE_QUEEN: i32 = 4;
-
-    let mut phase: i32 = 0;
-    for row in 0..8 {
-        for col in 0..8 {
-            if let Some(piece) = board.get(row, col) {
-                phase += match piece.get_type() {
-                    PieceType::Knight => PHASE_KNIGHT,
-                    PieceType::Bishop => PHASE_BISHOP,
-                    PieceType::Rook => PHASE_ROOK,
-                    PieceType::Queen => PHASE_QUEEN,
-                    _ => 0,
-                };
-            }
-        }
-    }
-    phase.clamp(0, 24)
 }
 
 #[inline]
@@ -177,12 +204,8 @@ struct BoardStats {
     phase: i32,
     white_pawns: i32,
     black_pawns: i32,
-    white_bishops: i32,
-    black_bishops: i32,
     white_bishop_on_dark: bool,
     black_bishop_on_dark: bool,
-    white_material: i32,
-    black_material: i32,
     drawish_material: MaterialDrawishness,
 }
 
@@ -201,32 +224,15 @@ impl BoardStats {
         let mut phase = 0;
         let mut white_pawns = 0;
         let mut black_pawns = 0;
-        let mut white_bishops = 0;
-        let mut black_bishops = 0;
         let mut white_bishop_on_dark = false;
         let mut black_bishop_on_dark = false;
-        let mut white_material = 0;
-        let mut black_material = 0;
         let mut drawish = MaterialDrawishness::default();
-
-        const PHASE_KNIGHT: i32 = 1;
-        const PHASE_BISHOP: i32 = 1;
-        const PHASE_ROOK: i32 = 2;
-        const PHASE_QUEEN: i32 = 4;
 
         for r in 0..8 {
             for c in 0..8 {
                 if let Some(p) = board.get(r, c) {
                     let pt = p.get_type();
                     let color = p.get_color();
-
-                    // Track material
-                    let mat = material_value(pt);
-                    if color == Color::White {
-                        white_material += mat;
-                    } else {
-                        black_material += mat;
-                    }
 
                     // Phase
                     phase += match pt {
@@ -249,19 +255,17 @@ impl BoardStats {
                         }
                         PieceType::Bishop => {
                             if color == Color::White {
-                                white_bishops += 1;
+                                drawish.white_bishops += 1;
                                 if (r + c) % 2 == 1 {
                                     white_bishop_on_dark = true;
                                 }
                             } else {
-                                black_bishops += 1;
+                                drawish.black_bishops += 1;
                                 if (r + c) % 2 == 1 {
                                     black_bishop_on_dark = true;
                                 }
                             }
                             drawish.minors += 1;
-                            drawish.white_bishops += (color == Color::White) as i32;
-                            drawish.black_bishops += (color == Color::Black) as i32;
                         }
                         PieceType::Knight => {
                             drawish.minors += 1;
@@ -282,12 +286,8 @@ impl BoardStats {
             phase: phase.clamp(0, 24),
             white_pawns,
             black_pawns,
-            white_bishops,
-            black_bishops,
             white_bishop_on_dark,
             black_bishop_on_dark,
-            white_material,
-            black_material,
             drawish_material: drawish,
         }
     }
@@ -321,6 +321,7 @@ struct EvalContext<'a> {
     pawn_counts: PawnFileCounts,
     att_w: [[bool; 8]; 8],
     att_b: [[bool; 8]; 8],
+    file_clearance: FileClearance,
 }
 
 impl<'a> EvalContext<'a> {
@@ -331,6 +332,7 @@ impl<'a> EvalContext<'a> {
         let king_b = find_king(board, Color::Black);
         let pawn_counts = crate::board::evaluators::evaluate_pawns::pawn_file_counts(board);
         let (att_w, att_b) = build_attack_maps(board);
+        let file_clearance = FileClearance::new(board);
 
         Self {
             board,
@@ -341,6 +343,7 @@ impl<'a> EvalContext<'a> {
             pawn_counts,
             att_w,
             att_b,
+            file_clearance,
         }
     }
 
@@ -353,16 +356,16 @@ impl<'a> EvalContext<'a> {
 
         match pt {
             PieceType::Pawn => val += crate::board::evaluators::evaluate_pawns::evaluate_pawn(
-                self.board, row, col, color, self.phase(), self.king_w, self.king_b, &self.att_w, &self.att_b
+                self.board, row, col, color, self.phase(), self.king_w, self.king_b, &self.att_w, &self.att_b, &self.pawn_counts
             ),
             PieceType::Knight => val += crate::board::evaluators::evaluate_knights::evaluate_knight(
                 self.board, row, col, color, self.phase()
             ),
             PieceType::Bishop => val += crate::board::evaluators::evaluate_bishops::evaluate_bishop(
-                self.board, row, col, color, self.phase(), self.eg
+                row, col, color, self.phase()
             ),
             PieceType::Rook => val += crate::board::evaluators::evaluate_rooks::evaluate_rook(
-                self.board, row, col, color, self.phase(), self.eg, self.stats.white_pawns, self.stats.black_pawns
+                self.board, row, col, color, self.phase(), self.eg, self.stats.white_pawns, self.stats.black_pawns, &self.file_clearance
             ),
             PieceType::Queen => val += crate::board::evaluators::evaluate_queens::evaluate_queen(
                 self.board, row, col, color, self.phase()
@@ -401,21 +404,41 @@ impl<'a> EvalContext<'a> {
     }
 
     fn evaluate_mobility(&self) -> i32 {
-        let (mob_w, mob_b) = mobility_activity(self.board);
-        // Mobility is important in BOTH phases, but slightly more in endgame
-        // Use a base + endgame scaling: base 50% always, +50% scaled by endgame
-        let base_w = mob_w / 2;
-        let base_b = mob_b / 2;
-        let eg_bonus_w = (mob_w * self.eg) / 48;
-        let eg_bonus_b = (mob_b * self.eg) / 48;
+        // Calculate mobility from existing attack maps instead of recalculating
+        let mut mob_w = 0;
+        let mut mob_b = 0;
 
-        let mut score = base_w + eg_bonus_w;
-        score -= base_b + eg_bonus_b;
+        // Count attacked squares, weighted by piece type
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(p) = self.board.get(r, c) {
+                    let color = p.get_color();
+                    let pt = p.get_type();
 
-        // Dampen excessive mobility in early middlegame (piece swarming)
-        if self.phase() > 16 {
-            let damp_w = (mob_w / 25) * (self.phase() - 16) / 8;
-            let damp_b = (mob_b / 25) * (self.phase() - 16) / 8;
+                    // Count pseudo-legal moves based on piece type
+                    let mobility = match pt {
+                        PieceType::Knight => count_knight_targets(self.board, r, c, color) as i32 * 2,
+                        PieceType::Bishop => count_slider_targets(self.board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)]) as i32 * 3,
+                        PieceType::Rook => count_slider_targets(self.board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 3,
+                        PieceType::Queen => count_slider_targets(self.board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)]) as i32,
+                        _ => 0,
+                    };
+
+                    if matches!(color, Color::White) {
+                        mob_w += mobility;
+                    } else {
+                        mob_b += mobility;
+                    }
+                }
+            }
+        }
+
+        let mut score = (mob_w * self.phase()) / 24;
+        score -= (mob_b * self.phase()) / 24;
+
+        if self.phase() > 12 {
+            let damp_w = (mob_w / 20) * (self.phase() - 12) / 12;
+            let damp_b = (mob_b / 20) * (self.phase() - 12) / 12;
             score -= damp_w;
             score += damp_b;
         }
@@ -515,20 +538,48 @@ impl<'a> EvalContext<'a> {
     fn evaluate_global_features(&self) -> i32 {
         let mut score = 0;
 
+        // Pawn islands penalty
+        let w_islands = crate::board::evaluators::evaluate_pawns::evaluate_pawn_islands(
+            &self.pawn_counts, Color::White, self.phase()
+        );
+        let b_islands = crate::board::evaluators::evaluate_pawns::evaluate_pawn_islands(
+            &self.pawn_counts, Color::Black, self.phase()
+        );
+        score += w_islands - b_islands;
+
+        // Pawn chains evaluation
+        let w_chains = crate::board::evaluators::evaluate_pawns::evaluate_pawn_chains(
+            self.board, Color::White, self.phase()
+        );
+        let b_chains = crate::board::evaluators::evaluate_pawns::evaluate_pawn_chains(
+            self.board, Color::Black, self.phase()
+        );
+        score += w_chains - b_chains;
+
+        // Pawn tension evaluation
+        let w_tension = crate::board::evaluators::evaluate_pawns::evaluate_pawn_tension(
+            self.board, Color::White, self.phase()
+        );
+        let b_tension = crate::board::evaluators::evaluate_pawns::evaluate_pawn_tension(
+            self.board, Color::Black, self.phase()
+        );
+        score += w_tension - b_tension;
+
+        // Pawn storm evaluation
+        let w_storm = crate::board::evaluators::evaluate_pawns::evaluate_pawn_storm(
+            self.board, Color::White, self.phase(), self.king_b, self.king_w
+        );
+        let b_storm = crate::board::evaluators::evaluate_pawns::evaluate_pawn_storm(
+            self.board, Color::Black, self.phase(), self.king_w, self.king_b
+        );
+        score += w_storm - b_storm;
+
         // Bishop pair
-        if self.stats.white_bishops >= 2 {
+        if self.stats.drawish_material.white_bishops >= 2 {
             score += self.taper(36, 24);
         }
-        if self.stats.black_bishops >= 2 {
+        if self.stats.drawish_material.black_bishops >= 2 {
             score -= self.taper(36, 24);
-        }
-
-        // Bishop pair bonus - evaluate for both colors
-        for &color in &[Color::White, Color::Black] {
-            let bishop_pair = crate::board::evaluators::evaluate_bishops::bishop_pair_bonus(
-                self.board, color, self.phase(), self.eg
-            );
-            score += apply_color_score(bishop_pair, color);
         }
 
         // Rook/Queen activity - evaluate for both colors
@@ -552,16 +603,26 @@ impl<'a> EvalContext<'a> {
 
         // King safety and activity
         for &color in &[Color::White, Color::Black] {
-            let safety = crate::board::evaluators::evaluate_king::king_safety(self.board, color);
-            let activity = crate::board::evaluators::evaluate_king::king_activity_endgame(self.board, color);
+            let king_pos = match color {
+                Color::White => self.king_w,
+                Color::Black => self.king_b,
+            };
+            let safety = crate::board::evaluators::evaluate_king::king_safety(
+                self.board, color, self.phase(), king_pos
+            );
+            let activity = crate::board::evaluators::evaluate_king::king_activity_endgame(king_pos);
+            let shelter = crate::board::evaluators::evaluate_king::evaluate_king_shelter_patterns(
+                self.board, color, self.phase(), king_pos
+            );
 
             score += apply_color_score((safety * self.phase()) / 24, color);
             score += apply_color_score((activity * self.eg) / 24, color);
+            score += apply_color_score(shelter, color);
 
             // Development penalty
             if self.phase() > 12 {
                 let dev_pen = crate::board::evaluators::evaluate_king::development_penalty_on_backrank(
-                    self.board, color
+                    self.board, color, self.phase()
                 );
                 score += apply_color_score(dev_pen * (self.phase() - 12) / 12, color);
             }
@@ -575,99 +636,180 @@ impl<'a> EvalContext<'a> {
             score += apply_color_score(-(pen * self.phase()) / 24, color);
         }
 
-        // Endgame: Enemy king cornering bonus when one side has significant material advantage
-        // This helps the engine push the enemy king to the edge/corner for mating
-        if self.eg > 8 {
-            let mat_diff = self.stats.white_material - self.stats.black_material;
-            const WINNING_THRESHOLD: i32 = 300; // ~1 minor piece advantage
-
-            if mat_diff >= WINNING_THRESHOLD {
-                // White is winning - reward cornering black king
-                let corner_bonus = crate::board::evaluators::evaluate_king::enemy_king_cornering_bonus(
-                    self.board, Color::White
-                );
-                score += (corner_bonus * self.eg) / 24;
-            } else if mat_diff <= -WINNING_THRESHOLD {
-                // Black is winning - reward cornering white king
-                let corner_bonus = crate::board::evaluators::evaluate_king::enemy_king_cornering_bonus(
-                    self.board, Color::Black
-                );
-                score -= (corner_bonus * self.eg) / 24;
-            }
-        }
-
         score
     }
 
-    #[inline]
-    fn taper(&self, mg: i32, eg: i32) -> i32 {
-        taper_general(self.phase(), mg, eg)
-    }
-
-    fn evaluate_unstoppable_passers(&self, side_to_move: Color) -> i32 {
+    /// Evaluate piece interactions: synergy, tropism, and batteries in a single pass.
+    fn evaluate_piece_interactions(&self) -> i32 {
         let mut score = 0;
 
-        // Check all pawns for unstoppable passers
-        for row in 0..8 {
-            for col in 0..8 {
-                if let Some(piece) = self.board.get(row, col)
-                    && piece.get_type() == PieceType::Pawn
-                {
-                    let color = piece.get_color();
+        // Collect piece positions in one pass
+        let mut white_queens: Vec<(usize, usize)> = Vec::new();
+        let mut white_rooks: Vec<(usize, usize)> = Vec::new();
+        let mut white_bishops: Vec<(usize, usize)> = Vec::new();
+        let mut black_queens: Vec<(usize, usize)> = Vec::new();
+        let mut black_rooks: Vec<(usize, usize)> = Vec::new();
+        let mut black_bishops: Vec<(usize, usize)> = Vec::new();
+
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(p) = self.board.get(r, c) {
+                    let color = p.get_color();
+                    let pt = p.get_type();
+
+                    // Collect pieces for battery detection
+                    match (color, pt) {
+                        (Color::White, PieceType::Queen) => white_queens.push((r, c)),
+                        (Color::White, PieceType::Rook) => white_rooks.push((r, c)),
+                        (Color::White, PieceType::Bishop) => white_bishops.push((r, c)),
+                        (Color::Black, PieceType::Queen) => black_queens.push((r, c)),
+                        (Color::Black, PieceType::Rook) => black_rooks.push((r, c)),
+                        (Color::Black, PieceType::Bishop) => black_bishops.push((r, c)),
+                        _ => {}
+                    }
+
+                    // Skip pawns and kings for synergy and tropism
+                    if matches!(pt, PieceType::Pawn | PieceType::King) {
+                        continue;
+                    }
+
+                    // Synergy: bonus for defended pieces
+                    let defended = match color {
+                        Color::White => self.att_w[r][c],
+                        Color::Black => self.att_b[r][c],
+                    };
+
+                    if defended {
+                        let synergy_bonus = match pt {
+                            PieceType::Knight | PieceType::Bishop => 4,
+                            PieceType::Rook => 6,
+                            PieceType::Queen => 8,
+                            _ => 0,
+                        };
+                        score += apply_color_score((synergy_bonus * self.phase()) / 24, color);
+                    }
+
+                    // Tropism: bonus for proximity to enemy king
                     let enemy_king = match color {
                         Color::White => self.king_b,
                         Color::Black => self.king_w,
                     };
-                    let pawn_side_to_move = color == side_to_move;
 
-                    let bonus = crate::board::evaluators::evaluate_pawns::unstoppable_passer_bonus(
-                        self.board,
-                        row,
-                        col,
-                        color,
-                        enemy_king,
-                        pawn_side_to_move,
-                        self.eg,
-                    );
+                    if let Some((ek_r, ek_c)) = enemy_king {
+                        let dist = chebyshev_dist((r as i32, c as i32), (ek_r as i32, ek_c as i32));
+                        let base_bonus = (7 - dist).max(0);
 
-                    score += apply_color_score(bonus, color);
+                        let tropism_bonus = match pt {
+                            PieceType::Queen => base_bonus * 3,
+                            PieceType::Rook => base_bonus * 2,
+                            PieceType::Bishop => base_bonus * 2,
+                            PieceType::Knight => base_bonus * 3,
+                            _ => 0,
+                        };
+
+                        score += apply_color_score((tropism_bonus * self.phase()) / 24, color);
+                    }
+                }
+            }
+        }
+
+        // Battery detection
+        // R+Q batteries for White
+        for &(qr, qc) in &white_queens {
+            for &(rr, rc) in &white_rooks {
+                if self.is_battery_on_line(qr, qc, rr, rc) {
+                    score += (12 * self.phase()) / 24;
+                }
+            }
+        }
+
+        // B+Q batteries for White
+        for &(qr, qc) in &white_queens {
+            for &(br, bc) in &white_bishops {
+                if self.is_battery_on_diagonal(qr, qc, br, bc) {
+                    score += (10 * self.phase()) / 24;
+                }
+            }
+        }
+
+        // R+Q batteries for Black
+        for &(qr, qc) in &black_queens {
+            for &(rr, rc) in &black_rooks {
+                if self.is_battery_on_line(qr, qc, rr, rc) {
+                    score -= (12 * self.phase()) / 24;
+                }
+            }
+        }
+
+        // B+Q batteries for Black
+        for &(qr, qc) in &black_queens {
+            for &(br, bc) in &black_bishops {
+                if self.is_battery_on_diagonal(qr, qc, br, bc) {
+                    score -= (10 * self.phase()) / 24;
                 }
             }
         }
 
         score
+    }
+
+    /// Check if two pieces form a battery on a file or rank (no pieces between them).
+    #[inline]
+    fn is_battery_on_line(&self, r1: usize, c1: usize, r2: usize, c2: usize) -> bool {
+        if r1 == r2 {
+            // Same rank - check if path is clear
+            let (min_c, max_c) = if c1 < c2 { (c1, c2) } else { (c2, c1) };
+            for c in (min_c + 1)..max_c {
+                if self.board.get(r1, c).is_some() {
+                    return false;
+                }
+            }
+            true
+        } else if c1 == c2 {
+            // Same file - use cached clearance
+            self.file_clearance.is_clear_between(r1, r2, c1)
+        } else {
+            false
+        }
+    }
+
+    /// Check if two pieces form a battery on a diagonal (no pieces between them).
+    #[inline]
+    fn is_battery_on_diagonal(&self, r1: usize, c1: usize, r2: usize, c2: usize) -> bool {
+        let dr = r2 as i32 - r1 as i32;
+        let dc = c2 as i32 - c1 as i32;
+
+        // Must be on same diagonal
+        if dr.abs() != dc.abs() || dr == 0 {
+            return false;
+        }
+
+        let step_r = if dr > 0 { 1 } else { -1 };
+        let step_c = if dc > 0 { 1 } else { -1 };
+
+        let mut r = r1 as i32 + step_r;
+        let mut c = c1 as i32 + step_c;
+
+        while r != r2 as i32 || c != c2 as i32 {
+            if self.board.get(r as usize, c as usize).is_some() {
+                return false;
+            }
+            r += step_r;
+            c += step_c;
+        }
+
+        true
+    }
+
+    #[inline]
+    fn taper(&self, mg: i32, eg: i32) -> i32 {
+        taper_general(mg, eg, self.phase())
     }
 }
 
 // ============================================================
 // MOBILITY HELPERS
 // ============================================================
-
-fn mobility_activity(board: &Board) -> (i32, i32) {
-    let mut white: i32 = 0;
-    let mut black: i32 = 0;
-
-    for r in 0..8 {
-        for c in 0..8 {
-            if let Some(p) = board.get(r, c) {
-                let color = p.get_color();
-                let add = match p.get_type() {
-                    PieceType::Knight => count_knight_targets(board, r, c, color) as i32 * 2,
-                    PieceType::Bishop => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)]) as i32 * 3,
-                    PieceType::Rook => count_slider_targets(board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 3,
-                    PieceType::Queen => count_slider_targets(board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)]) as i32,
-                    _ => 0,
-                };
-                if matches!(color, Color::White) {
-                    white += add;
-                } else {
-                    black += add;
-                }
-            }
-        }
-    }
-    (white, black)
-}
 
 #[inline]
 fn count_knight_targets(board: &Board, r: usize, c: usize, color: Color) -> usize {

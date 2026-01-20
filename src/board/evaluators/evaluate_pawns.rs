@@ -12,6 +12,7 @@ pub fn evaluate_pawn(
     king_b: Option<(usize, usize)>,
     att_w: &[[bool; 8]; 8],
     att_b: &[[bool; 8]; 8],
+    pawn_counts: &crate::board::evaluator::PawnFileCounts,
 ) -> i32 {
     let mut val = 0;
     // File bonuses from a..h: a/h negative, c/f small positive, d/e strong positive
@@ -31,9 +32,9 @@ pub fn evaluate_pawn(
         }
     }
 
-    if is_doubled_pawn(board, row, col, color) { val -= 12; }
-    if is_isolated_pawn(board, col, color) { val -= 14; }
-    if is_backward_pawn(board, row, col, color) {
+    if is_doubled_pawn_fast(pawn_counts, row, col, color) { val -= 12; }
+    if is_isolated_pawn_fast(pawn_counts, col, color) { val -= 14; }
+    if is_backward_pawn(board, row, col, color, phase) {
         val -= taper_general(phase, 22, 8);
     }
     if is_passed_pawn(board, row, col, color) {
@@ -43,6 +44,34 @@ pub fn evaluate_pawn(
 }
 use crate::board::evaluators::evaluate_king::is_king_in_front_of_pawn;
 
+/// Fast doubled pawn check using precomputed pawn counts
+#[inline]
+pub fn is_doubled_pawn_fast(pawn_counts: &PawnFileCounts, _row: usize, col: usize, color: Color) -> bool {
+    let count = match color {
+        Color::White => pawn_counts.white[col],
+        Color::Black => pawn_counts.black[col],
+    };
+    count > 1
+}
+
+/// Fast isolated pawn check using precomputed pawn counts
+#[inline]
+pub fn is_isolated_pawn_fast(pawn_counts: &PawnFileCounts, col: usize, color: Color) -> bool {
+    let (left_has_pawn, right_has_pawn) = match color {
+        Color::White => (
+            col > 0 && pawn_counts.white[col - 1] > 0,
+            col < 7 && pawn_counts.white[col + 1] > 0,
+        ),
+        Color::Black => (
+            col > 0 && pawn_counts.black[col - 1] > 0,
+            col < 7 && pawn_counts.black[col + 1] > 0,
+        ),
+    };
+    !left_has_pawn && !right_has_pawn
+}
+
+// Keep old versions for backward compatibility if needed elsewhere
+#[allow(dead_code)]
 pub fn is_doubled_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool {
     for r in 0..8 {
         if r == row { continue; }
@@ -51,6 +80,7 @@ pub fn is_doubled_pawn(board: &Board, row: usize, col: usize, color: Color) -> b
     false
 }
 
+#[allow(dead_code)]
 pub fn is_isolated_pawn(board: &Board, col: usize, color: Color) -> bool {
     for dc in [-1i32, 1] {
         let nc = col as i32 + dc;
@@ -116,7 +146,7 @@ pub fn friendly_pawn_adjacent_behind_limited(board: &Board, row: usize, col: usi
     false
 }
 
-pub fn is_backward_pawn(board: &Board, row: usize, col: usize, color: Color) -> bool {
+pub fn is_backward_pawn(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> bool {
     if !is_piece(board, row, col, color, PieceType::Pawn) { return false; }
     if is_passed_pawn(board, row, col, color) { return false; }
     if !has_enemy_pawn_ahead_same_file(board, row, col, color) { return false; }
@@ -127,8 +157,6 @@ pub fn is_backward_pawn(board: &Board, row: usize, col: usize, color: Color) -> 
     let front_blocked_by_enemy = matches!(board.get(fr, col), Some(p) if p.get_color() != color);
     let front_controlled_by_enemy_pawn = square_attacked_by_enemy_pawn(board, fr, col, opponent(color));
     if !(front_blocked_by_enemy || front_controlled_by_enemy_pawn) { return false; }
-    // Use a conservative phase cap (MG≤2, EG≤4). Without phase here, approximate with board phase.
-    let phase = crate::board::evaluator::game_phase(board);
     if friendly_pawn_adjacent_behind_limited(board, row, col, color, phase) { return false; }
     true
 }
@@ -238,16 +266,8 @@ pub fn evaluate_passed_pawn(
         }
     }
 
-    // Dynamic cap based on advancement: more advanced = higher cap
-    // adv 6 (7th rank) = cap 350, adv 5 = 250, adv 4 = 180, etc.
-    let cap: i32 = match adv {
-        6 => 350,  // About to promote - nearly queen value
-        5 => 250,  // Very close
-        4 => 180,  // Strong passed pawn
-        3 => 130,
-        _ => 100,  // Early passed pawn
-    };
-    score.min(cap)
+    let cap: i32 = 90;
+    if score > cap { cap } else { score }
 }
 
 pub fn has_clear_promotion_path(board: &Board, row: usize, col: usize, color: Color) -> bool {
@@ -360,83 +380,227 @@ pub fn is_hole_square_limited(board: &Board, row: usize, col: usize, color: Colo
     true
 }
 
-/// Check if a passed pawn is unstoppable (rule of the square).
-/// Returns true if the enemy king cannot catch the pawn before it promotes.
-/// This is a simplified check that doesn't account for blocking pieces.
-pub fn is_unstoppable_passer(
-    board: &Board,
-    pawn_row: usize,
-    pawn_col: usize,
-    color: Color,
-    enemy_king: Option<(usize, usize)>,
-    pawn_side_to_move: bool,
-) -> bool {
-    // Must be a passed pawn first
-    if !is_passed_pawn(board, pawn_row, pawn_col, color) {
-        return false;
+/// Count pawn islands for a given color.
+/// A pawn island is a group of pawns on adjacent files with no gaps.
+/// More islands = weaker, fragmented structure.
+pub fn count_pawn_islands(pawn_counts: &PawnFileCounts, color: Color) -> i32 {
+    let counts = match color {
+        Color::White => &pawn_counts.white,
+        Color::Black => &pawn_counts.black,
+    };
+
+    let mut islands = 0;
+    let mut in_island = false;
+
+    for &count in counts.iter() {
+        if count > 0 {
+            if !in_island {
+                islands += 1;
+                in_island = true;
+            }
+        } else {
+            in_island = false;
+        }
     }
 
-    // Must have clear path to promotion
-    if !has_clear_promotion_path(board, pawn_row, pawn_col, color) {
-        return false;
-    }
-
-    let Some((ek_r, ek_c)) = enemy_king else {
-        return true; // No enemy king means unstoppable
-    };
-
-    // Calculate distance to promotion
-    let promotion_row = match color {
-        Color::White => 7,
-        Color::Black => 0,
-    };
-    let pawn_dist = (promotion_row - pawn_row as i32).abs();
-
-    // Calculate enemy king distance to the promotion square
-    // Use Chebyshev distance (king moves diagonally)
-    let king_dist_to_promo = chebyshev_dist(
-        (ek_r as i32, ek_c as i32),
-        (promotion_row, pawn_col as i32)
-    );
-
-    // Rule of the square: if pawn is closer (accounting for tempo), it's unstoppable
-    // If it's the pawn's side to move, pawn gets a tempo advantage
-    let effective_pawn_dist = if pawn_side_to_move {
-        pawn_dist - 1  // Pawn moves first
-    } else {
-        pawn_dist
-    };
-
-    effective_pawn_dist < king_dist_to_promo
+    islands
 }
 
-/// Calculate bonus for unstoppable passed pawns.
-/// Returns a large bonus if the pawn cannot be stopped from promoting.
-pub fn unstoppable_passer_bonus(
-    board: &Board,
-    pawn_row: usize,
-    pawn_col: usize,
-    color: Color,
-    enemy_king: Option<(usize, usize)>,
-    pawn_side_to_move: bool,
-    eg: i32,
-) -> i32 {
-    if !is_unstoppable_passer(board, pawn_row, pawn_col, color, enemy_king, pawn_side_to_move) {
-        return 0;
+/// Evaluate pawn islands penalty.
+/// Penalize each island beyond the first (-8 cp per extra island).
+pub fn evaluate_pawn_islands(pawn_counts: &PawnFileCounts, color: Color, phase: i32) -> i32 {
+    let islands = count_pawn_islands(pawn_counts, color);
+    let penalty = (islands - 1).max(0) * 8;
+    -(penalty * phase) / 24
+}
+
+/// Check if a pawn is protected by a friendly pawn (part of a chain).
+fn is_pawn_protected(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    let behind_row = match color {
+        Color::White => row.checked_sub(1),
+        Color::Black => if row < 7 { Some(row + 1) } else { None },
+    };
+
+    if let Some(br) = behind_row {
+        for dc in [-1i32, 1] {
+            let nc = col as i32 + dc;
+            if (0..=7).contains(&nc) && is_piece(board, br, nc as usize, color, PieceType::Pawn) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check if a pawn is a chain base (protects another pawn but is not protected itself).
+fn is_chain_base(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    if is_pawn_protected(board, row, col, color) {
+        return false;
     }
 
-    // Massive bonus for unstoppable passer - scales with how close to promotion
-    let promotion_row = match color {
-        Color::White => 7,
-        Color::Black => 0,
+    // Check if this pawn protects another pawn (making it a base)
+    let front_row = match color {
+        Color::White => if row < 7 { Some(row + 1) } else { None },
+        Color::Black => row.checked_sub(1),
     };
-    let dist = (promotion_row - pawn_row as i32).abs();
 
-    // Base bonus: 500cp (half a queen) for unstoppable passer
-    // Additional bonus for being closer to promotion
-    let base = 500;
-    let proximity_bonus = (7 - dist) * 50; // Up to 300 extra for 7th rank
+    if let Some(fr) = front_row {
+        for dc in [-1i32, 1] {
+            let nc = col as i32 + dc;
+            if (0..=7).contains(&nc) && is_piece(board, fr, nc as usize, color, PieceType::Pawn) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
-    // Scale by endgame factor
-    ((base + proximity_bonus) * eg) / 24
+/// Evaluate pawn chain structure for a color.
+/// - Bonus for protected pawns in chains (+6 cp per pawn, scaling with advancement)
+/// - Penalty for weak chain bases that can be attacked (-10 cp)
+pub fn evaluate_pawn_chains(board: &Board, color: Color, phase: i32) -> i32 {
+    let mut score = 0;
+
+    for row in 0..8 {
+        for col in 0..8 {
+            if !is_piece(board, row, col, color, PieceType::Pawn) {
+                continue;
+            }
+
+            let advancement = match color {
+                Color::White => row as i32,
+                Color::Black => (7 - row) as i32,
+            };
+
+            if is_pawn_protected(board, row, col, color) {
+                // Bonus for being part of a chain, scaled by advancement
+                let bonus = 6 + advancement;
+                score += (bonus * phase) / 24;
+            } else if is_chain_base(board, row, col, color) {
+                // Check if the base can be attacked by enemy pawns
+                let enemy = opponent(color);
+                let can_be_attacked = square_attacked_by_enemy_pawn(board, row, col, enemy);
+
+                if can_be_attacked {
+                    // Weak base penalty
+                    score -= (10 * phase) / 24;
+                }
+            }
+        }
+    }
+
+    score
+}
+
+/// Check if a pawn can capture an enemy pawn (has tension).
+fn pawn_has_tension(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    let capture_row = match color {
+        Color::White => if row < 7 { Some(row + 1) } else { None },
+        Color::Black => row.checked_sub(1),
+    };
+
+    if let Some(cr) = capture_row {
+        let enemy = opponent(color);
+        for dc in [-1i32, 1] {
+            let nc = col as i32 + dc;
+            if (0..=7).contains(&nc) && is_piece(board, cr, nc as usize, enemy, PieceType::Pawn) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Evaluate pawn tension for a color.
+/// Tension pawns (pawns that can capture enemy pawns) provide dynamic potential.
+/// +5 cp per pawn with tension, with small bonus for advanced tension.
+pub fn evaluate_pawn_tension(board: &Board, color: Color, phase: i32) -> i32 {
+    let mut score = 0;
+
+    for row in 0..8 {
+        for col in 0..8 {
+            if !is_piece(board, row, col, color, PieceType::Pawn) {
+                continue;
+            }
+
+            if pawn_has_tension(board, row, col, color) {
+                let advancement = match color {
+                    Color::White => row as i32,
+                    Color::Black => (7 - row) as i32,
+                };
+
+                // Base tension bonus + small advancement bonus
+                let bonus = 5 + (advancement / 2);
+                score += (bonus * phase) / 24;
+            }
+        }
+    }
+
+    score
+}
+
+/// Evaluate pawn storm toward enemy king.
+/// Pawns advancing toward the enemy king's file (within 2 files) get a bonus.
+/// More effective in middlegame and when kings are on opposite sides.
+pub fn evaluate_pawn_storm(
+    board: &Board,
+    color: Color,
+    phase: i32,
+    enemy_king: Option<(usize, usize)>,
+    own_king: Option<(usize, usize)>,
+) -> i32 {
+    let enemy_king_pos = match enemy_king {
+        Some(pos) => pos,
+        None => return 0,
+    };
+
+    let own_king_pos = match own_king {
+        Some(pos) => pos,
+        None => return 0,
+    };
+
+    let enemy_king_file = enemy_king_pos.1 as i32;
+    let own_king_file = own_king_pos.1 as i32;
+
+    // Pawn storms are most effective when kings are on opposite sides
+    let kings_opposite_sides = (enemy_king_file <= 2 && own_king_file >= 5)
+        || (enemy_king_file >= 5 && own_king_file <= 2);
+
+    let storm_multiplier = if kings_opposite_sides { 2 } else { 1 };
+
+    let mut score = 0;
+
+    for row in 0..8 {
+        for col in 0..8 {
+            if !is_piece(board, row, col, color, PieceType::Pawn) {
+                continue;
+            }
+
+            let file_distance = (col as i32 - enemy_king_file).abs();
+
+            // Only consider pawns within 2 files of enemy king
+            if file_distance > 2 {
+                continue;
+            }
+
+            let advancement = match color {
+                Color::White => row as i32,
+                Color::Black => (7 - row) as i32,
+            };
+
+            // Pawns need to be advanced (at least rank 4 for white, rank 5 for black)
+            if advancement < 3 {
+                continue;
+            }
+
+            // Bonus based on advancement and proximity to enemy king file
+            // Closer to king file = higher bonus
+            let proximity_bonus = 3 - file_distance; // 3 for same file, 2 for 1 away, 1 for 2 away
+            let storm_bonus = (advancement - 2) * proximity_bonus * storm_multiplier;
+
+            score += (storm_bonus * phase) / 24;
+        }
+    }
+
+    score
 }

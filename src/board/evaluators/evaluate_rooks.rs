@@ -1,6 +1,6 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{PawnFileCounts, is_piece, find_king, opponent};
+use crate::board::evaluator::{PawnFileCounts, FileClearance, is_piece, find_king, opponent};
 
 pub fn evaluate_rook(
     board: &Board,
@@ -11,6 +11,7 @@ pub fn evaluate_rook(
     eg: i32,
     white_pawns: i32,
     black_pawns: i32,
+    file_clearance: &FileClearance,
 ) -> i32 {
     let mut val = 0;
     if eg > 0 {
@@ -24,7 +25,7 @@ pub fn evaluate_rook(
         // Rook behind passed pawn
         if let Some((pp_r, _)) = crate::board::evaluators::evaluate_pawns::find_passed_pawn_on_file(board, col, color) {
             let behind = match color { Color::White => row < pp_r, Color::Black => row > pp_r };
-            if behind && file_clear_between(board, row, pp_r, col) {
+            if behind && file_clearance.is_clear_between(row, pp_r, col) {
                 let adv = match color { Color::White => pp_r as i32, Color::Black => (7 - pp_r) as i32 };
                 val += ((12 + 2 * adv) * eg) / 24;
             }
@@ -33,7 +34,7 @@ pub fn evaluate_rook(
         // Cut-off king
         if let Some((ek_r, ek_c)) = find_king(board, opponent(color)) {
             if col == ek_c
-                && file_clear_between(board, row, ek_r, col)
+                && file_clearance.is_clear_between(row, ek_r, col)
                 && (row as i32 - ek_r as i32).abs() >= 2
             {
                 val += (10 * eg) / 24;
@@ -57,6 +58,7 @@ pub fn evaluate_rook(
     val
 }
 
+#[allow(dead_code)]
 pub fn file_clear_between(board: &Board, r1: usize, r2: usize, file: usize) -> bool {
     let start = r1.min(r2);
     let end = r1.max(r2);
