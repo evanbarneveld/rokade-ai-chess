@@ -1,2 +1,15 @@
-mod chess;
+mod generic;
 mod puzzles;
+mod search;
+mod board;
+mod book;
+mod generator;
+mod history;
+mod parser;
+mod pgn_player;
+mod piece;
+mod state;
+mod chess_tests;
+mod chess_main_tests;
+mod engine_main_tests;
+mod lib_tests;

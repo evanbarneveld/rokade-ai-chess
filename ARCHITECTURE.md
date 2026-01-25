@@ -70,7 +70,7 @@ These scores must be converted to White-perspective before being used in the mai
 - **White's goal**: MAXIMIZE the score (want higher numbers)
 - **Black's goal**: MINIMIZE the score (want lower numbers)
 
-Both colors receive scores in the same (White) perspective, but they optimize in opposite directions!
+Both colors receive scores in the same (White) perspective, but they optimize in opposite directions.
 
 ### Score Conversion: `apply_for_side()`
 
@@ -94,19 +94,86 @@ This function ensures heuristics that calculate "good for side" bonuses are corr
 
 ### Overview
 
-The engine uses a **minimax search with alpha-beta pruning** and several optimizations:
+The engine uses a **minimax alpha-beta search** with PVS/LMR, null-move pruning, and a quiescence search. Root search runs iterative deepening with aspiration windows, root ordering, and optional parallel evaluation.
 
 ```
 Root Level
-    ↓
-Iterative Deepening (depths 1 → target)
-    ↓
-Alpha-Beta Search (minimax with cutoffs)
-    ↓
-Quiescence Search (tactical positions)
-    ↓
-Static Evaluation (leaf nodes)
+    -> Opening book (early only)
+    -> Iterative Deepening (depth 1 -> target)
+    -> Root Evaluation (ordering + heuristics, optional parallel)
+    -> Alpha-Beta Search (PVS, LMR, null-move, TT)
+    -> Quiescence Search (captures/checks + selective pawn pushes)
+    -> Static Evaluation
 ```
+
+### Detailed Search Flow with Debug Trace Points
+
+The following diagram shows the complete search flow including all major components.
+Debug output (when feature 'debug-search' is active) is shown with `[TAG]` prefixes:
+
+```
+ITERATIVE DEEPENING (depth 1 -> target)
+|
+|-- [ID] "depth X of Y, side to move"
+|
+`-- ASPIRATION WINDOWS (src/search/management/aspiration.rs)
+    |
+    |-- [ASP] initial bounds [alpha, beta] based on last_score +/- window
+    |-- [ASP] attempt #N with alpha, beta
+    |   |
+    |   |-- FAIL-LOW:  score <= alpha -> widen window downward, retry
+    |   |-- FAIL-HIGH: score >= beta  -> widen window upward, retry
+    |   `-- SUCCESS:   alpha < score < beta -> accept result
+    |
+    `-- ROOT EVALUATION (src/search/evaluation/root_evaluator.rs)
+        |
+        |-- For each root move:
+        |   |-- [ROOT] "move XY: raw=R adj=A (+/-delta)"
+        |   |-- [ROOT] "NEW BEST ROOT MOVE: XY adj=A"
+        |   |
+        |   `-- ALPHA-BETA SEARCH (src/search/core/alphabeta.rs)
+        |       |
+        |       |-- [AB] "ply=P depth=D alpha=A beta=B side=S"
+        |       |-- Terminal checks:
+        |       |   |-- Time cutoff -> SEARCH_ABORTED
+        |       |   |-- Repetition -> 0 (draw)
+        |       |   `-- 50-move rule -> 0 (draw)
+        |       |
+        |       |-- [AB] TT probe (exact/lower/upper)
+        |       |-- [AB] Null-move pruning (if allowed)
+        |       |
+        |       |-- depth == 0?
+        |       |   `-- QUIESCENCE SEARCH (src/search/core/qsearch.rs)
+        |       |       |-- [QS] "qdepth=D alpha=A beta=B side=S"
+        |       |       |-- [QS] "stand_pat=E in_check=C"
+        |       |       |-- Stand-pat cutoff (if not in check)
+        |       |       |-- Delta pruning (hopeless positions)
+        |       |       |-- Captures/promotions only (unless in check)
+        |       |       |-- SEE-based filtering (optional)
+        |       |       |-- Selective endgame pawn pushes (limited)
+        |       |       `-- [QS] "returning best=B"
+        |       |
+        |       |-- [AB] "searching N moves at ply=P depth=D"
+        |       |-- For each move (TT hint, MVV-LVA+SEE, killers, history, counter/continuation):
+        |       |   |-- Passed-pawn extension
+        |       |   |-- Frontier futility pruning (depth=1)
+        |       |   |-- [LMR] "XY: depth D -> D' (reduction=R)"
+        |       |   |-- [PVS] "XY: null-window [a, a+1]"
+        |       |   `-- [PVS] "RE-SEARCH!" (if scout beats bound)
+        |       |
+        |       `-- Store result in TT
+        |
+        `-- Apply root heuristic adjustments (raw -> adjusted)
+
+>>> [ID] "DEPTH D COMPLETE: best=M raw=R adjusted=A"
+```
+
+**Debug Output Limits** (to avoid overwhelming output):
+- Root evaluation: All root moves logged
+- Alpha-beta: Entry logged for ply <= 4, moves/LMR logged for ply <= 3, PVS for ply <= 2
+- Quiescence: Logged for qdepth <= 2
+
+**Enable/Disable**: Set feature `debug-search`
 
 ### 1. Root Move Selection (`src/search/core/advanced_search.rs`)
 
@@ -115,14 +182,16 @@ Static Evaluation (leaf nodes)
 **Algorithm**:
 
 ```
-For each depth from 1 to target_depth:
-    For each legal move:
-        1. Make the move
-        2. Search resulting position with alpha-beta
-        3. Unmake the move
-        4. Apply heuristic adjustments
-        5. Track best move
-    Return best move from this depth
+1. Initialize TT and history (clear if deterministic).
+2. Generate legal moves; if none, return None.
+3. Opening book (early only): return book move if available.
+4. Order root moves (checking moves, captures, promotions).
+5. Iterative deepening with aspiration windows:
+   - evaluate root moves (serial or parallel, depth>=6 and >=4 moves)
+   - apply root heuristics and repetition-avoidance bias
+   - reorder PV move to front for next iteration
+6. Build PV and emit UCI info each iteration.
+7. Apply playing-strength selection using cached TT scores + noise.
 ```
 
 **Key Features**:
@@ -140,88 +209,75 @@ For each depth from 1 to target_depth:
   - `score_raw`: Pure search evaluation (what the position is worth)
   - `adjusted`: Raw score + heuristic adjustments (tie-breaking hints)
 
-**Example Flow**:
-
-```rust,ignore
-// Depth 1: Quick 1-ply search
-move e2-e4: raw=-20, adjusted=-10  ← Best so far
-
-// Depth 2: 2-ply search (reuses depth-1 ordering)
-move e2-e4: raw=+15, adjusted=+25  ← Best so far
-move d2-d4: raw=+10, adjusted=+15
-
-// Depth 3: 3-ply search...
-// Returns: e2-e4 (best move from deepest complete iteration)
-```
+- **Playing Strength Mode**:
+  - Uses TT-cached root scores to select suboptimal moves at lower strength
+  - Adds Gaussian noise when not deterministic
 
 ### 2. Alpha-Beta Search (`src/search/core/alphabeta.rs`)
 
 **Core Function**: `alphabeta(game_state, depth, alpha, beta, ply, tt, rep_stack, allow_null_move)`
 
-**Algorithm** (Negamax variant):
+**Algorithm** (maximizing/minimizing):
 
 ```rust,ignore
 fn alphabeta(position, depth, alpha, beta) -> score {
-    // Terminal conditions
-    if depth == 0: return quiescence_search()
-    if time_up(): return ABORTED
-    if repetition(): return 0  // Draw
+    if time_up(): return SEARCH_ABORTED
+    if repetition(): return 0
+    if 50_move_rule(): return 0
+    if depth == 0: return qsearch()
 
-    // Transposition table lookup
-    if cached_result_available(): return cached_score
+    // TT probe (exact/lower/upper) updates alpha/beta
+    // Null-move pruning if allowed
 
-    // Null move pruning (try passing the turn)
-    if position_not_critical && allow_null_move:
-        pass_turn()
-        score = -alphabeta(..., depth-R, -beta, -beta+1, ...)
-        if score >= beta: return beta  // Cutoff
+    moves = ordered_moves(TT_hint, MVV_LVA, killers, history)
+    if moves.is_empty(): return mate_or_stalemate_score()
 
-    // Search all moves
-    best_score = -infinity
-    for each legal_move:
+    for each move in moves:
         make_move()
-        score = -alphabeta(..., depth-1, -beta, -alpha, ...)
+        maybe_extend_passed_pawn()
+        score = alphabeta(child, reduced_or_full_depth, alpha, beta)
         unmake_move()
 
-        best_score = max(best_score, score)
-        alpha = max(alpha, score)
+        update best and alpha/beta (maximize for White, minimize for Black)
+        if cutoff: break
 
-        if alpha >= beta:
-            break  // Beta cutoff (move too good)
-
-    // Store in transposition table
-    cache_result(position, best_score, depth)
-    return best_score
+    store TT entry (bound + best move)
+    return best
 }
 ```
 
 **Key Optimizations**:
 
 1. **Transposition Table (TT)**:
-   - Caches previously evaluated positions
+   - Lock-free atomic implementation enabling parallel search threads to share cached positions
+   - Uses XOR-based corruption detection (stores key^data and data in two AtomicU64 words)
+   - 16 bytes per entry with packed data layout for memory efficiency
    - Uses Zobrist hashing for position keys
-   - Stores: score, depth, best move, bound type (exact/lower/upper)
+   - Stores: score, depth, best move, bound type (exact/lower/upper), age
    - Special handling: Cached 0 scores near root not trusted (may be stale)
 
 2. **Null Move Pruning**:
    - Tries "passing the turn" to prove position is strong
    - If even after passing we're still winning, we can prune this branch
-   - Disabled in critical positions (check, zugzwang risk)
+   - Uses static-eval gating and dynamic reductions; disabled in critical positions (check, zugzwang risk)
 
 3. **Late Move Reduction (LMR)**:
-   - Searches promising moves at full depth
-   - Searches unlikely moves at reduced depth first
-   - Re-searches at full depth if reduced search surprises
+   - Reduces quiet moves and bad captures after a few moves are searched
+   - Logarithmic scaling by depth and move index
+   - Reductions are eased for killer/counter/continuation-history moves; checking moves are not reduced
+   - Re-searches at full depth if reduced search looks promising
 
 4. **Principal Variation Search (PVS)**:
-   - Searches expected best move with full window
-   - Searches other moves with null window (scout search)
-   - Re-searches with full window if scout finds better move
+   - Full window for the first move
+   - Null-window scouts for the rest, with re-search on improvement
+
+5. **Other pruning and extensions**:
+   - Frontier futility pruning at depth=1 for quiet moves
+   - Passed-pawn extension in late endgames
 
 **Score Returns**:
-- Returns score in **White-perspective** (always!)
+- Returns score in **White-perspective** (always)
 - Positive = good for White, Negative = good for Black
-- Negamax negates scores when switching sides internally
 
 ### 3. Quiescence Search (`src/search/core/qsearch.rs`)
 
@@ -229,43 +285,29 @@ fn alphabeta(position, depth, alpha, beta) -> score {
 
 **When Used**: At depth=0, instead of immediately evaluating, we search captures and checks.
 
-**Why Needed**:
-
-```
-Without Qsearch:
-  Depth 4: Evaluate after Qxe5
-  → Looks like we won a pawn!
-
-  Reality:
-  Depth 4: Qxe5
-  Depth 5: Nxe5 (knight recaptures)
-  → Actually we traded pieces, not won a pawn
-
-With Qsearch:
-  Depth 4: Qxe5 → Continue searching captures
-  Depth 5: Nxe5 → Quiet position, now evaluate
-  → Correct evaluation: material is equal
-```
-
 **Algorithm**:
 
 ```rust,ignore
 fn qsearch(position, alpha, beta) -> score {
-    // Stand pat: can we just stop here?
+    if time_up(): return SEARCH_ABORTED
+    if repetition() or 50_move_rule(): return 0
+
     stand_pat = evaluate_position()
-    if stand_pat >= beta: return beta
-    alpha = max(alpha, stand_pat)
+    if not in_check:
+        apply stand-pat cutoff
+        apply delta pruning
 
-    // Try captures and checks only
-    for each tactical_move (captures, checks):
+    moves = captures/promotions only (unless in_check)
+    optionally filter captures with SEE
+    optionally add a few safe passed-pawn pushes in late endgame
+
+    for move in moves (MVV-LVA):
         make_move()
-        score = -qsearch(..., -beta, -alpha)
+        score = qsearch(child, alpha, beta)
         unmake_move()
+        update alpha/beta with cutoffs
 
-        if score >= beta: return beta
-        alpha = max(alpha, score)
-
-    return alpha
+    return best
 }
 ```
 
@@ -282,25 +324,24 @@ fn qsearch(position, alpha, beta) -> score {
 **Components**:
 
 1. **Material Counting**:
-   - Pawn = 100, Knight = 300, Bishop = 320, Rook = 500, Queen = 900
-   - Adjusted by piece-square tables (position-dependent)
+   - Pawn = 100, Knight = 320, Bishop = 330, Rook = 500, Queen = 900
+   - Tapered piece-square tables are applied by game phase
 
 2. **Positional Factors**:
-   - King safety (pawn shelter, attack patterns)
-   - Piece mobility (number of legal moves)
-   - Pawn structure (doubled, isolated, passed pawns)
-   - Center control
-   - Space advantage
+   - Hanging pieces
+   - Piece mobility (pseudo-legal target counts)
+   - Holes, center control, and space
+   - Pawn structure (islands, chains, tension, storms, majorities)
+   - Passed pawn quality (blockades, connected passers, king distance)
+   - Rook/queen activity (open/semi-open files, king file, alignment, endgame centralization)
+   - King safety, shelter, and endgame activity (open-file pressure, queen scaling)
+   - Piece interactions (defended pieces, tropism, batteries)
+   - Safe exchange threats against defended pieces
+   - Tempo bonus scaled by phase
 
-3. **Game Phase**:
-   - Opening: Prioritize development, center control
-   - Middlegame: Tactical play, king safety
-   - Endgame: King activity, passed pawns, pawn races
-
-4. **Special Situations**:
-   - Insufficient material → 0 (draw)
-   - Opposite-colored bishops → Pull score toward 0
-   - Unstoppable passed pawns → Large bonuses
+3. **Special Situations**:
+   - Insufficient material -> 0 (draw)
+   - Opposite-colored bishops only -> pull score toward zero (0.75x)
 
 ### Root-Level Heuristics (`src/search/management/root_moves.rs`)
 
@@ -311,50 +352,38 @@ At the root level (where the engine chooses its move), additional heuristics pro
 **Heuristic Pipeline** (applied in order):
 
 1. **Development/Centralization Bonus**
-   - Rewards moving pieces to strong squares
-   - Encourages knight/bishop development
-   - Penalizes early queen moves in opening
+   - Light development bias for minors
 
 2. **SEE (Static Exchange Evaluation) Penalties**
-   - Evaluates piece exchanges on destination square
-   - Penalizes hanging pieces or bad trades
-   - Example: Don't move knight where it can be captured for free
+   - Penalize bad destination exchanges
 
 3. **Threat Resolution & Evacuation**
-   - Rewards moving threatened pieces to safety
-   - Extra bonus for knight evacuation from pawn threats
-   - Penalizes ignoring threats
+   - Reward saving threatened pieces; special handling for pawn threats
+   - Quiet pawn moves that attack valuable pieces get a bonus
 
-4. **Pawn Attacks on Enemy Pieces**
-   - Rewards quiet pawn moves that attack enemy pieces
-   - Higher bonus for attacking valuable pieces (knights, rooks, queens)
-   - Example: `a6` attacking knight on `b5` gets -150cp bonus
+4. **Knight Evacuation Priority**
+   - Extra weight for escaping pawn attacks
 
 5. **Capture Bonus**
-   - Small bonus for capturing (beyond material gain in raw score)
-   - Encourages simplification when ahead in material
+   - Small capture bonus based on captured value
 
-6. **Endgame Scaling**
-   - Adjusts evaluation based on game phase
-   - Encourages trading when ahead, avoiding trades when behind
-   - 50-move rule awareness
+6. **Endgame / 50-move Scaling**
+   - Scaling for simplification and 50-move pressure
 
 7. **King Safety**
-   - Bonus for castling in opening
-   - Penalty for exposing king
-   - Rewards keeping pawns in front of king
+   - Castling and exposure considerations
 
-8. **Self-Hanging Detection**
-   - Heavy penalty for leaving pieces undefended
-   - Bonus for checking moves (forcing opponent response)
+8. **Self-Hang or Check Mobility**
+   - Penalize self-hanging; bonus for safe checks
 
-9. **Queen Positioning**
-   - Bonus for queen pressure on opponent kingside
-   - Encourages attacking play
+9. **Queen Kingside Pressure**
+   - Bonus for kingside pressure
 
-10. **Opponent Tactics**
-    - Penalty if move allows opponent knight forks/checks
-    - Forward-looking tactical awareness
+10. **Opponent Knight Checks/Forks**
+    - Penalty if move enables tactical knight threats
+
+11. **Critical Square Defense**
+    - f2/f7 defense bonus
 
 **Key Implementation Detail**:
 
@@ -366,6 +395,10 @@ adjusted += apply_for_side(bonus, side);
 ```
 
 This ensures Black's bonuses correctly decrease the White-perspective score.
+
+**Root-Level Post-Processing**:
+- Repetition-avoidance bias is applied after adjustment (root only).
+- Mate scores are never adjusted; non-mate scores are clamped to avoid flipping losing moves to winning.
 
 ---
 
@@ -385,9 +418,10 @@ let mut best_adjusted = if active_color == Color::White {
     MAX_EVAL_VALUE  // Start from +infinity
 };
 
-// Evaluate each move
-for each move in legal_moves:
-    adjusted_score = evaluate_and_adjust(move)
+// Evaluate each move (serial or parallel)
+for each move in ordered_root_moves:
+    raw_score = evaluate_after_root_move()
+    adjusted_score = adjust_root_score() + repetition_bias
 
     // Color-dependent comparison
     let is_better = if active_color == Color::White {
@@ -405,15 +439,15 @@ for each move in legal_moves:
 **Why This Works**:
 
 Since all scores are in White-perspective:
-- White wants **higher** scores → maximize
-- Black wants **lower** scores → minimize
+- White wants **higher** scores -> maximize
+- Black wants **lower** scores -> minimize
 
-**Parallel Search** (depth ≥ 6, moves ≥ 4):
+**Parallel Search** (depth >= 6, moves >= 4):
 
-1. Search first (most promising) move serially
-2. Search remaining moves in parallel using thread pool
-3. Merge results using color-appropriate comparison
-4. Each parallel task uses local transposition table (no contention)
+1. Search first (most promising) move serially to establish PV and bounds
+2. Search remaining moves in parallel using Rayon thread pool
+3. All threads share a single lock-free transposition table (threads benefit from each other's work)
+4. Merge results using color-appropriate comparison
 
 ---
 
@@ -479,24 +513,22 @@ if score > 0 {
 // For Black's move: want score to decrease
 ```
 
-### Pattern 4: Negamax Recursion
+### Pattern 4: Maximizing/Minimizing Recursion
 
-The negamax framework handles perspective flipping:
+The search uses explicit maximize/minimize logic rather than negamax:
 
 ```rust,ignore
-// Current position from current_side's perspective
-let score = alphabeta(...);
+let maximizing = side_to_move == Color::White;
 
-// Recurse to opponent's perspective
-make_move();
-let opponent_score = alphabeta(...);
-unmake_move();
-
-// Flip perspective back: opponent's score negated
-let score_for_current = -opponent_score;
+// Update bounds based on side
+if maximizing {
+    alpha = alpha.max(score);
+} else {
+    beta = beta.min(score);
+}
 ```
 
-This is handled internally by the engine; heuristics should not negate scores manually.
+Heuristics should not negate scores manually.
 
 ---
 
@@ -504,48 +536,57 @@ This is handled internally by the engine; heuristics should not negate scores ma
 
 ```
 src/
-├── search/
-│   ├── core/
-│   │   ├── advanced_search.rs     # Root move search, iterative deepening, move selection
-│   │   ├── alphabeta.rs           # Main alpha-beta search algorithm
-│   │   └── qsearch.rs             # Quiescence search (tactical extensions)
-│   │
-│   ├── management/
-│   │   ├── root_moves.rs          # Root move evaluation, heuristic adjustments
-│   │   ├── move_generator.rs     # Legal move generation
-│   │   ├── see.rs                 # Static Exchange Evaluation
-│   │   └── prune_null_moves.rs   # Null move pruning logic
-│   │
-│   ├── evaluation/
-│   │   ├── root_evaluator.rs     # Root-level evaluation orchestration
-│   │   ├── repetition.rs         # Repetition detection and avoidance
-│   │   └── root_heuristics/      # Individual heuristic functions
-│   │       ├── threat_resolution.rs
-│   │       ├── knight_evacuation.rs
-│   │       ├── king_safety.rs
-│   │       └── utils.rs
-│   │
-│   ├── state/
-│   │   ├── tt.rs                 # Transposition table
-│   │   ├── zobrist.rs            # Zobrist hashing
-│   │   └── rep_stack.rs          # Repetition tracking
-│   │
-│   └── integration/
-│       ├── time_control.rs       # Time management
-│       ├── uci_feedback.rs       # UCI info output
-│       └── threading.rs          # Parallel search
-│
-├── board/
-│   ├── evaluator.rs              # Static position evaluation
-│   ├── Board.rs                  # Board representation
-│   └── checks/
-│       └── square_attacked.rs    # Attack detection
-│
-├── state/
-│   └── game_state.rs             # Game state (board + metadata)
-│
-└── piece/
-    └── pieces.rs                 # Piece types and values
++-- search/
+¦   +-- core/
+¦   ¦   +-- advanced_search.rs     # Root move search, iterative deepening, move selection
+¦   ¦   +-- alphabeta.rs           # Main alpha-beta search algorithm
+¦   ¦   +-- qsearch.rs             # Quiescence search (tactical extensions)
+¦   ¦   +-- simple_search.rs       # Simplified search path
+¦   ¦
+¦   +-- management/
+¦   ¦   +-- aspiration.rs          # Aspiration window logic
+¦   ¦   +-- root_moves.rs          # Root move evaluation, heuristic adjustments
+¦   ¦   +-- move_generator.rs      # Legal move generation
+¦   ¦   +-- see.rs                 # Static Exchange Evaluation
+¦   ¦   +-- prune_null_moves.rs    # Null move pruning logic
+¦   ¦
+¦   +-- evaluation/
+¦   ¦   +-- heuristics.rs          # History/killer heuristics
+¦   ¦   +-- root_evaluator.rs      # Root-level evaluation orchestration
+¦   ¦   +-- repetition.rs          # Repetition detection and avoidance
+¦   ¦   +-- root_heuristics/       # Individual heuristic functions
+¦   ¦       +-- threat_resolution.rs
+¦   ¦       +-- knight_evacuation.rs
+¦   ¦       +-- king_safety.rs
+¦   ¦       +-- utils.rs
+¦   ¦
+¦   +-- state/
+¦   ¦   +-- tt.rs                  # Lock-free atomic transposition table
+¦   ¦   +-- zobrist.rs             # Zobrist hashing
+¦   ¦   +-- rep_stack.rs           # Repetition tracking
+¦   ¦
+¦   +-- integration/
+¦       +-- playing_strength.rs    # Strength throttling and noise
+¦       +-- telemetry.rs           # Telemetry hooks (currently empty)
+¦       +-- time_control.rs        # Time management
+¦       +-- uci_feedback.rs        # UCI info output
+¦       +-- threading.rs           # Parallel search
+¦
++-- board/
+¦   +-- evaluator.rs              # Static position evaluation
+¦   +-- board.rs                  # Board representation
+¦   +-- attack_maps.rs            # Attack maps for evaluation
+¦   +-- pst.rs                    # Piece-square tables
+¦   +-- san_move.rs               # SAN conversion
+¦   +-- evaluators/               # Piece-specific evaluators
+¦   +-- checks/
+¦       +-- square_attacked.rs    # Attack detection
+¦
++-- state/
+¦   +-- game_state.rs             # Game state (board + metadata)
+¦
++-- piece/
+    +-- pieces.rs                 # Piece types and values
 ```
 
 ---
@@ -605,7 +646,7 @@ cargo test
 
 ```rust,ignore
 // In root_moves.rs
-eprintln!("MOVE: {:?}→{:?} raw={} adj={} delta={}",
+eprintln!("MOVE: {:?}->{:?} raw={} adj={} delta={}",
           from, to, score_raw, adjusted, adjusted - score_raw);
 ```
 
@@ -668,9 +709,9 @@ for (san, adj, raw) in ranks {
 ### 1. Score Perspective Consistency
 
 **Always** maintain White-perspective in the main search:
-- Raw scores from `alphabeta()`: White-perspective ✓
-- Adjusted scores: White-perspective ✓
-- Move comparisons: Color-dependent (White max, Black min) ✓
+- Raw scores from `alphabeta()`: White-perspective
+- Adjusted scores: White-perspective
+- Move comparisons: Color-dependent (White max, Black min)
 
 ### 2. Heuristic Clarity
 
@@ -719,5 +760,5 @@ This architecture provides a solid foundation for a strong chess engine while re
 
 ---
 
-*Last Updated: 2025-01-18*
-*Version: 1.0*
+*Last Updated: 2026-01-24*
+*Version: 1.2*

@@ -64,8 +64,8 @@ fn detect_opponent_promotion_threat(
 
     // Check all opponent pawns on the promotion rank
     for col in 0..8 {
-        if let Some(p) = base_board.get(promotion_rank, col) {
-            if p.get_color() == opp && p.get_type() == PieceType::Pawn {
+        if let Some(p) = base_board.get(promotion_rank, col)
+            && p.get_color() == opp && p.get_type() == PieceType::Pawn {
                 // Found an opponent pawn threatening to promote!
 
                 // First check: did we capture the pawn?
@@ -89,9 +89,9 @@ fn detect_opponent_promotion_threat(
 
                 // Check if it can capture diagonally to promote
                 let mut can_capture_diagonal = false;
-                if col > 0 {
-                    if let Some(piece) = base_board.get(promotion_square_rank, col - 1) {
-                        if piece.get_color() == side {
+                if col > 0
+                    && let Some(piece) = base_board.get(promotion_square_rank, col - 1)
+                        && piece.get_color() == side {
                             can_capture_diagonal = true;
                             // Did we move this piece away?
                             if to != (promotion_square_rank, col - 1) {
@@ -100,11 +100,9 @@ fn detect_opponent_promotion_threat(
                                 can_capture_diagonal = false; // We removed the capturable piece
                             }
                         }
-                    }
-                }
-                if col < 7 {
-                    if let Some(piece) = base_board.get(promotion_square_rank, col + 1) {
-                        if piece.get_color() == side {
+                if col < 7
+                    && let Some(piece) = base_board.get(promotion_square_rank, col + 1)
+                        && piece.get_color() == side {
                             let piece_still_there = post_after.get(promotion_square_rank, col + 1)
                                 .map(|p| p.get_color() == side)
                                 .unwrap_or(false);
@@ -112,8 +110,6 @@ fn detect_opponent_promotion_threat(
                                 can_capture_diagonal = true;
                             }
                         }
-                    }
-                }
 
                 // If pawn can promote (either by advancing or capturing) and we didn't stop it
                 let can_promote = (can_advance_straight && !blocked_straight_by_us) || can_capture_diagonal;
@@ -131,7 +127,6 @@ fn detect_opponent_promotion_threat(
                     threat_penalty += penalty_value;
                 }
             }
-        }
     }
 
     threat_penalty

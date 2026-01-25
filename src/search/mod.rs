@@ -3,17 +3,17 @@ mod management;
 mod evaluation;
 pub(crate) mod state;
 pub mod integration;
+pub mod context;
+#[doc(hidden)]
+pub mod test_support;
 
 use core::simple_search;
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::search::core::advanced_search;
-
-static DETERMINISTIC: AtomicBool = AtomicBool::new(false);
-static PARALLEL_SEARCH: AtomicBool = AtomicBool::new(true);
-
+pub use context::{SearchContext, InfoCb};
 
 pub trait Search {
     fn find_best_move(
+        ctx: &SearchContext,
         game_state: &crate::state::game_state::GameState,
         history: &crate::history::history::History,
         search_depth: usize,
@@ -34,6 +34,7 @@ pub enum SearchMode {
 ///
 /// from square (rank, col) to square (rank, col), score, and used depth
 pub fn find_best_move_with_mode(
+    ctx: &SearchContext,
     mode: SearchMode,
     game_state: &crate::state::game_state::GameState,
     history: &crate::history::history::History,
@@ -42,46 +43,19 @@ pub fn find_best_move_with_mode(
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     match mode {
         SearchMode::Normal => advanced_search::AdvancedSearch::find_best_move(
+            ctx,
             game_state,
             history,
             search_depth,
             playing_strength,
         ),
         SearchMode::Test => simple_search::SimpleSearch::find_best_move(
+            ctx,
             game_state,
             history,
             search_depth,
             playing_strength,
         ),
     }
-}
-
-/// Enable or disable deterministic behavior across the engine.
-/// When enabled, all random choices and evaluation noise are suppressed,
-/// and components should pick the most stable/best option instead of sampling.
-#[inline]
-pub fn set_deterministic(on: bool) {
-    DETERMINISTIC.store(on, Ordering::Relaxed);
-}
-
-/// Returns true when deterministic behavior is enabled.
-#[inline]
-pub fn is_deterministic() -> bool {
-    DETERMINISTIC.load(Ordering::Relaxed)
-}
-
-#[inline]
-pub fn get_deterministic() -> bool {
-    is_deterministic()
-}
-
-#[inline]
-pub fn set_parallel_search(on: bool) {
-    PARALLEL_SEARCH.store(on, Ordering::Relaxed);
-}
-
-#[inline]
-pub fn is_parallel_search() -> bool {
-    PARALLEL_SEARCH.load(Ordering::Relaxed)
 }
 

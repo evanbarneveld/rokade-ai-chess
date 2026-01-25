@@ -31,6 +31,18 @@ impl RepetitionStack {
         self.counts.get(key).is_some_and(|&c| c > 0)
     }
 
+    /// Return how many times a key appears in the stack.
+    #[inline]
+    pub fn count(&self, key: u64) -> u32 {
+        *self.counts.get(&key).unwrap_or(&0)
+    }
+
+    /// Return the most recent key, if any.
+    #[inline]
+    pub fn last(&self) -> Option<u64> {
+        self.stack.last().copied()
+    }
+
     /// Push a key onto the stack
     #[inline]
     pub fn push(&mut self, key: u64) {

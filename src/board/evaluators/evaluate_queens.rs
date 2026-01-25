@@ -1,6 +1,9 @@
 use crate::board::Board;
+use crate::board::evaluation_helpers::{chebyshev_dist, is_piece, PawnFileCounts};
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{PawnFileCounts, is_piece};
+
+const QUEEN_CENTER_BONUS: i32 = 4;
+const QUEEN_CENTER_MAX_DIST: i32 = 4;
 
 pub fn evaluate_queen(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> i32 {
     let mut val = 0;
@@ -16,6 +19,18 @@ pub fn evaluate_queen(board: &Board, row: usize, col: usize, color: Color, phase
             let shallow = match color { Color::White => row <= 2, Color::Black => row >= 5 };
             if shallow { val -= (14 * phase) / 24; }
         }
+    }
+    let eg = 24 - phase;
+    if eg > 0 {
+        let mut best = 99;
+        for (cr, cc) in [(3, 3), (3, 4), (4, 3), (4, 4)] {
+            let dist = chebyshev_dist((row as i32, col as i32), (cr, cc));
+            if dist < best {
+                best = dist;
+            }
+        }
+        let center_bonus = (QUEEN_CENTER_MAX_DIST - best).max(0) * QUEEN_CENTER_BONUS;
+        val += (center_bonus * eg) / 24;
     }
     val
 }

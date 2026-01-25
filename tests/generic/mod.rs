@@ -1,0 +1,15 @@
+mod move_tests;
+mod pgn_tests;
+mod pv_test;
+mod perft_depth_1_2_and_3_tests;
+mod eval_tests;
+mod blunder_tests;
+mod generate_moves_debug_tests;
+mod board_tests;
+mod perft_depth_4_5_and_higher_tests;
+mod eval_symmetry_tests;
+mod eval_passed_pawns_tests;
+mod opening_preference_tests;
+mod repetition_tests;
+mod promotion_tests;
+mod utils;

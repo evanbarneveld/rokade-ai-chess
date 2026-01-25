@@ -1,6 +1,17 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{is_piece, square_attacked_by_enemy_pawn, PawnFileCounts, opponent, chebyshev_dist, taper_general};
+use crate::board::evaluation_helpers::{
+    chebyshev_dist, is_piece, opponent, square_attacked_by_enemy_pawn, PawnFileCounts, taper_general,
+};
+
+const DOUBLED_PAWN_PENALTY_MG: i32 = 10;
+const DOUBLED_PAWN_PENALTY_EG: i32 = 16;
+const ISOLATED_PAWN_PENALTY_MG: i32 = 12;
+const ISOLATED_PAWN_PENALTY_EG: i32 = 18;
+const BACKWARD_PAWN_PENALTY_MG: i32 = 14;
+const BACKWARD_PAWN_PENALTY_EG: i32 = 20;
+const PAWN_MAJORITY_BONUS_MG: i32 = 4;
+const PAWN_MAJORITY_BONUS_EG: i32 = 8;
 
 pub fn evaluate_pawn(
     board: &Board,
@@ -12,7 +23,7 @@ pub fn evaluate_pawn(
     king_b: Option<(usize, usize)>,
     att_w: &[[bool; 8]; 8],
     att_b: &[[bool; 8]; 8],
-    pawn_counts: &crate::board::evaluator::PawnFileCounts,
+    pawn_counts: &PawnFileCounts,
 ) -> i32 {
     let mut val = 0;
     // File bonuses from a..h: a/h negative, c/f small positive, d/e strong positive
@@ -32,10 +43,14 @@ pub fn evaluate_pawn(
         }
     }
 
-    if is_doubled_pawn_fast(pawn_counts, row, col, color) { val -= 12; }
-    if is_isolated_pawn_fast(pawn_counts, col, color) { val -= 14; }
+    if is_doubled_pawn_fast(pawn_counts, row, col, color) {
+        val -= taper_general(DOUBLED_PAWN_PENALTY_MG, DOUBLED_PAWN_PENALTY_EG, phase);
+    }
+    if is_isolated_pawn_fast(pawn_counts, col, color) {
+        val -= taper_general(ISOLATED_PAWN_PENALTY_MG, ISOLATED_PAWN_PENALTY_EG, phase);
+    }
     if is_backward_pawn(board, row, col, color, phase) {
-        val -= taper_general(phase, 22, 8);
+        val -= taper_general(BACKWARD_PAWN_PENALTY_MG, BACKWARD_PAWN_PENALTY_EG, phase);
     }
     if is_passed_pawn(board, row, col, color) {
         val += evaluate_passed_pawn(board, row, col, color, phase, king_w, king_b, att_w, att_b);
@@ -205,8 +220,19 @@ pub fn evaluate_passed_pawn(
         Color::Black => if row > 0 { Some(row - 1) } else { None },
     };
     if let Some(nr) = next_r_opt {
-        if board.get(nr, col).is_some() {
-            score -= (14 * eg) / 24;
+        if let Some(blocker) = board.get(nr, col) {
+            let block_pen = if blocker.get_color() != color {
+                match blocker.get_type() {
+                    PieceType::Pawn => 22,
+                    PieceType::Knight | PieceType::Bishop => 18,
+                    PieceType::Rook => 12,
+                    PieceType::Queen => 10,
+                    PieceType::King => 26,
+                }
+            } else {
+                10
+            };
+            score -= (block_pen * eg) / 24;
         } else {
             let enemy_king = match color { Color::White => king_b, Color::Black => king_w };
             let mut safe_bonus = 10;
@@ -251,6 +277,9 @@ pub fn evaluate_passed_pawn(
     }
     if support > 0 { score += (8 * support * eg) / 24; }
 
+    let connected_bonus = connected_passed_pawn_bonus(board, row, col, color, phase);
+    score += connected_bonus;
+
     if let (Some((fk_r, fk_c)), Some((ek_r, ek_c))) = (
         match color { Color::White => king_w, Color::Black => king_b },
         match color { Color::White => king_b, Color::Black => king_w },
@@ -268,6 +297,43 @@ pub fn evaluate_passed_pawn(
 
     let cap: i32 = 90;
     if score > cap { cap } else { score }
+}
+
+fn connected_passed_pawn_bonus(
+    board: &Board,
+    row: usize,
+    col: usize,
+    color: Color,
+    phase: i32,
+) -> i32 {
+    let mut best = 0i32;
+    for dc in [-1i32, 1] {
+        let nc_i = col as i32 + dc;
+        if !(0..=7).contains(&nc_i) {
+            continue;
+        }
+        let nc = nc_i as usize;
+        for dr in [-1i32, 0, 1] {
+            let nr_i = row as i32 + dr;
+            if !(0..=7).contains(&nr_i) {
+                continue;
+            }
+            let nr = nr_i as usize;
+            if is_piece(board, nr, nc, color, PieceType::Pawn)
+                && is_passed_pawn(board, nr, nc, color)
+            {
+                let adv_self = match color { Color::White => row as i32, Color::Black => (7 - row) as i32 };
+                let adv_other = match color { Color::White => nr as i32, Color::Black => (7 - nr) as i32 };
+                let mg = 8 + (adv_self + adv_other) / 2;
+                let eg = mg + 6;
+                let bonus = taper_general(mg, eg, phase);
+                if bonus > best {
+                    best = bonus;
+                }
+            }
+        }
+    }
+    best
 }
 
 pub fn has_clear_promotion_path(board: &Board, row: usize, col: usize, color: Color) -> bool {
@@ -603,4 +669,24 @@ pub fn evaluate_pawn_storm(
     }
 
     score
+}
+
+pub fn pawn_majority_bonus(pawn_counts: &PawnFileCounts, color: Color, phase: i32) -> i32 {
+    let (own, opp) = match color {
+        Color::White => (&pawn_counts.white, &pawn_counts.black),
+        Color::Black => (&pawn_counts.black, &pawn_counts.white),
+    };
+    let own_q: i32 = own[0..4].iter().sum();
+    let opp_q: i32 = opp[0..4].iter().sum();
+    let own_k: i32 = own[4..8].iter().sum();
+    let opp_k: i32 = opp[4..8].iter().sum();
+
+    let mut bonus = 0;
+    if own_q > 0 && own_q >= opp_q + 2 {
+        bonus += taper_general(PAWN_MAJORITY_BONUS_MG, PAWN_MAJORITY_BONUS_EG, phase);
+    }
+    if own_k > 0 && own_k >= opp_k + 2 {
+        bonus += taper_general(PAWN_MAJORITY_BONUS_MG, PAWN_MAJORITY_BONUS_EG, phase);
+    }
+    bonus
 }

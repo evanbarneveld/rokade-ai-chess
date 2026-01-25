@@ -1,0 +1,8 @@
+mod attack_maps_tests;
+mod board_tests;
+mod evaluator_tests;
+mod pst_tests;
+mod san_move_tests;
+mod test_support_tests;
+mod checks;
+mod evaluators;

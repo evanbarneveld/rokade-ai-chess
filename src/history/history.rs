@@ -118,11 +118,10 @@ impl History {
     // Returns how many times a given zobrist key has appeared in the history
     pub fn zobrist_repetition_count(&self, zobrist_key: u64) -> usize {
         let mut count = 0;
-        if let Some(starting) = self.starting_zobrist {
-            if starting == zobrist_key {
+        if let Some(starting) = self.starting_zobrist
+            && starting == zobrist_key {
                 count += 1;
             }
-        }
         for (_, _, _, _, z) in &self.plies {
             if *z == zobrist_key {
                 count += 1;

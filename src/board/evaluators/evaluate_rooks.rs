@@ -1,6 +1,6 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{PawnFileCounts, FileClearance, is_piece, find_king, opponent};
+use crate::board::evaluation_helpers::{find_king, is_piece, opponent, FileClearance, PawnFileCounts};
 
 pub fn evaluate_rook(
     board: &Board,
@@ -15,6 +15,7 @@ pub fn evaluate_rook(
 ) -> i32 {
     let mut val = 0;
     if eg > 0 {
+        let enemy = opponent(color);
         // Rook on 7th
         let on_7th = match color {
             Color::White => row == 6 && black_pawns > 0,
@@ -31,8 +32,17 @@ pub fn evaluate_rook(
             }
         }
 
+        // Blockade enemy passed pawn on the file.
+        if let Some((pp_r, _)) = crate::board::evaluators::evaluate_pawns::find_passed_pawn_on_file(board, col, enemy) {
+            let in_front = match color { Color::White => row < pp_r, Color::Black => row > pp_r };
+            if in_front && file_clearance.is_clear_between(row, pp_r, col) {
+                let adv = match enemy { Color::White => pp_r as i32, Color::Black => (7 - pp_r) as i32 };
+                val += ((12 + 2 * adv) * eg) / 24;
+            }
+        }
+
         // Cut-off king
-        if let Some((ek_r, ek_c)) = find_king(board, opponent(color)) {
+        if let Some((ek_r, ek_c)) = find_king(board, enemy) {
             if col == ek_c
                 && file_clearance.is_clear_between(row, ek_r, col)
                 && (row as i32 - ek_r as i32).abs() >= 2
@@ -108,10 +118,43 @@ pub fn doubled_rooks_bonus(board: &Board, color: Color, _counts: &PawnFileCounts
 }
 
 pub fn rook_on_enemy_king_file_bonus(board: &Board, color: Color) -> i32 {
-    use crate::board::evaluator::find_king;
-    use crate::board::evaluator::opponent;
+    use crate::board::evaluation_helpers::{find_king, opponent};
     if let Some((_, ek_c)) = find_king(board, opponent(color)) {
         for r in 0..8 { if is_piece(board, r, ek_c, color, PieceType::Rook) { return 10; } }
     }
     0
+}
+
+pub fn rook_queen_alignment_bonus(board: &Board, color: Color, counts: &PawnFileCounts) -> i32 {
+    let mut score = 0;
+    for c in 0..8 {
+        let friendly = match color {
+            Color::White => counts.white[c],
+            Color::Black => counts.black[c],
+        };
+        if friendly > 0 {
+            continue;
+        }
+        let enemy = match color {
+            Color::White => counts.black[c],
+            Color::Black => counts.white[c],
+        };
+        let mut has_rook = false;
+        let mut has_queen = false;
+        for r in 0..8 {
+            if let Some(p) = board.get(r, c) {
+                if p.get_color() == color {
+                    if p.get_type() == PieceType::Rook {
+                        has_rook = true;
+                    } else if p.get_type() == PieceType::Queen {
+                        has_queen = true;
+                    }
+                }
+            }
+        }
+        if has_rook && has_queen {
+            score += if enemy == 0 { 12 } else { 8 };
+        }
+    }
+    score
 }

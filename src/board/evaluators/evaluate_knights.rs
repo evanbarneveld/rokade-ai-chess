@@ -1,6 +1,6 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{is_piece, opponent, taper_general};
+use crate::board::evaluation_helpers::{is_piece, opponent, taper_general};
 
 pub fn evaluate_knight(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> i32 {
     let mut val = 0;
@@ -18,6 +18,9 @@ pub fn evaluate_knight(board: &Board, row: usize, col: usize, color: Color, phas
             },
         };
         val += (dev_bonus * phase) / 24;
+    }
+    if col == 0 || col == 7 {
+        val -= taper_general(14, 6, phase);
     }
     if is_knight_outpost(board, row, col, color) {
         val += taper_general(phase, 22, 8);

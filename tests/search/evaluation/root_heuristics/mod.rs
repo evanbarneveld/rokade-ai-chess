@@ -1,0 +1,9 @@
+mod utils_tests;
+mod check_hanging_tests;
+mod critical_defense_tests;
+mod endgame_scaling_tests;
+mod king_safety_tests;
+mod knight_evacuation_tests;
+mod opponent_tactics_tests;
+mod queen_pressure_tests;
+mod threat_resolution_tests;

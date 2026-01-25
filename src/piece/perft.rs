@@ -110,7 +110,8 @@ pub fn perft_count_parallel(gs: &GameState, depth: u32) -> u64 {
 
     // Build root move list
     let mut root_moves: Vec<PerftMove> = Vec::with_capacity(64);
-    find_all_valid_moves_into_perft(gs, &mut root_moves);
+    let mut root_state = *gs;
+    find_all_valid_moves_into_perft(&mut root_state, &mut root_moves);
 
     if depth == 1 {
         return root_moves.len() as u64;

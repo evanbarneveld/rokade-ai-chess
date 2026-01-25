@@ -19,11 +19,11 @@ pub fn queen_kingside_pressure_bonus(
         _ => return 0,
     }
 
-    let (post, _) = simulate_move(base_board, from, to);
+    let (post, _) = simulate_move(base_board, from, to, None);
     let targets: &[(usize, usize)] = if side == Color::White {
-        &[(1, 5), (1, 7)]
-    } else {
         &[(6, 5), (6, 7)]
+    } else {
+        &[(1, 5), (1, 7)]
     };
 
     let mut hit_count = 0;

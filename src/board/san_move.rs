@@ -5,7 +5,7 @@ use crate::search::core::advanced_search::find_all_valid_moves;
 use crate::state::game_state::GameState;
 
 pub fn convert_move_to_san(
-    game_state: GameState,
+    game_state: &GameState,
     generated_move: Option<((usize, usize), (usize, usize), Option<char>)>,
 ) -> Option<String> {
     let (from, to, promo) = generated_move?;
@@ -89,6 +89,7 @@ fn rank_char(row: usize) -> char {
 
 // Determine if the position after (from->to) is checked or mate, and return "", "+" or "#"
 fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize), promo: Option<char>, side: Color) -> String {
+    let moving_piece = board.get(from.0, from.1);
     let mut tmp = *board;
     let _u = tmp.make_move_simple(from, to, promo);
     let opp = opposite_color(side);
@@ -98,6 +99,19 @@ fn check_or_mate_suffix(board: &Board, from: (usize, usize), to: (usize, usize),
     }
     // Check for mate: if opponent has no legal moves
     let mut opp_state = GameState::from_board_and_side(tmp, opp);
+
+    // Set en passant target for two-square pawn advances
+    if let Some(p) = moving_piece
+        && p.get_type() == PieceType::Pawn {
+            let start_row = if side == Color::White { 1 } else { 6 };
+            let dir: isize = if side == Color::White { 1 } else { -1 };
+
+            if from.0 == start_row && (to.0 as isize) == (from.0 as isize + 2 * dir) && from.1 == to.1 {
+                let mid_row = (from.0 as isize + dir) as usize;
+                opp_state.set_en_passant_target(Some((mid_row, from.1)));
+            }
+        }
+
     let legals = find_all_valid_moves(&mut opp_state);
     if legals.is_empty() { "#".to_string() } else { "+".to_string() }
 }

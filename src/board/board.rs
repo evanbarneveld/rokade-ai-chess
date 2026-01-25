@@ -119,29 +119,6 @@ impl Board {
     }
 
     // ============================================================
-    // PIECE ITERATION
-    // ============================================================
-
-    /// Iterate over all pieces on the board with their positions
-    pub fn iter_pieces(&self) -> impl Iterator<Item = ((usize, usize), Piece)> + '_ {
-        self.squares.iter().enumerate().flat_map(|(r, row)| {
-            row.iter().enumerate().filter_map(move |(c, piece)| {
-                piece.map(|p| ((r, c), p))
-            })
-        })
-    }
-
-    /// Iterate over pieces of a specific color
-    pub fn iter_pieces_of_color(&self, color: Color) -> impl Iterator<Item = ((usize, usize), Piece)> + '_ {
-        self.iter_pieces().filter(move |(_, p)| p.get_color() == color)
-    }
-
-    /// Iterate over pieces of a specific type
-    pub fn iter_pieces_of_type(&self, piece_type: PieceType) -> impl Iterator<Item = ((usize, usize), Piece)> + '_ {
-        self.iter_pieces().filter(move |(_, p)| p.get_type() == piece_type)
-    }
-
-    // ============================================================
     // KING LOCATION MANAGEMENT
     // ============================================================
 
@@ -239,12 +216,11 @@ impl Board {
         let mut castle_rook_to: Option<(usize, usize)> = None;
 
         // Update piece counts for captured piece
-        if let Some(cap) = captured {
-            if let Some(idx) = Self::piece_type_to_count_index(cap.get_type()) {
+        if let Some(cap) = captured
+            && let Some(idx) = Self::piece_type_to_count_index(cap.get_type()) {
                 self.piece_counts[cap.get_color() as usize][idx] =
                     self.piece_counts[cap.get_color() as usize][idx].saturating_sub(1);
             }
-        }
 
         // Handle castling
         if let Some(p) = moved
@@ -373,11 +349,10 @@ impl Board {
         self.piece_counts = [[0; 4]; 2];
         for r in 0..8 {
             for c in 0..8 {
-                if let Some(p) = self.get(r, c) {
-                    if let Some(idx) = Self::piece_type_to_count_index(p.get_type()) {
+                if let Some(p) = self.get(r, c)
+                    && let Some(idx) = Self::piece_type_to_count_index(p.get_type()) {
                         self.piece_counts[p.get_color() as usize][idx] += 1;
                     }
-                }
             }
         }
     }

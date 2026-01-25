@@ -91,8 +91,8 @@ pub fn self_hang_or_check_mobility(
 
         // Large bonus for advanced pawn checks (near promotion)
         // These are often winning tactics that should be prioritized
-        if let Some(piece) = post_after.get(to.0, to.1) {
-            if piece.get_type() == PieceType::Pawn {
+        if let Some(piece) = post_after.get(to.0, to.1)
+            && piece.get_type() == PieceType::Pawn {
                 let pawn_rank = to.0;
                 // For White: rank 6 (row 6) or 7 (row 7) near promotion
                 // For Black: rank 1 (row 1) or 2 (row 2) near promotion
@@ -106,7 +106,6 @@ pub fn self_hang_or_check_mobility(
                     check_bonus += 2000;
                 }
             }
-        }
     }
 
     // If we give check, reduce hanging piece penalties significantly

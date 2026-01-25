@@ -26,11 +26,10 @@ pub fn opponent_knight_check_fork_penalty(
     let mut opp_knights = Vec::new();
     for r in 0..8 {
         for c in 0..8 {
-            if let Some(p) = post_after.get(r, c) {
-                if p.get_color() == opp && p.get_type() == PieceType::Knight {
+            if let Some(p) = post_after.get(r, c)
+                && p.get_color() == opp && p.get_type() == PieceType::Knight {
                     opp_knights.push((r, c));
                 }
-            }
         }
     }
 
@@ -58,7 +57,7 @@ pub fn opponent_knight_check_fork_penalty(
             let r_i32 = nr as i32 + dr;
             let c_i32 = nc as i32 + dc;
 
-            if r_i32 < 0 || r_i32 >= 8 || c_i32 < 0 || c_i32 >= 8 {
+            if !(0..8).contains(&r_i32) || !(0..8).contains(&c_i32) {
                 continue;
             }
 
@@ -121,11 +120,10 @@ pub fn opponent_knight_check_fork_penalty(
 fn find_king_square(board: &Board, color: Color) -> Option<(usize, usize)> {
     for r in 0..8 {
         for c in 0..8 {
-            if let Some(p) = board.get(r, c) {
-                if p.get_color() == color && p.get_type() == PieceType::King {
+            if let Some(p) = board.get(r, c)
+                && p.get_color() == color && p.get_type() == PieceType::King {
                     return Some((r, c));
                 }
-            }
         }
     }
     None

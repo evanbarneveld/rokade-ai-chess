@@ -29,7 +29,7 @@ pub fn knight_safe_squares(board: &Board, side: Color, from: (usize, usize)) -> 
             && occ.get_color() == side {
                 continue;
             }
-        let (sim, _) = simulate_move(board, from, (nr, nc));
+        let (sim, _) = simulate_move(board, from, (nr, nc), None);
         let mut tmp = sim;
         if !is_square_attacked_by_opponent(&mut tmp, (nr, nc), side)
             || see_dest_estimate(&sim, side, (nr, nc), 0) >= 0
@@ -85,7 +85,7 @@ pub fn knight_evacuations_priority(
     } else if let Some(p) = base_board.get(from.0, from.1)
         && p.get_type() == PieceType::Knight {
             let (tr, tc) = to;
-            let (sim, _) = simulate_move(base_board, from, to);
+            let (sim, _) = simulate_move(base_board, from, to, None);
             let mut tmp = sim;
             let dest_attacked = is_square_attacked_by_opponent(&mut tmp, (tr, tc), side);
             let see1 = see_dest_estimate(&sim, side, (tr, tc), 0);

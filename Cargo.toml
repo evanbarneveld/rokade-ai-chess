@@ -1,6 +1,6 @@
 [package]
 name = "rokade-ai-chess"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 build = "build.rs"
 
@@ -18,7 +18,11 @@ chrono = "0.4.42"
 
 [features]
 default = ["parallel"]
+#default = ["parallel", "debug-search"]
 parallel = ["rayon"]
+# Enable verbose search tracing output (iterative deepening, alphabeta, qsearch)
+# Usage: cargo run --features debug-search
+debug-search = []
 
 [build-dependencies]
 
@@ -39,7 +43,10 @@ strip = true
 name = "rokade-ai-chess"
 path = "src/chess_main.rs"
 
-[profile.engine-only]
+[profile.bench]
+debug=true
+
+[profile.engine]
 inherits = "release"
 
 [[bin]]
@@ -47,4 +54,4 @@ name = "rokade-ai-chess-engine"
 path = "src/engine_main.rs"
 
 [dev-dependencies]
-serial_test = "*"
+#serial_test = "*"

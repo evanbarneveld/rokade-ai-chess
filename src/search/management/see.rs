@@ -111,7 +111,7 @@ pub fn find_smallest_attacker(
         let r_i32 = tr as i32 + pawn_row_offset;
         let c_i32 = tc as i32 + dc;
         // Check bounds before casting to usize to avoid wraparound
-        if r_i32 >= 0 && r_i32 < 8 && c_i32 >= 0 && c_i32 < 8 {
+        if (0..8).contains(&r_i32) && (0..8).contains(&c_i32) {
             let r = r_i32 as usize;
             let c = c_i32 as usize;
             if let Some(p) = board.get(r, c)
@@ -134,7 +134,7 @@ pub fn find_smallest_attacker(
     for (dr, dc) in knight_moves {
         let r_i32 = tr as i32 + dr;
         let c_i32 = tc as i32 + dc;
-        if r_i32 >= 0 && r_i32 < 8 && c_i32 >= 0 && c_i32 < 8 {
+        if (0..8).contains(&r_i32) && (0..8).contains(&c_i32) {
             let r = r_i32 as usize;
             let c = c_i32 as usize;
             if let Some(p) = board.get(r, c)
@@ -181,7 +181,7 @@ pub fn find_smallest_attacker(
             }
             let r_i32 = tr as i32 + dr;
             let c_i32 = tc as i32 + dc;
-            if r_i32 >= 0 && r_i32 < 8 && c_i32 >= 0 && c_i32 < 8 {
+            if (0..8).contains(&r_i32) && (0..8).contains(&c_i32) {
                 let r = r_i32 as usize;
                 let c = c_i32 as usize;
                 if let Some(p) = board.get(r, c)
@@ -216,7 +216,7 @@ fn scan_ray(
     let mut r = from.0 as i32 + dr;
     let mut c = from.1 as i32 + dc;
 
-    while r >= 0 && r < 8 && c >= 0 && c < 8 {
+    while (0..8).contains(&r) && (0..8).contains(&c) {
         let (ur, uc) = (r as usize, c as usize);
         if let Some(p) = board.get(ur, uc) {
             if p.get_color() == color && piece_types.contains(&p.get_type()) {
@@ -435,170 +435,3 @@ pub fn apply_destination_see_penalties(
     delta
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::board::Board;
-    use crate::piece::pieces::{Color, Piece, PieceType};
-
-    /// Helper to create a board from a position
-    fn setup_board_from_pieces(pieces: &[((usize, usize), PieceType, Color)]) -> Board {
-        let mut board = Board::empty();
-        for &((r, c), piece_type, color) in pieces {
-            board.set(r, c, Some(Piece::new(piece_type, color)));
-        }
-        board
-    }
-
-    #[test]
-    fn test_see_simple_pawn_capture() {
-        // White pawn on e4 captures black pawn on d5, no defenders/attackers
-        let mut board = setup_board_from_pieces(&[
-            ((3, 4), PieceType::Pawn, Color::White), // e4
-        ]);
-        // Simulate: pawn moved to d5 after capturing
-        board.set(3, 3, Some(Piece::new(PieceType::Pawn, Color::White))); // d5
-        board.set(3, 4, None); // e4 empty
-
-        let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
-        assert_eq!(see, 100, "Undefended pawn capture should return pawn value");
-    }
-
-    #[test]
-    fn test_see_knight_takes_pawn_defended_by_pawn() {
-        // Knight takes pawn defended by pawn: N x P(p) => lose knight
-        // Black pawn at row 4 (rank 4) can attack row 3 (rank 5) diagonally
-        let mut board = setup_board_from_pieces(&[
-            ((4, 2), PieceType::Pawn, Color::Black), // Defender pawn at c4, attacks d3 (row 3)
-        ]);
-        // Knight on d3 (row 3) after capturing pawn - note: row 3 = rank 5 in this engine
-        board.set(3, 3, Some(Piece::new(PieceType::Knight, Color::White))); // d3
-
-        let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
-        // Knight (320) takes pawn (100), then black pawn takes knight (320)
-        // Net: 100 - 320 = -220
-        assert!(see < 0, "Knight taking defended pawn should be negative SEE, got {}", see);
-    }
-
-    #[test]
-    fn test_see_equal_trade_knight_for_knight() {
-        // White knight takes black knight, black has a piece that can recapture
-        let mut board = setup_board_from_pieces(&[
-            ((4, 2), PieceType::Pawn, Color::Black), // Can recapture at row 3 from row 4
-        ]);
-        board.set(3, 3, Some(Piece::new(PieceType::Knight, Color::White))); // WN on d3
-
-        let see = see_dest_estimate(&board, Color::White, (3, 3), 320);
-        // Takes knight (320), then loses knight (320) => 0
-        assert_eq!(see, 0, "Equal trade should result in SEE of 0");
-    }
-
-    #[test]
-    fn test_see_queen_takes_pawn_attacked_by_pawn() {
-        // Queen takes pawn, but attacked by enemy pawn => bad trade
-        let mut board = setup_board_from_pieces(&[
-            ((4, 2), PieceType::Pawn, Color::Black), // Attacking pawn at row 4
-        ]);
-        board.set(3, 3, Some(Piece::new(PieceType::Queen, Color::White))); // Queen on d3 (row 3)
-
-        let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
-        // Queen (900) takes pawn (100), loses queen (900) => 100 - 900 = -800
-        assert!(see < -700, "Queen taking pawn attacked by pawn should be very negative");
-    }
-
-    #[test]
-    fn test_see_xray_attack_rook_behind_bishop() {
-        // Bishop takes pawn, rook behind bishop joins exchange (X-ray)
-        // Setup: Black pawn on d5, White bishop on c4, White rook on a4 (x-ray on diagonal not applicable)
-        // Better: Rook on e4, Bishop on e5 takes piece on e6, rook revealed
-        let mut board = setup_board_from_pieces(&[
-            ((3, 4), PieceType::Rook, Color::White),   // Rook on e4
-            ((2, 5), PieceType::Pawn, Color::Black),   // Black defender pawn on f6
-        ]);
-        // Bishop on e5 after capturing
-        board.set(2, 4, Some(Piece::new(PieceType::Bishop, Color::White))); // e5
-
-        let see = see_dest_estimate(&board, Color::White, (2, 4), 100);
-        // Bishop takes pawn (100), black pawn takes bishop (330), white rook takes pawn (100)
-        // Net: 100 - 330 + 100 = -130, but negamax chooses best: don't continue => depends on exact calculation
-        // The X-ray effect should be detected by scan_ray after pieces are removed
-        assert!(see <= 100, "SEE should handle X-ray attacks");
-    }
-
-    #[test]
-    fn test_see_multi_piece_exchange() {
-        // Complex exchange: Q takes P, defended by N, B, R
-        let mut board = setup_board_from_pieces(&[
-            ((2, 5), PieceType::Knight, Color::Black), // Knight defender
-            ((1, 6), PieceType::Bishop, Color::Black), // Bishop defender (diagonal)
-        ]);
-        board.set(3, 3, Some(Piece::new(PieceType::Queen, Color::White))); // Queen on d5
-
-        let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
-        // Queen takes pawn: +100, Knight takes Queen: -900, total -800
-        // White wouldn't continue this exchange
-        assert!(see < 0, "Queen taking defended pawn should be negative");
-    }
-
-    #[test]
-    fn test_see_no_attacker() {
-        // Piece on square with no attackers => just return captured value
-        let mut board = setup_board_from_pieces(&[]);
-        board.set(3, 3, Some(Piece::new(PieceType::Knight, Color::White))); // Knight on d5
-
-        let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
-        assert_eq!(see, 100, "No attackers => captured value");
-    }
-
-    #[test]
-    fn test_see_king_capture() {
-        // King should be handled correctly in exchange (shouldn't be captured)
-        let mut board = setup_board_from_pieces(&[
-            ((2, 3), PieceType::King, Color::Black), // Black king adjacent
-        ]);
-        board.set(3, 3, Some(Piece::new(PieceType::Pawn, Color::White))); // Pawn on d5
-
-        let see = see_dest_estimate(&board, Color::White, (3, 3), 100);
-        // White pawn captured Black pawn (100), Black king recaptures White pawn (100): even trade
-        assert_eq!(see, 0, "Equal exchange should result in SEE of 0, got {}", see);
-    }
-
-    #[test]
-    fn test_see_after_helper() {
-        let board = setup_board_from_pieces(&[
-            ((3, 3), PieceType::Knight, Color::White),
-            ((2, 2), PieceType::Pawn, Color::Black),
-        ]);
-
-        let captured = Some(Piece::new(PieceType::Pawn, Color::Black));
-        let see = see_after(&board, Color::White, (3, 3), captured);
-
-        // Knight on d5, defended/attacked appropriately
-        assert!(see <= 100, "see_after should call see_dest_estimate correctly");
-    }
-
-    #[test]
-    fn test_attacked_by_pawn() {
-        let board = setup_board_from_pieces(&[
-            ((2, 2), PieceType::Pawn, Color::White), // c6
-        ]);
-
-        // White pawn on c6 attacks d5 and b5
-        assert!(attacked_by_pawn(&board, (3, 3), Color::White), "Should detect pawn attack on d5");
-        assert!(attacked_by_pawn(&board, (3, 1), Color::White), "Should detect pawn attack on b5");
-        assert!(!attacked_by_pawn(&board, (3, 2), Color::White), "Should not detect attack on c5");
-    }
-
-    #[test]
-    fn test_pawn_attacked_minor_penalty() {
-        let board = setup_board_from_pieces(&[
-            ((4, 2), PieceType::Pawn, Color::Black), // Black pawn at row 4 attacks row 3
-        ]);
-
-        let penalty = pawn_attacked_minor_penalty(&board, Color::White, (3, 3), PieceType::Knight);
-        assert_eq!(penalty, 1200, "Knight attacked by pawn should have penalty");
-
-        let no_penalty = pawn_attacked_minor_penalty(&board, Color::White, (3, 3), PieceType::Queen);
-        assert_eq!(no_penalty, 0, "Queen shouldn't have minor pawn attack penalty");
-    }
-}

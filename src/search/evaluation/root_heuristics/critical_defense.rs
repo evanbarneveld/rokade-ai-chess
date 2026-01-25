@@ -78,13 +78,11 @@ fn count_attackers(board: &Board, sq: (usize, usize), attacker_color: Color) -> 
     for dc in [-1i32, 1] {
         let pr = r as i32 + pawn_row_offset;
         let pc = c as i32 + dc;
-        if pr >= 0 && pr < 8 && pc >= 0 && pc < 8 {
-            if let Some(p) = board.get(pr as usize, pc as usize) {
-                if p.get_color() == attacker_color && p.get_type() == PieceType::Pawn {
+        if (0..8).contains(&pr) && (0..8).contains(&pc)
+            && let Some(p) = board.get(pr as usize, pc as usize)
+                && p.get_color() == attacker_color && p.get_type() == PieceType::Pawn {
                     count += 1;
                 }
-            }
-        }
     }
 
     // Check knights
@@ -95,13 +93,11 @@ fn count_attackers(board: &Board, sq: (usize, usize), attacker_color: Color) -> 
     for (dr, dc) in knight_moves {
         let nr = r as i32 + dr;
         let nc = c as i32 + dc;
-        if nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
-            if let Some(p) = board.get(nr as usize, nc as usize) {
-                if p.get_color() == attacker_color && p.get_type() == PieceType::Knight {
+        if (0..8).contains(&nr) && (0..8).contains(&nc)
+            && let Some(p) = board.get(nr as usize, nc as usize)
+                && p.get_color() == attacker_color && p.get_type() == PieceType::Knight {
                     count += 1;
                 }
-            }
-        }
     }
 
     // Check bishops/queens on diagonals
@@ -126,13 +122,11 @@ fn count_attackers(board: &Board, sq: (usize, usize), attacker_color: Color) -> 
             }
             let kr = r as i32 + dr;
             let kc = c as i32 + dc;
-            if kr >= 0 && kr < 8 && kc >= 0 && kc < 8 {
-                if let Some(p) = board.get(kr as usize, kc as usize) {
-                    if p.get_color() == attacker_color && p.get_type() == PieceType::King {
+            if (0..8).contains(&kr) && (0..8).contains(&kc)
+                && let Some(p) = board.get(kr as usize, kc as usize)
+                    && p.get_color() == attacker_color && p.get_type() == PieceType::King {
                         count += 1;
                     }
-                }
-            }
         }
     }
 
@@ -146,8 +140,8 @@ fn count_defenders_for_piece_type(board: &Board, sq: (usize, usize), defender_co
     let (r, c) = sq;
 
     // Check if the piece that just moved defends the square
-    if let Some(p) = board.get(moved_to.0, moved_to.1) {
-        if p.get_color() == defender_color {
+    if let Some(p) = board.get(moved_to.0, moved_to.1)
+        && p.get_color() == defender_color {
             let pt = p.get_type();
             let (mr, mc) = moved_to;
             let dr = r as i32 - mr as i32;
@@ -184,7 +178,6 @@ fn count_defenders_for_piece_type(board: &Board, sq: (usize, usize), defender_co
                 count += 1;
             }
         }
-    }
 
     count
 }
@@ -238,7 +231,7 @@ fn scan_ray_for_attacker(
     let mut r = from.0 as i32 + dr;
     let mut c = from.1 as i32 + dc;
 
-    while r >= 0 && r < 8 && c >= 0 && c < 8 {
+    while (0..8).contains(&r) && (0..8).contains(&c) {
         let (ur, uc) = (r as usize, c as usize);
         if let Some(p) = board.get(ur, uc) {
             if p.get_color() == color && piece_types.contains(&p.get_type()) {
@@ -283,13 +276,11 @@ fn blocks_attack_on_critical(
 
     // Check ranks/files
     for (dr, dc) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-        if let Some(attacker_sq) = scan_ray_for_attacker(base_board, critical_sq, dr, dc, opp, &[PieceType::Rook, PieceType::Queen]) {
-            if is_on_line_between(attacker_sq, critical_sq, to) {
-                if scan_ray_for_attacker(post_after, critical_sq, dr, dc, opp, &[PieceType::Rook, PieceType::Queen]).is_none() {
+        if let Some(attacker_sq) = scan_ray_for_attacker(base_board, critical_sq, dr, dc, opp, &[PieceType::Rook, PieceType::Queen])
+            && is_on_line_between(attacker_sq, critical_sq, to)
+                && scan_ray_for_attacker(post_after, critical_sq, dr, dc, opp, &[PieceType::Rook, PieceType::Queen]).is_none() {
                     return true;
                 }
-            }
-        }
     }
 
     false

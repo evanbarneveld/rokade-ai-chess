@@ -8,9 +8,10 @@ use crate::history::history::History;
 use crate::piece::pieces::{capture_value_cp, opposite_color, Color, PieceType};
 use crate::search::core::alphabeta::alphabeta;
 use crate::search::advanced_search::find_all_valid_moves;
-use crate::search::management::see::apply_destination_see_penalties;
+use crate::search::context::SearchContext;
+use crate::search::evaluation::heuristics::SearchHeuristics;
+use crate::search::management::see::{apply_destination_see_penalties};
 use crate::search::state::tt::{decode_move, TranspositionTable};
-use crate::search::state::zobrist::compute_zobrist_full;
 use crate::state::game_state::GameState;
 
 // Import heuristics from sub-modules
@@ -49,12 +50,7 @@ pub fn build_pv_for_root(
     let _undo = gs.make_move_fast(from, to, root_promo);
 
     for _ in 1..max_len {
-        let key = compute_zobrist_full(
-            gs.board(),
-            gs.active_color(),
-            &gs.castling_rights(),
-            gs.en_passant_target(),
-        );
+        let key = gs.zobrist_key();
         let Some(entry) = tt.probe(key) else {
             break;
         };
@@ -156,6 +152,7 @@ pub fn adjust_root_score(
     side: Color,
     from: (usize, usize),
     to: (usize, usize),
+    promo: Option<char>,
     base_hmc: u32,
     is_capture: bool,
     moved_is_pawn: bool,
@@ -165,7 +162,7 @@ pub fn adjust_root_score(
     let mut adjusted = score_raw + initial_bonus;
 
     // Prepare post-position for heuristics
-    let (mut post_after, moved_probe) = simulate_move(base_board, from, to);
+    let (mut post_after, moved_probe) = simulate_move(base_board, from, to, promo);
     let opp = opposite_color(side);
     let gives_check = post_after.is_side_in_check(opp);
     let moved_is_queen = moved_probe
@@ -196,9 +193,9 @@ pub fn adjust_root_score(
         for &dc in &[-1i32, 1i32] {
             let attack_r = (to.0 as i32) + pawn_rank_dir;
             let attack_c = (to.1 as i32) + dc;
-            if attack_r >= 0 && attack_r < 8 && attack_c >= 0 && attack_c < 8 {
-                if let Some(p) = post_after.get(attack_r as usize, attack_c as usize) {
-                    if p.get_color() != side {
+            if (0..8).contains(&attack_r) && (0..8).contains(&attack_c)
+                && let Some(p) = post_after.get(attack_r as usize, attack_c as usize)
+                    && p.get_color() != side {
                         let piece_value = match p.get_type() {
                             PieceType::Knight | PieceType::Bishop => 2,
                             PieceType::Rook => 4,
@@ -217,8 +214,6 @@ pub fn adjust_root_score(
                             max_attacked_value = max_attacked_value.max(piece_value);
                         }
                     }
-                }
-            }
         }
 
         if attacks_valuable_enemy {
@@ -282,6 +277,8 @@ pub fn adjust_root_score(
 /// Evaluate a position after making a root move.
 #[inline]
 pub fn evaluate_after_root_move(
+    ctx: &SearchContext,
+    heuristics: &mut SearchHeuristics,
     game_state: &mut GameState,
     from: (usize, usize),
     to: (usize, usize),
@@ -289,7 +286,7 @@ pub fn evaluate_after_root_move(
     depth_now: usize,
     a: i32,
     b: i32,
-    tt: &mut TranspositionTable,
+    tt: &TranspositionTable,
     history: &History,
 ) -> (i32, bool, bool) {
     let side = game_state.active_color();
@@ -303,6 +300,7 @@ pub fn evaluate_after_root_move(
     let score_raw = if depth_now <= 1 {
         // Shallow depth: use qsearch to avoid horizon blunders
         crate::search::core::qsearch::qsearch(
+            ctx,
             game_state,
             crate::search::advanced_search::MIN_EVAL_VALUE + 1,
             crate::search::advanced_search::MAX_EVAL_VALUE - 1,
@@ -313,6 +311,8 @@ pub fn evaluate_after_root_move(
         let gives_check = game_state.mutable_board().is_side_in_check(opposite_color(side));
         let ext = if gives_check { 2 } else { 0 };
         alphabeta(
+            ctx,
+            heuristics,
             game_state,
             depth_now - 1 + ext,
             a,
@@ -321,6 +321,7 @@ pub fn evaluate_after_root_move(
             tt,
             &mut rep_stack,
             true, // Allow null move at root
+            Some((from, to)),
         )
     };
 
@@ -336,13 +337,14 @@ pub fn adjusted_root_eval_for_move(
     side: Color,
     from: (usize, usize),
     to: (usize, usize),
+    promo: Option<char>,
     base_hmc: u32,
     score_raw: i32,
     is_capture: bool,
     moved_is_pawn: bool,
 ) -> i32 {
     let mut adj = adjust_root_score(
-        base_board, side, from, to, base_hmc, is_capture, moved_is_pawn, score_raw,
+        base_board, side, from, to, promo, base_hmc, is_capture, moved_is_pawn, score_raw,
     );
 
     // adjust_root_score already returns White-perspective scores for both sides
@@ -352,6 +354,17 @@ pub fn adjusted_root_eval_for_move(
 
     // Calculate the heuristic adjustment
     let heuristic_delta = adj - score_raw;
+
+    // For mate scores, don't apply any heuristic adjustment at all.
+    // The raw score already encodes mate depth correctly (MATE_VALUE - ply).
+    // Any adjustment risks colliding different mate depths:
+    //   mate-in-1: 29999 - 1 = 29998
+    //   mate-in-2: 29997 + 1 = 29998  <- collision!
+    // A faster mate MUST always beat a slower mate.
+    const MATE_THRESHOLD: i32 = 25000;
+    if score_raw.abs() > MATE_THRESHOLD {
+        return score_raw;
+    }
 
     // Safety: don't let heuristics turn a losing move into a winning one
     // EXCEPT for critical tactical penalties like ignoring promotion threats

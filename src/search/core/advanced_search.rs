@@ -1,7 +1,6 @@
 use crate::history::history::History;
 use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
 use crate::search::management::aspiration::{probe_with_aspiration, ASP_WINDOW_INIT_CP};
-use crate::search::state::locking::get_tt_mutex;
 use crate::search::integration::playing_strength::select_move_based_using_strength_promo;
 
 // Re-export find_all_valid_moves for backward compatibility
@@ -11,15 +10,15 @@ use crate::search::management::root_moves::{
     adjusted_root_eval_for_move, build_pv_for_root, get_root_moves,
 };
 use crate::search::integration::threading::init_rayon_pool_if_needed;
-use crate::search::integration::uci_feedback::emit_info;
 use crate::state::game_state::GameState;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 
 pub const SEARCH_ABORTED: i32 = MAX_EVAL_VALUE + 50000;
-pub(crate) use crate::book::book::{book_pick, get_order_book_enabled};
+pub(crate) use crate::book::book::book_pick;
 use crate::search::Search;
 use crate::board::san_move::convert_move_to_san;
-use crate::search::core::alphabeta::with_heuristics;
+use crate::search::context::SearchContext;
+use crate::search::evaluation::heuristics::SearchHeuristics;
 
 pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 pub const MAX_SEARCH_DEPTH: usize = 20;
@@ -30,10 +29,10 @@ pub const MAX_SEARCH_DEPTH: usize = 20;
 pub(crate) const ZOBRIST_HASHING_ENABLED: bool = true;
 
 // Tie the transposition table to Zobrist hashing. Without Zobrist keys, TT is disabled.
-pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = ZOBRIST_HASHING_ENABLED;
+pub(crate) const TRANSPOSITION_TABLE_ENABLED: bool = true; // ZOBRIST_HASHING_ENABLED;
 
 pub(crate) const NULL_MOVE_PRUNING_ENABLED: bool = true;
-pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true;
+pub(crate) const ASPIRATION_WINDOWS_ENABLED: bool = true; // improves a-b performance on average
 
 pub(crate) const QUIESCENCE_ENABLED: bool = true;
 pub(crate) const QSEE_PRUNING_ENABLED: bool = true;
@@ -43,9 +42,27 @@ pub(crate) const ID_ITERATIONS_ENABLED: bool = true;
 
 pub const MAX_PLAYING_STRENGTH: usize = 1000;
 pub const DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY: usize = 3000usize;
+const PV_CHANGE_MAX_EXTRA_PCT_TIME: usize = 75;
+
+pub const MAX_MOVE_TIME_MS: usize = 240_000;
 
 // Re-export move generator types for backward compatibility
 pub use crate::search::management::move_generator::{find_all_valid_moves_into_perft, PerftMove, _dump_all_valid_moves};
+
+#[inline]
+pub(crate) fn score_raw_for_strength_move(
+    temp_gs: &GameState,
+    active_color: Color,
+    tt: &crate::search::state::tt::TranspositionTable,
+) -> i32 {
+    let key = temp_gs.zobrist_key();
+    if let Some(entry) = tt.probe(key) {
+        crate::search::state::tt::from_tt_score(entry.score, 0)
+    } else {
+        let eval = crate::board::evaluator::evaluate_position(temp_gs.board(), active_color);
+        if active_color == Color::Black { -eval } else { eval }
+    }
+}
 
 // Provide a simple implementor of the `Search` trait that forwards to this module's function.
 // This keeps existing callers of the free function intact while enabling trait-based use.
@@ -53,12 +70,14 @@ pub struct AdvancedSearch;
 
 impl Search for AdvancedSearch {
     fn find_best_move(
+        ctx: &SearchContext,
         game_state: &GameState,
         history: &History,
         search_depth: usize,
         playing_strength: usize,
     ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
         find_best_move(
+            ctx,
             game_state,
             history,
             search_depth,
@@ -71,31 +90,33 @@ impl Search for AdvancedSearch {
 /// returns the evaluated score (in centipawns) for the selected move
 /// and the effective Search depth that was actually used internally.
 pub fn find_best_move(
+    ctx: &SearchContext,
     game_state: &GameState,
     history: &History,
     search_depth: usize,
     playing_strength: usize,
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
-    find_best_move_internal(game_state, history, search_depth, playing_strength, None)
+    find_best_move_internal(ctx, game_state, history, search_depth, playing_strength, None)
 }
 
 /// Find the best move and return all root moves ranked by score.
 /// Returns a vector of (SAN, adjusted_score, raw_score) sorted by preference for the side to move.
 /// Uses full iterative deepening and all search optimizations, making it much faster than debug_rank_root_moves.
 pub fn find_best_move_with_ranking(
+    ctx: &SearchContext,
     game_state: &GameState,
     history: &History,
     search_depth: usize,
 ) -> Vec<(String, i32, i32)> {
     let mut all_scores = Vec::new();
-    find_best_move_internal(game_state, history, search_depth, MAX_PLAYING_STRENGTH, Some(&mut all_scores));
+    find_best_move_internal(ctx, game_state, history, search_depth, MAX_PLAYING_STRENGTH, Some(&mut all_scores));
 
     // Convert moves to SAN notation
     let active_color = game_state.active_color();
     let mut result: Vec<(String, i32, i32)> = all_scores
         .into_iter()
         .map(|((from, to, promo), adj, raw)| {
-            let san = convert_move_to_san(*game_state, Some((from, to, promo))).unwrap_or_else(|| {
+            let san = convert_move_to_san(game_state, Some((from, to, promo))).unwrap_or_else(|| {
                 format!("{}{}", crate::piece::as_square_str(from), crate::piece::as_square_str(to))
             });
             (san, adj, raw)
@@ -114,6 +135,7 @@ pub fn find_best_move_with_ranking(
 
 /// Internal implementation that optionally collects all move rankings
 fn find_best_move_internal(
+    ctx: &SearchContext,
     game_state: &GameState,
     history: &History,
     search_depth: usize,
@@ -122,16 +144,12 @@ fn find_best_move_internal(
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     init_rayon_pool_if_needed();
 
-    // Clear heuristics for deterministic search
-    with_heuristics(|h| h.clear());
+    let mut heuristics = SearchHeuristics::new(128);
 
     let mut gs = *game_state;
-    let tt_mutex = get_tt_mutex();
-    {
-        let mut tt_lock = tt_mutex.lock().unwrap();
-        if crate::search::is_deterministic() {
-            tt_lock.clear();
-        }
+    let tt = ctx.tt();
+    if ctx.is_deterministic() {
+        heuristics.clear();
     }
 
     // Unified move loop - works for both maximizing (White) and minimizing (Black)
@@ -143,9 +161,9 @@ fn find_best_move_internal(
     }
 
     // Opening book: if we have a book move in early game, play it immediately.
-    if get_order_book_enabled()
+    if ctx.get_order_book_enabled()
         && gs.full_move_number() <= 8
-            && let Some((bf, bt)) = book_pick(&gs) {
+            && let Some((bf, bt)) = book_pick(&gs, ctx.is_deterministic()) {
                 return Some((bf, bt, None, 0, 0));
             }
 
@@ -205,12 +223,20 @@ fn find_best_move_internal(
     };
 
     // Iterative Deepening + Aspiration windows at root (serial evaluation for stability)
-    let mut tt = tt_mutex.lock().unwrap();
     let mut _last_score: i32 = 0;
     let mut chosen: Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> = None;
 
     if ID_ITERATIONS_ENABLED {
+        let base_budget_ms = ctx.time_budget_ms();
+        let max_extra_ms = base_budget_ms.saturating_mul(PV_CHANGE_MAX_EXTRA_PCT_TIME) / 100;
+        let mut extra_used_ms: usize = 0;
+        let mut last_best_move: Option<((usize, usize), (usize, usize), Option<char>)> = None;
         for depth_now in 1..=effective_depth {
+            #[cfg(feature = "debug-search")]
+            {
+                eprintln!("\n========== ITERATIVE DEEPENING: depth {} of {} ==========", depth_now, effective_depth);
+                eprintln!("Side to move: {:?}", active_color);
+            }
             tt.next_age();
             // Reset aspiration window at the start of each iteration
             let mut window: i32 = ASP_WINDOW_INIT_CP;
@@ -218,31 +244,37 @@ fn find_best_move_internal(
             let should_collect = depth_now == effective_depth && all_move_scores.is_some();
             let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
                 probe_with_aspiration(
+                    ctx,
                     active_color,
                     &root_moves,
                     depth_now,
                     _last_score,
                     &mut window,
-                    &mut tt,
+                    tt,
                     &mut gs,
                     history,
+                    &mut heuristics,
                     if should_collect { all_move_scores.as_deref_mut() } else { None },
                 )
             } else {
                 evaluate_root_for_bounds(
+                    ctx,
                     active_color,
                     &root_moves,
                     depth_now,
                     MIN_EVAL_VALUE + 1,
                     MAX_EVAL_VALUE - 1,
-                    &mut tt,
+                    tt,
                     &mut gs,
                     history,
+                    &mut heuristics,
                     if should_collect { all_move_scores.as_deref_mut() } else { None },
                 )
             };
 
             if best_raw == SEARCH_ABORTED {
+                #[cfg(feature = "debug-search")]
+                eprintln!(">>> SEARCH ABORTED at depth {}", depth_now);
                 if chosen.is_none() {
                     let (bf, bt, bpromo) = root_moves[0];
                     chosen = Some((bf, bt, bpromo, 0, 1));
@@ -250,21 +282,49 @@ fn find_best_move_internal(
                 break;
             }
 
+            #[cfg(feature = "debug-search")]
+            {
+                let from_sq = crate::piece::as_square_str(bf);
+                let to_sq = crate::piece::as_square_str(bt);
+                eprintln!(">>> DEPTH {} COMPLETE: best={}{}{} raw={} adjusted={}",
+                    depth_now, from_sq, to_sq,
+                    bpromo.map(|c| c.to_string()).unwrap_or_default(),
+                    best_raw, best_adj);
+            }
+
+            if depth_now >= 2 {
+                if let Some((lf, lt, lp)) = last_best_move {
+                    if (lf, lt, lp) != (bf, bt, bpromo)
+                        && base_budget_ms > 0
+                        && extra_used_ms < max_extra_ms {
+                        let mut extend_ms = base_budget_ms / 2;
+                        if extend_ms > 500 { extend_ms = 500; }
+                        let remaining_extra = max_extra_ms.saturating_sub(extra_used_ms);
+                        if extend_ms > remaining_extra { extend_ms = remaining_extra; }
+                        if extend_ms > 0 {
+                            ctx.extend_time_budget_ms(extend_ms);
+                            extra_used_ms += extend_ms;
+                        }
+                    }
+                }
+                last_best_move = Some((bf, bt, bpromo));
+            } else {
+                last_best_move = Some((bf, bt, bpromo));
+            }
+
             _last_score = best_raw;
             // Emit PV/info for this iteration, including TT hashfull permille
             let hf = tt.hashfull_permille();
-            let pv = build_pv_for_root(&gs, bf, bt, bpromo, &tt, depth_now);
-            let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
-            emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
+            let pv = build_pv_for_root(&gs, bf, bt, bpromo, tt, depth_now);
+            ctx.emit_info(bf, bt, bpromo, best_raw, depth_now, pv, hf);
             chosen = Some((bf, bt, bpromo, best_adj, depth_now));
 
             // Reorder root moves: place best move from this iteration first for next iteration
-            if let Some(pos) = root_moves.iter().position(|&(f, t, p)| f == bf && t == bt && p == bpromo) {
-                if pos > 0 {
+            if let Some(pos) = root_moves.iter().position(|&(f, t, p)| f == bf && t == bt && p == bpromo)
+                && pos > 0 {
                     let best = root_moves.remove(pos);
                     root_moves.insert(0, best);
                 }
-            }
         }
     } else {
         // Single-depth Search without iterative deepening
@@ -273,27 +333,31 @@ fn find_best_move_internal(
         let mut window: i32 = ASP_WINDOW_INIT_CP;
         let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
             probe_with_aspiration(
+                ctx,
                 active_color,
                 &root_moves,
                 depth_now,
                 _last_score,
                 &mut window,
-                &mut tt,
+                tt,
                 &mut gs,
                 history,
+                &mut heuristics,
                 all_move_scores.as_deref_mut(),
             )
         } else {
             evaluate_root_for_bounds(
+                ctx,
                 active_color,
                 &root_moves,
                 depth_now,
                 MIN_EVAL_VALUE + 1,
                 MAX_EVAL_VALUE - 1,
-                &mut tt,
+                tt,
                 &mut gs,
                 history,
-                all_move_scores.as_deref_mut(),
+                &mut heuristics,
+                all_move_scores,
             )
         };
 
@@ -302,9 +366,8 @@ fn find_best_move_internal(
             chosen = Some((bf, bt, bpromo, 0, 1));
         } else {
             let hf = tt.hashfull_permille();
-            let pv = build_pv_for_root(&gs, bf, bt, bpromo, &tt, depth_now);
-            let white_persp_score = if active_color == Color::Black { -best_adj } else { best_adj };
-            emit_info(bf, bt, bpromo, white_persp_score, depth_now, pv, hf);
+            let pv = build_pv_for_root(&gs, bf, bt, bpromo, tt, depth_now);
+            ctx.emit_info(bf, bt, bpromo, best_raw, depth_now, pv, hf);
             chosen = Some((bf, bt, bpromo, best_adj, depth_now));
         }
     }
@@ -319,12 +382,11 @@ fn find_best_move_internal(
             // Apply evaluation noise if not in deterministic mode
             use crate::search::integration::playing_strength::strength_noise_sigma;
             use rand::{rng, Rng};
-            let apply_noise = !crate::search::is_deterministic() && playing_strength < 1000;
+            let apply_noise = !ctx.is_deterministic() && playing_strength < 1000;
             let sigma = if apply_noise { strength_noise_sigma(playing_strength) } else { 0 };
 
             for &(from, to, promo) in &root_moves {
                 // Try to get score from TT instead of re-evaluating
-                use crate::search::state::zobrist::compute_zobrist_full;
                 use crate::piece::piece_mover::PieceMover;
 
                 let mut temp_gs = gs;
@@ -340,29 +402,15 @@ fn find_best_move_internal(
 
                 if PieceMover::move_piece(&mut temp_gs, from, to, is_capture, promotion_piece) {
                     temp_gs.switch_player_turn();
-                    let key = compute_zobrist_full(
-                        temp_gs.board(),
-                        temp_gs.active_color(),
-                        &temp_gs.castling_rights(),
-                        temp_gs.en_passant_target(),
-                    );
-
                     // Look up in TT; if not found, use a heuristic estimate
-                    let score_raw = if let Some(entry) = tt.probe(key) {
-                        use crate::search::state::tt::from_tt_score;
-                        -from_tt_score(entry.score, 0) // Negate because it's from opponent's perspective
-                    } else {
-                        // Fallback: simple static evaluation if not in TT
-                        use crate::board::evaluator::evaluate_position;
-                        let eval = evaluate_position(temp_gs.board(), active_color);
-                        if active_color == Color::Black { -eval } else { eval }
-                    };
+                    let score_raw = score_raw_for_strength_move(&temp_gs, active_color, tt);
 
                     let mut adj = adjusted_root_eval_for_move(
                         gs.board(),
                         active_color,
                         from,
                         to,
+                        promo,
                         gs.half_move_clock(),
                         score_raw,
                         is_capture,
@@ -389,7 +437,11 @@ fn find_best_move_internal(
                     scored_with_promo.reverse();
                 }
 
-                if let Some((from, to, promo_opt)) = select_move_based_using_strength_promo(&scored_with_promo, playing_strength) {
+                if let Some((from, to, promo_opt)) = select_move_based_using_strength_promo(
+                    &scored_with_promo,
+                    playing_strength,
+                    ctx.is_deterministic(),
+                ) {
                     let sc_final = scored_with_promo
                         .iter()
                         .find(|e| e.0 == from && e.1 == to && e.2 == promo_opt)
@@ -413,9 +465,10 @@ fn find_best_move_internal(
 /// search enhancements, making it much faster than the previous implementation.
 /// The depth > 5 restriction has been removed.
 pub fn debug_rank_root_moves(
+    ctx: &SearchContext,
     game_state: &GameState,
     history: &History,
     depth: usize,
 ) -> Vec<(String, i32, i32)> {
-    find_best_move_with_ranking(game_state, history, depth)
+    find_best_move_with_ranking(ctx, game_state, history, depth)
 }

@@ -1,13 +1,23 @@
-use crate::piece::piece_mover::PieceMover;
 use crate::piece::pieces::{Color, Piece, PieceType};
+use crate::piece::move_validators::bishop_move_validator::is_valid_bishop_move;
+use crate::piece::move_validators::king_move_validator::is_valid_king_move;
+use crate::piece::move_validators::knight_move_validator::is_valid_knight_move;
+use crate::piece::move_validators::pawn_move_validator::is_valid_pawn_move;
+use crate::piece::move_validators::queen_move_validator::is_valid_queen_move;
+use crate::piece::move_validators::rook_move_validator::is_valid_rook_move;
 use crate::state::game_state::GameState;
 
 /// Generate target squares for a piece based on its type and position.
 /// Returns a vector of potential destination squares (not validated yet).
 #[inline]
-fn generate_piece_targets(piece_type: PieceType, from: (usize, usize), color: Color) -> Vec<(usize, usize)> {
+fn generate_piece_targets_into(
+    piece_type: PieceType,
+    from: (usize, usize),
+    color: Color,
+    targets: &mut Vec<(usize, usize)>,
+) {
     let (r, c) = from;
-    let mut targets = Vec::with_capacity(32);
+    targets.clear();
 
     match piece_type {
         PieceType::Knight => {
@@ -98,8 +108,6 @@ fn generate_piece_targets(piece_type: PieceType, from: (usize, usize), color: Co
             }
         }
     }
-
-    targets
 }
 
 /// Helper function to convert promotion char to PieceType
@@ -138,16 +146,125 @@ fn is_promotion(to: (usize, usize), active_color: Color) -> bool {
 /// This is a lightweight wrapper around the move + legality check to make the intent clear.
 #[inline]
 fn try_move_and_check_legality(
-    game_state: &GameState,
+    game_state: &mut GameState,
+    from: (usize, usize),
+    to: (usize, usize),
+    promo: Option<char>,
+    active_color: Color,
+) -> bool {
+    let u = game_state.make_move_fast(from, to, promo);
+    let in_check = game_state.mutable_board().is_side_in_check(active_color);
+    game_state.unmake_move_fast(u);
+    !in_check
+}
+
+#[inline]
+fn is_valid_piece_move(
+    game_state: &mut GameState,
+    piece_type: PieceType,
     from: (usize, usize),
     to: (usize, usize),
     is_capture: bool,
     promo_piece: Option<Piece>,
     active_color: Color,
 ) -> bool {
-    let mut gs_var = *game_state;
-    PieceMover::move_piece(&mut gs_var, from, to, is_capture, promo_piece)
-        && !gs_var.mutable_board().is_side_in_check(active_color)
+    match piece_type {
+        PieceType::Pawn => {
+            let ep = game_state.en_passant_target();
+            let board = game_state.mutable_board();
+            is_valid_pawn_move(board, from, to, is_capture, ep, active_color, promo_piece, false)
+        }
+        PieceType::Knight => {
+            let board = game_state.mutable_board();
+            is_valid_knight_move(board, from, to, false)
+        }
+        PieceType::Bishop => {
+            let board = game_state.mutable_board();
+            is_valid_bishop_move(board, from, to, false)
+        }
+        PieceType::Rook => {
+            let board = game_state.mutable_board();
+            is_valid_rook_move(board, from, to, false)
+        }
+        PieceType::Queen => {
+            let board = game_state.mutable_board();
+            is_valid_queen_move(board, from, to, false)
+        }
+        PieceType::King => is_valid_king_move(game_state, from, to),
+    }
+}
+
+fn piece_attacks_square(
+    game_state: &mut GameState,
+    from: (usize, usize),
+    to: (usize, usize),
+    piece_type: PieceType,
+    active_color: Color,
+) -> bool {
+    let board = game_state.mutable_board();
+    match piece_type {
+        PieceType::Pawn => {
+            let dr = match active_color {
+                Color::White => 1i32,
+                Color::Black => -1i32,
+            };
+            let rr = from.0 as i32 + dr;
+            if rr != to.0 as i32 {
+                return false;
+            }
+            let dc = (to.1 as i32 - from.1 as i32).abs();
+            dc == 1
+        }
+        PieceType::Knight => is_valid_knight_move(board, from, to, false),
+        PieceType::Bishop => is_valid_bishop_move(board, from, to, false),
+        PieceType::Rook => is_valid_rook_move(board, from, to, false),
+        PieceType::Queen => is_valid_queen_move(board, from, to, false),
+        PieceType::King => {
+            let dr = from.0.abs_diff(to.0);
+            let dc = from.1.abs_diff(to.1);
+            dr <= 1 && dc <= 1 && (dr != 0 || dc != 0)
+        }
+    }
+}
+
+fn checker_line_squares(
+    king: (usize, usize),
+    checker: (usize, usize),
+) -> Vec<(usize, usize)> {
+    let mut squares = Vec::new();
+    let dr = checker.0 as i32 - king.0 as i32;
+    let dc = checker.1 as i32 - king.1 as i32;
+    let step_r = dr.signum();
+    let step_c = dc.signum();
+
+    if dr == 0 || dc == 0 || dr.abs() == dc.abs() {
+        let mut r = king.0 as i32 + step_r;
+        let mut c = king.1 as i32 + step_c;
+        while (r, c) != (checker.0 as i32, checker.1 as i32) {
+            squares.push((r as usize, c as usize));
+            r += step_r;
+            c += step_c;
+        }
+    }
+
+    squares
+}
+
+fn generate_king_evasions(
+    game_state: &mut GameState,
+    from: (usize, usize),
+    active_color: Color,
+    out: &mut Vec<((usize, usize), (usize, usize), Option<char>)>,
+) {
+    let mut targets: Vec<(usize, usize)> = Vec::with_capacity(8);
+    generate_piece_targets_into(PieceType::King, from, active_color, &mut targets);
+    for to in targets {
+        let is_capture = game_state.board().get(to.0, to.1).is_some();
+        if !is_valid_piece_move(game_state, PieceType::King, from, to, is_capture, None, active_color) {
+            continue;
+        }
+        out.push((from, to, None));
+    }
 }
 
 pub fn find_all_valid_moves(
@@ -155,54 +272,221 @@ pub fn find_all_valid_moves(
 ) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
     let mut result: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::new();
     let active_color = game_state.active_color();
+    let en_passant_target = game_state.en_passant_target();
+    let mut targets: Vec<(usize, usize)> = Vec::with_capacity(32);
 
-    let mut pieces_to_move = Vec::new();
     for r in 0..8 {
         for c in 0..8 {
-            if let Some(p) = game_state.board().get(r, c)
-                && p.get_color() == active_color {
-                    pieces_to_move.push(((r, c), p.get_type()));
-                }
-        }
-    }
-
-    let en_passant_target = game_state.en_passant_target();
-
-    for (from, piece_type) in pieces_to_move {
-        // Generate piece-specific target squares instead of checking all 64 squares
-        let targets = generate_piece_targets(piece_type, from, active_color);
-
-        for to in targets {
-            let target_piece = game_state.board().get(to.0, to.1);
-            let is_capture = target_piece.is_some()
-                || (piece_type == PieceType::Pawn
-                    && en_passant_target.is_some()
-                    && to == en_passant_target.unwrap());
-
-            if !game_state.move_from_and_to_validation_check(
-                from,
-                to,
-                is_capture,
-                piece_type == PieceType::Pawn,
-            ) {
+            let piece = match game_state.board().get(r, c) {
+                Some(p) => p,
+                None => continue,
+            };
+            if piece.get_color() != active_color {
                 continue;
             }
 
-            let is_pawn_promotion = piece_type == PieceType::Pawn && is_promotion(to, active_color);
+            let from = (r, c);
+            let piece_type = piece.get_type();
 
-            if is_pawn_promotion {
-                // Generate all 4 promotion options and filter by legality
-                let promo_chars = ['q', 'r', 'b', 'n'];
-                for &pc in promo_chars.iter() {
-                    let promo_piece = Some(Piece::new(promo_char_to_piece_type(pc), active_color));
-                    if try_move_and_check_legality(game_state, from, to, is_capture, promo_piece, active_color) {
-                        result.push((from, to, Some(pc)));
+            // Generate piece-specific target squares instead of checking all 64 squares
+            generate_piece_targets_into(piece_type, from, active_color, &mut targets);
+
+            for to in targets.iter().copied() {
+                let target_piece = game_state.board().get(to.0, to.1);
+                let is_capture = target_piece.is_some()
+                    || (piece_type == PieceType::Pawn
+                        && en_passant_target.is_some()
+                        && to == en_passant_target.unwrap());
+
+                if !game_state.move_from_and_to_validation_check(
+                    from,
+                    to,
+                    is_capture,
+                    piece_type == PieceType::Pawn,
+                ) {
+                    continue;
+                }
+
+                let is_pawn_promotion = piece_type == PieceType::Pawn && is_promotion(to, active_color);
+
+                if is_pawn_promotion {
+                    // Generate all 4 promotion options and filter by legality
+                    let promo_chars = ['q', 'r', 'b', 'n'];
+                    for &pc in promo_chars.iter() {
+                        let promo_piece = Some(Piece::new(promo_char_to_piece_type(pc), active_color));
+                        if !is_valid_piece_move(game_state, piece_type, from, to, is_capture, promo_piece, active_color) {
+                            continue;
+                        }
+                        if piece_type == PieceType::King
+                            || try_move_and_check_legality(game_state, from, to, Some(pc), active_color)
+                        {
+                            result.push((from, to, Some(pc)));
+                        }
+                    }
+                } else {
+                    // Regular move - check legality
+                    if !is_valid_piece_move(game_state, piece_type, from, to, is_capture, None, active_color) {
+                        continue;
+                    }
+                    if piece_type == PieceType::King
+                        || try_move_and_check_legality(game_state, from, to, None, active_color)
+                    {
+                        result.push((from, to, None));
                     }
                 }
-            } else {
-                // Regular move - check legality
-                if try_move_and_check_legality(game_state, from, to, is_capture, None, active_color) {
+            }
+        }
+    }
+    result
+}
+
+/// Generate only legal check evasion moves for the active side.
+pub fn find_all_evasion_moves(
+    game_state: &mut GameState,
+) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
+    let active_color = game_state.active_color();
+    if !game_state.mutable_board().is_side_in_check(active_color) {
+        return find_all_valid_moves(game_state);
+    }
+
+    if game_state.en_passant_target().is_some() {
+        return find_all_valid_moves(game_state);
+    }
+
+    let king_sq = game_state.board().get_king_location(active_color);
+    let mut checkers: Vec<((usize, usize), PieceType)> = Vec::new();
+    for r in 0..8 {
+        for c in 0..8 {
+            let piece = match game_state.board().get(r, c) {
+                Some(p) => p,
+                None => continue,
+            };
+            if piece.get_color() == active_color {
+                continue;
+            }
+            if piece_attacks_square(game_state, (r, c), king_sq, piece.get_type(), piece.get_color()) {
+                checkers.push(((r, c), piece.get_type()));
+            }
+        }
+    }
+
+    let mut result: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::new();
+    let king_from = king_sq;
+    generate_king_evasions(game_state, king_from, active_color, &mut result);
+
+    if checkers.len() != 1 {
+        return result;
+    }
+
+    let checker_sq = checkers[0].0;
+    let checker_pt = checkers[0].1;
+    let mut block_squares = Vec::new();
+    if matches!(checker_pt, PieceType::Bishop | PieceType::Rook | PieceType::Queen) {
+        block_squares = checker_line_squares(king_sq, checker_sq);
+    }
+
+    let mut targets: Vec<(usize, usize)> = Vec::with_capacity(32);
+    for r in 0..8 {
+        for c in 0..8 {
+            let piece = match game_state.board().get(r, c) {
+                Some(p) => p,
+                None => continue,
+            };
+            if piece.get_color() != active_color || piece.get_type() == PieceType::King {
+                continue;
+            }
+
+            let from = (r, c);
+            let piece_type = piece.get_type();
+            generate_piece_targets_into(piece_type, from, active_color, &mut targets);
+            for to in targets.iter().copied() {
+                if to != checker_sq && !block_squares.contains(&to) {
+                    continue;
+                }
+                let target_piece = game_state.board().get(to.0, to.1);
+                let is_capture = target_piece.is_some();
+                if !is_valid_piece_move(game_state, piece_type, from, to, is_capture, None, active_color) {
+                    continue;
+                }
+                if piece_type == PieceType::King
+                    || try_move_and_check_legality(game_state, from, to, None, active_color)
+                {
                     result.push((from, to, None));
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// Generate only capturing moves (including en passant) and promotions.
+pub fn find_all_capture_moves(
+    game_state: &mut GameState,
+) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
+    let mut result: Vec<((usize, usize), (usize, usize), Option<char>)> = Vec::new();
+    let active_color = game_state.active_color();
+    let en_passant_target = game_state.en_passant_target();
+    let mut targets: Vec<(usize, usize)> = Vec::with_capacity(32);
+
+    for r in 0..8 {
+        for c in 0..8 {
+            let piece = match game_state.board().get(r, c) {
+                Some(p) => p,
+                None => continue,
+            };
+            if piece.get_color() != active_color {
+                continue;
+            }
+
+            let from = (r, c);
+            let piece_type = piece.get_type();
+            generate_piece_targets_into(piece_type, from, active_color, &mut targets);
+
+            for to in targets.iter().copied() {
+                let is_ep = piece_type == PieceType::Pawn
+                    && en_passant_target.is_some()
+                    && to == en_passant_target.unwrap()
+                    && game_state.board().get(to.0, to.1).is_none();
+                let target_piece = game_state.board().get(to.0, to.1);
+                let is_capture = target_piece.is_some() || is_ep;
+                let is_pawn_promotion = piece_type == PieceType::Pawn && is_promotion(to, active_color);
+
+                if !is_capture && !is_pawn_promotion {
+                    continue;
+                }
+
+                if !game_state.move_from_and_to_validation_check(
+                    from,
+                    to,
+                    is_capture,
+                    piece_type == PieceType::Pawn,
+                ) {
+                    continue;
+                }
+
+                if is_pawn_promotion {
+                    let promo_chars = ['q', 'r', 'b', 'n'];
+                    for &pc in promo_chars.iter() {
+                        let promo_piece = Some(Piece::new(promo_char_to_piece_type(pc), active_color));
+                        if !is_valid_piece_move(game_state, piece_type, from, to, is_capture, promo_piece, active_color) {
+                            continue;
+                        }
+                        if piece_type == PieceType::King
+                            || try_move_and_check_legality(game_state, from, to, Some(pc), active_color)
+                        {
+                            result.push((from, to, Some(pc)));
+                        }
+                    }
+                } else {
+                    if !is_valid_piece_move(game_state, piece_type, from, to, is_capture, None, active_color) {
+                        continue;
+                    }
+                    if piece_type == PieceType::King
+                        || try_move_and_check_legality(game_state, from, to, None, active_color)
+                    {
+                        result.push((from, to, None));
+                    }
                 }
             }
         }
@@ -221,28 +505,29 @@ pub struct PerftMove {
 
 /// Fill `out` with all legal moves for the active side, including capture flag and promotion marker.
 /// This mirrors `find_all_valid_moves` but avoids allocating a new Vec every call and returns flags.
-pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<PerftMove>) {
+pub fn find_all_valid_moves_into_perft(game_state: &mut GameState, out: &mut Vec<PerftMove>) {
     out.clear();
-    let board = game_state.board();
     let active_color = game_state.active_color();
+    let en_passant_target = game_state.en_passant_target();
+    let mut targets: Vec<(usize, usize)> = Vec::with_capacity(32);
 
     for r in 0..8 {
         for c in 0..8 {
-            let piece = match board.get(r, c) { Some(p) => p, None => continue };
+            let piece = match game_state.board().get(r, c) { Some(p) => p, None => continue };
             if piece.get_color() != active_color { continue; }
 
             let from = (r, c);
             let piece_type = piece.get_type();
 
             // Generate piece-specific target squares instead of checking all 64 squares
-            let targets = generate_piece_targets(piece_type, from, active_color);
+            generate_piece_targets_into(piece_type, from, active_color, &mut targets);
 
-            for to in targets {
-                let target_piece_is_some = board.get(to.0, to.1).is_some();
+            for to in targets.iter().copied() {
+                let target_piece_is_some = game_state.board().get(to.0, to.1).is_some();
                 let is_capture = target_piece_is_some
                     || (piece_type == PieceType::Pawn
-                        && game_state.en_passant_target().is_some()
-                        && to == game_state.en_passant_target().unwrap());
+                        && en_passant_target.is_some()
+                        && to == en_passant_target.unwrap());
                 let is_pawn_move = piece_type == PieceType::Pawn;
                 if !game_state.move_from_and_to_validation_check(
                     from, to, is_capture, is_pawn_move,
@@ -260,7 +545,12 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                     ];
                     for pt in promo_types.iter() {
                         let promo_piece = Some(Piece::new(*pt, active_color));
-                        if try_move_and_check_legality(game_state, from, to, is_capture, promo_piece, active_color) {
+                        if !is_valid_piece_move(game_state, piece_type, from, to, is_capture, promo_piece, active_color) {
+                            continue;
+                        }
+                        if piece_type == PieceType::King
+                            || try_move_and_check_legality(game_state, from, to, piece_type_to_promo_char(*pt), active_color)
+                        {
                             out.push(PerftMove {
                                 from,
                                 to,
@@ -271,7 +561,12 @@ pub fn find_all_valid_moves_into_perft(game_state: &GameState, out: &mut Vec<Per
                     }
                 } else {
                     // Regular move - check legality
-                    if try_move_and_check_legality(game_state, from, to, is_capture, None, active_color) {
+                    if !is_valid_piece_move(game_state, piece_type, from, to, is_capture, None, active_color) {
+                        continue;
+                    }
+                    if piece_type == PieceType::King
+                        || try_move_and_check_legality(game_state, from, to, None, active_color)
+                    {
                         out.push(PerftMove { from, to, is_capture, promo: None });
                     }
                 }
@@ -298,7 +593,7 @@ pub fn _dump_all_valid_moves(
     if to_san {
         let mut parts: Vec<String> = Vec::with_capacity(moves.len());
         for (from, to, promo) in moves {
-            if let Some(s) = convert_move_to_san(*game_state, Some((from, to, promo))) {
+            if let Some(s) = convert_move_to_san(game_state, Some((from, to, promo))) {
                 parts.push(s);
             } else {
                 // fallback to coord if SAN conversion fails

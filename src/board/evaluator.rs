@@ -1,78 +1,30 @@
-use crate::board::Board;
 use crate::board::attack_maps::build_attack_maps;
-pub(crate) use crate::board::pst::{tapered_eval as taper_general};
+use crate::board::evaluation_helpers::{
+    apply_color_score, chebyshev_dist, count_knight_targets, count_slider_targets, find_king,
+    get_piece_type, is_color, is_piece, material_value, square_attacked_by_enemy_pawn,
+};
+use crate::board::Board;
 use crate::board::pst::*;
-use crate::piece::pieces::{Color, PieceType};
+use crate::piece::pieces::{piece_value_cp, Color, PieceType};
+
+pub use crate::board::evaluation_helpers::{FileClearance, PawnFileCounts};
+pub(crate) use crate::board::evaluation_helpers::taper_general;
 
 pub const MIN_EVAL_VALUE: i32 = i32::MIN + 100_000;
 pub const MAX_EVAL_VALUE: i32 = i32::MAX - 100_000;
 
-// Material scores (centipawns)
-const PAWN: i32 = 100;
-const KNIGHT: i32 = 320;
-const BISHOP: i32 = 330;
-const ROOK: i32 = 500;
-const QUEEN: i32 = 900;
-const KING: i32 = 0; // King material is not counted; PST handles its safety/activity
+pub const MATE_VALUE: i32 = 30_000;
+
+const THREAT_MIN_GAIN: i32 = 150;
+const THREAT_BASE_BONUS: i32 = 6;
+const THREAT_VALUE_DIV: i32 = 20;
+const THREAT_MAX_BONUS: i32 = 40;
 
 // Phase weights for game phase calculation (total = 24 at start)
 const PHASE_KNIGHT: i32 = 1;
 const PHASE_BISHOP: i32 = 1;
 const PHASE_ROOK: i32 = 2;
 const PHASE_QUEEN: i32 = 4;
-
-pub struct PawnFileCounts {
-    pub white: [i32; 8],
-    pub black: [i32; 8],
-}
-
-pub struct FileClearance {
-    /// For each file, stores ranges that are clear of pieces
-    /// Used for rook evaluation optimization
-    pub files: [Vec<(usize, usize)>; 8],
-}
-
-impl FileClearance {
-    pub fn new(board: &Board) -> Self {
-        let mut files = [const { Vec::new() }; 8];
-
-        for col in 0..8 {
-            let mut clear_start = 0;
-            for row in 0..8 {
-                if board.get(row, col).is_some() {
-                    if row > clear_start {
-                        files[col].push((clear_start, row));
-                    }
-                    clear_start = row + 1;
-                } else if row == 7 && clear_start <= 7 {
-                    files[col].push((clear_start, 8));
-                }
-            }
-            if clear_start < 8 {
-                files[col].push((clear_start, 8));
-            }
-        }
-
-        Self { files }
-    }
-
-    #[inline]
-    pub fn is_clear_between(&self, r1: usize, r2: usize, file: usize) -> bool {
-        let start = r1.min(r2) + 1;
-        let end = r1.max(r2);
-
-        if start >= end {
-            return true;
-        }
-
-        for &(clear_start, clear_end) in &self.files[file] {
-            if clear_start <= start && clear_end >= end {
-                return true;
-            }
-        }
-        false
-    }
-}
 
 // ============================================================
 // PUBLIC API
@@ -104,95 +56,9 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     score += ctx.evaluate_space();
     score += ctx.evaluate_global_features();
     score += ctx.evaluate_piece_interactions();
+    score += ctx.evaluate_threats();
 
     apply_drawish_tweaks(&ctx.stats, score)
-}
-
-// ============================================================
-// HELPER FUNCTIONS
-// ============================================================
-
-#[inline]
-pub(crate) fn is_piece(board: &Board, r: usize, c: usize, color: Color, pt: PieceType) -> bool {
-    matches!(board.get(r, c), Some(p) if p.get_color() == color && p.get_type() == pt)
-}
-
-#[inline]
-pub(crate) fn is_color(board: &Board, r: usize, c: usize, color: Color) -> bool {
-    matches!(board.get(r, c), Some(p) if p.get_color() == color)
-}
-
-#[inline]
-pub(crate) fn get_piece_type(board: &Board, r: usize, c: usize) -> Option<PieceType> {
-    board.get(r, c).map(|p| p.get_type())
-}
-
-#[inline]
-pub(crate) fn material_value(piece: PieceType) -> i32 {
-    match piece {
-        PieceType::Pawn => PAWN,
-        PieceType::Knight => KNIGHT,
-        PieceType::Bishop => BISHOP,
-        PieceType::Rook => ROOK,
-        PieceType::Queen => QUEEN,
-        PieceType::King => KING,
-    }
-}
-
-#[inline]
-pub(crate) fn square_attacked_by_enemy_pawn(board: &Board, r: usize, c: usize, enemy: Color) -> bool {
-    match enemy {
-        Color::White => {
-            if r > 0 {
-                if c > 0 && is_piece(board, r-1, c-1, Color::White, PieceType::Pawn) { return true; }
-                if c < 7 && is_piece(board, r-1, c+1, Color::White, PieceType::Pawn) { return true; }
-            }
-        }
-        Color::Black => {
-            if r < 7 {
-                if c > 0 && is_piece(board, r+1, c-1, Color::Black, PieceType::Pawn) { return true; }
-                if c < 7 && is_piece(board, r+1, c+1, Color::Black, PieceType::Pawn) { return true; }
-            }
-        }
-    }
-    false
-}
-
-#[inline]
-pub(crate) fn find_king(board: &Board, color: Color) -> Option<(usize, usize)> {
-    for r in 0..8 {
-        for c in 0..8 {
-            if let Some(p) = board.get(r, c)
-                && p.get_color() == color
-                && p.get_type() == PieceType::King
-            {
-                return Some((r, c));
-            }
-        }
-    }
-    None
-}
-
-#[inline]
-pub(crate) fn opponent(color: Color) -> Color {
-    match color {
-        Color::White => Color::Black,
-        Color::Black => Color::White,
-    }
-}
-
-#[inline]
-pub(crate) fn chebyshev_dist(a: (i32, i32), b: (i32, i32)) -> i32 {
-    (a.0 - b.0).abs().max((a.1 - b.1).abs())
-}
-
-/// Apply score from White's perspective (+) or Black's perspective (-)
-#[inline]
-fn apply_color_score(score: i32, color: Color) -> i32 {
-    match color {
-        Color::White => score,
-        Color::Black => -score,
-    }
 }
 
 // ============================================================
@@ -362,7 +228,7 @@ impl<'a> EvalContext<'a> {
                 self.board, row, col, color, self.phase()
             ),
             PieceType::Bishop => val += crate::board::evaluators::evaluate_bishops::evaluate_bishop(
-                row, col, color, self.phase()
+                self.board, row, col, color, self.phase()
             ),
             PieceType::Rook => val += crate::board::evaluators::evaluate_rooks::evaluate_rook(
                 self.board, row, col, color, self.phase(), self.eg, self.stats.white_pawns, self.stats.black_pawns, &self.file_clearance
@@ -574,6 +440,15 @@ impl<'a> EvalContext<'a> {
         );
         score += w_storm - b_storm;
 
+        // Pawn majority bonus
+        let w_majority = crate::board::evaluators::evaluate_pawns::pawn_majority_bonus(
+            &self.pawn_counts, Color::White, self.phase()
+        );
+        let b_majority = crate::board::evaluators::evaluate_pawns::pawn_majority_bonus(
+            &self.pawn_counts, Color::Black, self.phase()
+        );
+        score += w_majority - b_majority;
+
         // Bishop pair
         if self.stats.drawish_material.white_bishops >= 2 {
             score += self.taper(36, 24);
@@ -593,11 +468,15 @@ impl<'a> EvalContext<'a> {
             let king_file_bonus = crate::board::evaluators::evaluate_rooks::rook_on_enemy_king_file_bonus(
                 self.board, color
             );
+            let alignment_bonus = crate::board::evaluators::evaluate_rooks::rook_queen_alignment_bonus(
+                self.board, color, &self.pawn_counts
+            );
             let queen_bonus = crate::board::evaluators::evaluate_queens::queen_on_semi_open_file_bonus(
                 self.board, color, &self.pawn_counts
             );
 
-            let rook_queen_score = (rook_act + doubled_bonus + king_file_bonus + queen_bonus) * self.phase() / 24;
+            let rook_queen_score = (rook_act + doubled_bonus + king_file_bonus + alignment_bonus + queen_bonus)
+                * self.phase() / 24;
             score += apply_color_score(rook_queen_score, color);
         }
 
@@ -608,7 +487,7 @@ impl<'a> EvalContext<'a> {
                 Color::Black => self.king_b,
             };
             let safety = crate::board::evaluators::evaluate_king::king_safety(
-                self.board, color, self.phase(), king_pos
+                self.board, color, self.phase(), king_pos, &self.pawn_counts
             );
             let activity = crate::board::evaluators::evaluate_king::king_activity_endgame(king_pos);
             let shelter = crate::board::evaluators::evaluate_king::evaluate_king_shelter_patterns(
@@ -753,6 +632,140 @@ impl<'a> EvalContext<'a> {
         score
     }
 
+    fn evaluate_threats(&self) -> i32 {
+        let mut score = 0;
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(p) = self.board.get(r, c) {
+                    let bonus = self.threat_bonus_for_piece(r, c, p.get_color(), p.get_type());
+                    score += apply_color_score(bonus, p.get_color());
+                }
+            }
+        }
+        score
+    }
+
+    fn threat_bonus_for_piece(&self, r: usize, c: usize, color: Color, pt: PieceType) -> i32 {
+        if pt == PieceType::King {
+            return 0;
+        }
+        if !self.is_attacker_safe(r, c, color) {
+            return 0;
+        }
+
+        let attacker_value = piece_value_cp(pt);
+        let mut best = 0i32;
+
+        match pt {
+            PieceType::Pawn => {
+                let dir = if color == Color::White { 1 } else { -1 };
+                for dc in [-1i32, 1] {
+                    let tr = r as i32 + dir;
+                    let tc = c as i32 + dc;
+                    if let Some(bonus) = self.threat_bonus_from_target(color, attacker_value, tr, tc) {
+                        best = best.max(bonus);
+                    }
+                }
+            }
+            PieceType::Knight => {
+                for (dr, dc) in [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)] {
+                    let tr = r as i32 + dr;
+                    let tc = c as i32 + dc;
+                    if let Some(bonus) = self.threat_bonus_from_target(color, attacker_value, tr, tc) {
+                        best = best.max(bonus);
+                    }
+                }
+            }
+            PieceType::Bishop => {
+                best = best.max(self.threat_bonus_from_slider(color, attacker_value, r, c, &[(1, 1), (1, -1), (-1, 1), (-1, -1)]));
+            }
+            PieceType::Rook => {
+                best = best.max(self.threat_bonus_from_slider(color, attacker_value, r, c, &[(1, 0), (-1, 0), (0, 1), (0, -1)]));
+            }
+            PieceType::Queen => {
+                best = best.max(self.threat_bonus_from_slider(color, attacker_value, r, c, &[
+                    (1, 1), (1, -1), (-1, 1), (-1, -1),
+                    (1, 0), (-1, 0), (0, 1), (0, -1),
+                ]));
+            }
+            PieceType::King => {}
+        }
+
+        (best * self.phase()) / 24
+    }
+
+    fn threat_bonus_from_slider(
+        &self,
+        color: Color,
+        attacker_value: i32,
+        r: usize,
+        c: usize,
+        dirs: &[(i32, i32)],
+    ) -> i32 {
+        let mut best = 0i32;
+        for (dr, dc) in dirs {
+            let mut tr = r as i32 + dr;
+            let mut tc = c as i32 + dc;
+            while (0..8).contains(&tr) && (0..8).contains(&tc) {
+                if let Some(bonus) = self.threat_bonus_from_target(color, attacker_value, tr, tc) {
+                    best = best.max(bonus);
+                }
+                if self.board.get(tr as usize, tc as usize).is_some() {
+                    break;
+                }
+                tr += dr;
+                tc += dc;
+            }
+        }
+        best
+    }
+
+    fn threat_bonus_from_target(
+        &self,
+        color: Color,
+        attacker_value: i32,
+        tr: i32,
+        tc: i32,
+    ) -> Option<i32> {
+        if !(0..8).contains(&tr) || !(0..8).contains(&tc) {
+            return None;
+        }
+        let tr = tr as usize;
+        let tc = tc as usize;
+        let target = self.board.get(tr, tc)?;
+        if target.get_color() == color {
+            return None;
+        }
+        if target.get_type() == PieceType::King {
+            return None;
+        }
+
+        let defended_by_enemy = match color {
+            Color::White => self.att_b[tr][tc],
+            Color::Black => self.att_w[tr][tc],
+        };
+        if !defended_by_enemy {
+            return None;
+        }
+
+        let target_value = piece_value_cp(target.get_type());
+        let gain = target_value - attacker_value;
+        if gain < THREAT_MIN_GAIN {
+            return None;
+        }
+
+        let bonus = (THREAT_BASE_BONUS + gain / THREAT_VALUE_DIV).min(THREAT_MAX_BONUS);
+        Some(bonus)
+    }
+
+    fn is_attacker_safe(&self, r: usize, c: usize, color: Color) -> bool {
+        let (attacked_by_opp, defended_by_own) = match color {
+            Color::White => (self.att_b[r][c], self.att_w[r][c]),
+            Color::Black => (self.att_w[r][c], self.att_b[r][c]),
+        };
+        defended_by_own || !attacked_by_opp
+    }
+
     /// Check if two pieces form a battery on a file or rank (no pieces between them).
     #[inline]
     fn is_battery_on_line(&self, r1: usize, c1: usize, r2: usize, c2: usize) -> bool {
@@ -805,50 +818,6 @@ impl<'a> EvalContext<'a> {
     fn taper(&self, mg: i32, eg: i32) -> i32 {
         taper_general(mg, eg, self.phase())
     }
-}
-
-// ============================================================
-// MOBILITY HELPERS
-// ============================================================
-
-#[inline]
-fn count_knight_targets(board: &Board, r: usize, c: usize, color: Color) -> usize {
-    const K: [(i32,i32);8] = [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)];
-    let mut n = 0usize;
-    for (dr,dc) in K {
-        let nr = r as i32 + dr;
-        let nc = c as i32 + dc;
-        if (0..8).contains(&nr) && (0..8).contains(&nc) {
-            match board.get(nr as usize, nc as usize) {
-                None => n += 1,
-                Some(tp) if tp.get_color() != color => n += 1,
-                _ => {}
-            }
-        }
-    }
-    n
-}
-
-#[inline]
-fn count_slider_targets(board: &Board, r: usize, c: usize, color: Color, dirs: &[(i32,i32)]) -> usize {
-    let mut n = 0usize;
-    for (dr,dc) in dirs.iter() {
-        let mut nr = r as i32 + dr;
-        let mut nc = c as i32 + dc;
-        while (0..8).contains(&nr) && (0..8).contains(&nc) {
-            if let Some(tp) = board.get(nr as usize, nc as usize) {
-                if tp.get_color() != color {
-                    n += 1;
-                }
-                break;
-            } else {
-                n += 1;
-            }
-            nr += dr;
-            nc += dc;
-        }
-    }
-    n
 }
 
 // ============================================================

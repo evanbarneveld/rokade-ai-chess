@@ -6,15 +6,29 @@ use crate::search::management::root_moves::{adjusted_root_eval_for_move, evaluat
 use crate::search::state::tt::{decode_move, TranspositionTable};
 use crate::search::state::zobrist::compute_zobrist_full;
 use crate::state::castling::CastlingRights;
-use crate::search::{is_parallel_search};
+use crate::search::context::SearchContext;
+use crate::search::evaluation::heuristics::SearchHeuristics;
 use crate::state::game_state::GameState;
 use rayon::prelude::*;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
-use crate::search::core::advanced_search::SEARCH_ABORTED;
+use crate::search::core::advanced_search::{QUIESCENCE_ENABLED, SEARCH_ABORTED};
 
 // Root parallelization settings
 const ROOT_PARALLEL_MIN_DEPTH: usize = 6;
 const ROOT_PARALLEL_MIN_MOVES: usize = 4;
+
+#[inline]
+pub(crate) fn has_search_aborted(results: &[((usize, usize), (usize, usize), Option<char>, i32, i32)]) -> bool {
+    results.iter().any(|r| r.4 == SEARCH_ABORTED)
+}
+
+static TEST_SLEEP_AFTER_PV_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+#[inline]
+pub(crate) fn set_test_sleep_after_pv_ms(ms: u64) {
+    TEST_SLEEP_AFTER_PV_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
 
 #[inline]
 pub(crate) fn reorder_with_tt_hint(
@@ -37,14 +51,16 @@ pub(crate) fn reorder_with_tt_hint(
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn evaluate_root_for_bounds(
+    ctx: &SearchContext,
     active_color: Color,
     root_moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
     depth_now: usize,
     a: i32,
     b: i32,
-    tt: &mut TranspositionTable,
+    tt: &TranspositionTable,
     game_state: &mut GameState,
     history: &History,
+    heuristics: &mut SearchHeuristics,
     mut collect_all_scores: Option<&mut Vec<(((usize, usize), (usize, usize), Option<char>), i32, i32)>>,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
     let mut best_from_to_promo: Option<((usize, usize), (usize, usize), Option<char>)> = None;
@@ -89,7 +105,7 @@ pub(crate) fn evaluate_root_for_bounds(
         });
     }
 
-    let enable_parallel = is_parallel_search()
+    let enable_parallel = ctx.is_parallel_search()
         && depth_now >= ROOT_PARALLEL_MIN_DEPTH
         && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
     if enable_parallel {
@@ -99,6 +115,8 @@ pub(crate) fn evaluate_root_for_bounds(
         let pv_score_raw;
         {
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                ctx,
+                heuristics,
                 game_state,
                 pv_from,
                 pv_to,
@@ -119,6 +137,7 @@ pub(crate) fn evaluate_root_for_bounds(
                 active_color,
                 pv_from,
                 pv_to,
+                pv_promo,
                 game_state.half_move_clock(),
                 score_raw,
                 is_capture,
@@ -137,19 +156,25 @@ pub(crate) fn evaluate_root_for_bounds(
             collector.push(((pv_from, pv_to, pv_promo), pv_adjusted, pv_score_raw));
         }
 
-        // 2) Search the remaining moves in parallel with per-task local TT to avoid contention
-        // reuse shared board reference in parallel (read-only access)
+        let ms = TEST_SLEEP_AFTER_PV_MS.load(std::sync::atomic::Ordering::Relaxed);
+        if ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+
+        // 2) Search the remaining moves in parallel using the shared lock-free TT
+        // All threads share the same TT, enabling them to benefit from each other's work
         let a_loc = a;
         let b_loc = b;
         let side = active_color;
         let parallel_results: Vec<_> = ordered[1..]
             .par_iter()
             .map(|&(from, to, promo)| {
-                // local TT per task
-                let mut local_tt = TranspositionTable::new_with_default_size();
                 // WE MUST CLONE game_state for parallel tasks
                 let mut local_gs = *game_state;
+                let mut local_heuristics = SearchHeuristics::new(128);
                 let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                    ctx,
+                    &mut local_heuristics,
                     &mut local_gs,
                     from,
                     to,
@@ -157,7 +182,7 @@ pub(crate) fn evaluate_root_for_bounds(
                     depth_now,
                     a_loc,
                     b_loc,
-                    &mut local_tt,
+                    tt,  // Use shared lock-free TT
                     history,
                 );
 
@@ -171,6 +196,7 @@ pub(crate) fn evaluate_root_for_bounds(
                     side,
                     from,
                     to,
+                    promo,
                     local_gs.half_move_clock(),
                     score_raw,
                     is_capture,
@@ -191,12 +217,14 @@ pub(crate) fn evaluate_root_for_bounds(
             })
             .collect();
 
+        if has_search_aborted(&parallel_results) {
+            return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
+        }
+
         // Collect all parallel move scores if requested
         if let Some(collector) = collect_all_scores.as_deref_mut() {
             for &(from, to, promo, adj, raw) in &parallel_results {
-                if raw != SEARCH_ABORTED {
-                    collector.push(((from, to, promo), adj, raw));
-                }
+                collector.push(((from, to, promo), adj, raw));
             }
         }
 
@@ -227,9 +255,6 @@ pub(crate) fn evaluate_root_for_bounds(
 
         // Update best with parallel results if better
         let (pf, pt, ppromo, padj, praw) = results;
-        if praw == SEARCH_ABORTED {
-            return (((0, 0), (0, 0), None), SEARCH_ABORTED, SEARCH_ABORTED);
-        }
         // Ignore identity placeholder
         if !(pf == (0, 0) && pt == (0, 0)) {
             let better = if side == Color::White {
@@ -247,6 +272,8 @@ pub(crate) fn evaluate_root_for_bounds(
         // Search sequentially over root moves
         for &(from, to, promo) in &ordered {
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
+                ctx,
+                heuristics,
                 game_state,
                 from,
                 to,
@@ -268,6 +295,7 @@ pub(crate) fn evaluate_root_for_bounds(
                 active_color,
                 from,
                 to,
+                promo,
                 game_state.half_move_clock(),
                 score_raw,
                 is_capture,
@@ -290,6 +318,17 @@ pub(crate) fn evaluate_root_for_bounds(
                 collector.push(((from, to, promo), adjusted, score_raw));
             }
 
+            // Debug: show each root move with raw and adjusted scores
+            #[cfg(feature = "debug-search")] {
+                let from_sq = crate::piece::as_square_str(from);
+                let to_sq = crate::piece::as_square_str(to);
+                let promo_str = promo.map(|c| c.to_string()).unwrap_or_default();
+                let delta = adjusted - score_raw;
+                let delta_str = if delta >= 0 { format!("+{}", delta) } else { format!("{}", delta) };
+                eprintln!("[ROOT] {}{}{}: raw={} adj={} ({})",
+                    from_sq, to_sq, promo_str, score_raw, adjusted, delta_str);
+            }
+
             // Track best
             // Adjustments are in White-perspective: White maximizes, Black minimizes
             let better = if active_color == Color::White {
@@ -299,17 +338,29 @@ pub(crate) fn evaluate_root_for_bounds(
             };
 
             if better || best_from_to_promo.is_none() {
+                #[cfg(feature = "debug-search")] {
+                    if best_from_to_promo.is_some() {
+                        let from_sq = crate::piece::as_square_str(from);
+                        let to_sq = crate::piece::as_square_str(to);
+                        eprintln!("[ROOT] ★ NEW BEST ROOT MOVE: {}{} adj={}",
+                                  from_sq, to_sq, adjusted);
+                    }
+                }
                 best_from_to_promo = Some((from, to, promo));
                 best_adjusted = adjusted;
                 best_score_raw = score_raw;
             }
 
             // Aspiration cutoffs help ordering mid-loop too
-            if active_color == Color::White && score_raw >= b {
-                break;
-            }
-            if active_color == Color::Black && score_raw <= a {
-                break;
+            // Only apply when quiescence is enabled, as disabled quiescence can cause
+            // inflated raw scores for captures that trigger premature cutoffs
+            if QUIESCENCE_ENABLED {
+                if active_color == Color::White && score_raw >= b {
+                    break;
+                }
+                if active_color == Color::Black && score_raw <= a {
+                    break;
+                }
             }
         }
     }
@@ -364,3 +415,4 @@ pub(crate) fn root_move_order_bias(board: &Board, side: Color, from: (usize, usi
     }
     bias
 }
+

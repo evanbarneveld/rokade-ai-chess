@@ -1,0 +1,6 @@
+mod bishop_move_validator_tests;
+mod king_move_validator_tests;
+mod knight_move_validator_tests;
+mod pawn_move_validator_tests;
+mod queen_move_validator_tests;
+mod rook_move_validator_tests;

@@ -1,6 +1,0 @@
-pub mod ambiguous_pawn_san_move_solver;
-pub mod ambiguous_knight_san_move_solver;
-pub mod ambiguous_bishop_san_move_solver;
-pub mod ambiguous_queen_san_move_solver;
-pub mod ambiguous_king_san_move_solver;
-pub mod ambiguous_rook_san_move_solver;

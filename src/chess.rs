@@ -9,6 +9,9 @@ use crate::state::fen::reader::reset_from_fen;
 use crate::state::fen::writer::game_state_to_fen_string;
 use crate::search::SearchMode;
 use crate::search::state::zobrist::compute_zobrist_full;
+use crate::search::context::SearchContext;
+use crate::search::state::tt::DEFAULT_HASH_MB;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Chess<> {
@@ -18,6 +21,8 @@ pub struct Chess<> {
     history: History,
     search_mode: SearchMode,
     playing_strength: usize,
+    hash_size_mb: usize,
+    search_context: Arc<SearchContext>,
 }
 impl Default for Chess {
     fn default() -> Self {
@@ -39,6 +44,8 @@ impl Chess {
             history: History::new(),
             search_mode: SearchMode::Normal,
             playing_strength: 1000,
+            hash_size_mb: DEFAULT_HASH_MB,
+            search_context: Arc::new(SearchContext::new()),
         };
         let zobrist = compute_zobrist_full(
             chess.game_state.board(),
@@ -70,6 +77,58 @@ impl Chess {
 
     pub fn get_playing_strength(&self) -> usize {
         self.playing_strength
+    }
+
+    pub fn search_context(&self) -> &SearchContext {
+        self.search_context.as_ref()
+    }
+
+    pub fn search_context_arc(&self) -> Arc<SearchContext> {
+        Arc::clone(&self.search_context)
+    }
+
+    pub fn set_deterministic(&self, on: bool) {
+        self.search_context.set_deterministic(on);
+    }
+
+    pub fn is_deterministic(&self) -> bool {
+        self.search_context.is_deterministic()
+    }
+
+    pub fn set_parallel_search(&self, on: bool) {
+        self.search_context.set_parallel_search(on);
+    }
+
+    pub fn is_parallel_search(&self) -> bool {
+        self.search_context.is_parallel_search()
+    }
+
+    pub fn set_order_book_enabled(&self, on: bool) {
+        self.search_context.set_order_book_enabled(on);
+    }
+
+    pub fn get_order_book_enabled(&self) -> bool {
+        self.search_context.get_order_book_enabled()
+    }
+
+    pub fn set_hash_size_mb(&mut self, mb: usize) {
+        let mb = mb.max(1);
+        let old_ctx = Arc::clone(&self.search_context);
+        let deterministic = old_ctx.is_deterministic();
+        let parallel = old_ctx.is_parallel_search();
+        let order_book_enabled = old_ctx.get_order_book_enabled();
+
+        let new_ctx = Arc::new(SearchContext::new_with_hash_mb(mb));
+        new_ctx.set_deterministic(deterministic);
+        new_ctx.set_parallel_search(parallel);
+        new_ctx.set_order_book_enabled(order_book_enabled);
+
+        self.search_context = new_ctx;
+        self.hash_size_mb = mb;
+    }
+
+    pub fn get_hash_size_mb(&self) -> usize {
+        self.hash_size_mb
     }
 
     pub fn reset(&mut self) -> Result<(), String> {

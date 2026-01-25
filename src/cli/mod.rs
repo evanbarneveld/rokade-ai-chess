@@ -6,8 +6,6 @@ use crate::generator::move_generator::generate_move_as_san;
 use crate::search::SearchMode;
 use crate::pgn_player::pgn_player::PgnPlayer;
 use crate::search::core::advanced_search::DEFAULT_SEARCH_DEPTH;
-use crate::search::core::alphabeta::with_heuristics;
-use crate::search::state::locking::get_tt_mutex;
 use crate::state::outcome::OutcomeType;
 use crate::uci::run_uci;
 
@@ -120,14 +118,14 @@ pub fn run_cli() {
                 continue;
             }
             if some_input.eq_ignore_ascii_case("deterministic") {
-                crate::search::set_deterministic(!crate::search::is_deterministic());
-                println!("Deterministic search is now {}", crate::search::is_deterministic());
+                let new_val = !game.is_deterministic();
+                game.set_deterministic(new_val);
+                println!("Deterministic search is now {}", game.is_deterministic());
                 continue;
             }
             if some_input.eq_ignore_ascii_case("clearcache") {
-                get_tt_mutex().lock().unwrap().clear();
-                with_heuristics(|h| h.clear());
-                println!("Cleared transposition table and search heuristics.");
+                game.search_context().tt().clear();
+                println!("Cleared transposition table.");
                 continue;
             }
             if some_input.starts_with("reset") {
@@ -180,7 +178,15 @@ pub fn run_cli() {
             let move_time_in_ms = if game.active_color_is_white() { white_bot_move_time } else { black_bot_move_time };
             let gs_copy = *game.get_game_state();
             let history_clone = game.get_history().clone();
-            if let Some(generated_move) = generate_move_as_san(game.get_search_mode(), gs_copy, &history_clone, search_depth, move_time_in_ms, strength) {
+            if let Some(generated_move) = generate_move_as_san(
+                game.search_context(),
+                game.get_search_mode(),
+                &gs_copy,
+                &history_clone,
+                search_depth,
+                move_time_in_ms,
+                strength,
+            ) {
                 println ! ("{}\n", generated_move);
 
                 if !game.move_piece_san(generated_move.as_str()) {
@@ -496,7 +502,7 @@ fn print_help() {
     println!("searchmode                - get search mode (advanced or simple)");
     println!("searchmode advanced       - set search mode to advanced");
     println!("searchmode simple         - set search mode to simple");
-    println!("clearcache                - clear transposition table and search heuristics");
+    println!("clearcache                - clear transposition table");
     println!("uci                       - switch to UCI mode (use 'cli' to return)");
 }
 

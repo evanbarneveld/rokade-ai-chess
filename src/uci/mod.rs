@@ -1,24 +1,16 @@
 use std::io::{self, BufRead, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::process::exit;
 use std::thread;
 use chrono::Local;
-use crate::book::book::set_order_book_enabled;
 use crate::Chess;
 use crate::cli::{BUILD_NUMBER, VERSION};
 use crate::piece::as_move_str;
 use crate::search::core::advanced_search::{DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH};
-use crate::search::{
-    find_best_move_with_mode, get_deterministic, is_parallel_search, set_deterministic,
-    set_parallel_search, SearchMode,
-};
-use crate::search::core::advanced_search::get_order_book_enabled;
-use crate::search::integration::telemetry::{get_nodes, reset_search_telemetry};
-use crate::search::integration::time_control::{clear_time_budget, set_time_budget_ms};
-use crate::search::integration::uci_feedback::set_info_callback;
+use crate::search::{find_best_move_with_mode, InfoCb, SearchMode};
 
 // Minimal UCI interface implementation.
 // Supported commands:
@@ -35,8 +27,10 @@ use crate::search::integration::uci_feedback::set_info_callback;
 
 // Move overhead: safety margin (in ms) to account for GUI communication latency
 const MOVE_OVERHEAD_MS: usize = 50;
+const SCORE_DIVISOR : f32 = 8.0f32;
 
 static LOG: OnceLock<Mutex<File>> = OnceLock::new();
+const MOVE_TIME_AS_PERCENTAGE_OF_TIME_LEFT: f64 = 0.02;
 
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
@@ -53,7 +47,7 @@ pub fn run_uci() -> io::Result<()> {
     let engine = Arc::new(Mutex::new(Chess::new()));
     let searching = Arc::new(AtomicBool::new(false));
 
-    send_uci_response();
+    send_uci_response(&engine.lock().unwrap());
 
     // ensure starting position
     let _ = engine.lock().unwrap().reset();
@@ -74,7 +68,7 @@ pub fn run_uci() -> io::Result<()> {
         }
 
         if line.eq_ignore_ascii_case("uci") {
-            send_uci_response();
+            send_uci_response(&engine.lock().unwrap());
         }
 
         if line.to_ascii_lowercase().starts_with("setoption ") {
@@ -85,7 +79,7 @@ pub fn run_uci() -> io::Result<()> {
                     let val = line[(idx + 6)..].trim();
                     let mode = match val.to_ascii_lowercase().as_str() {
                         "normal" => Some(SearchMode::Normal),
-                        "test (slow)" => Some(SearchMode::Test),
+                        "test" => Some(SearchMode::Test),
                         _ => None,
                     };
                     if let Some(m) = mode { engine.lock().unwrap().set_search_mode(m); }
@@ -125,27 +119,37 @@ pub fn run_uci() -> io::Result<()> {
                 if let Some(idx) = lower.find("value ") {
                     let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
-                        set_deterministic(true);
+                        engine.lock().unwrap().set_deterministic(true);
                     } else if val == "false" {
-                        set_deterministic(false);
+                        engine.lock().unwrap().set_deterministic(false);
+                    }
+                }
+            } else if lower.contains("name hash") {
+                if searching.load(Ordering::SeqCst) {
+                    write_to_stdout_and_log_with_flush("OUT", "info string Hash option ignored while searching");
+                    continue;
+                }
+                if let Some(idx) = lower.find("value ") {
+                    if let Ok(v) = line[(idx + 6)..].trim().parse::<usize>() {
+                        engine.lock().unwrap().set_hash_size_mb(v);
                     }
                 }
             } else if lower.contains("name parallel search") {
                 if let Some(idx) = lower.find("value ") {
                     let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
-                        set_parallel_search(true);
+                        engine.lock().unwrap().set_parallel_search(true);
                     } else if val == "false" {
-                        set_parallel_search(false);
+                        engine.lock().unwrap().set_parallel_search(false);
                     }
                 }
             } else if lower.contains("name order book")
                 && let Some(idx) = lower.find("value ") {
                     let val = line[(idx + 6)..].trim().to_ascii_lowercase();
                     if val == "true" {
-                        set_order_book_enabled(true);
+                        engine.lock().unwrap().set_order_book_enabled(true);
                     } else if val == "false" {
-                        set_order_book_enabled(false);
+                        engine.lock().unwrap().set_order_book_enabled(false);
                     }
                 }
             continue;
@@ -185,7 +189,8 @@ pub fn run_uci() -> io::Result<()> {
 
             let white_is_active = engine.lock().unwrap().active_color_is_white();
 
-            let mut movetime: usize = 0; // default unlimited time per move unless constrained below
+            let mut movetime: usize = 0; // default: no explicit movetime unless set
+            let mut movetime_specified = false;
             let mut is_infinite = false; // go infinite flag
 
             // Parse tokens for movetime and/or wtime/btime and increments winc/binc (order-independent)
@@ -208,6 +213,7 @@ pub fn run_uci() -> io::Result<()> {
                         if i + 1 < tokens.len() {
                             if let Ok(v) = tokens[i + 1].parse::<usize>() {
                                 movetime = v;
+                                movetime_specified = true;
                             }
                             i += 2; continue;
                         }
@@ -247,12 +253,10 @@ pub fn run_uci() -> io::Result<()> {
                 i += 1;
             }
 
-            // If go infinite, don't set any time limit
-            if is_infinite {
-                movetime = 0;
-            }
+            let time_inputs = movetime_specified || wtime.is_some() || btime.is_some() || winc.is_some() || binc.is_some();
+
             // If no explicit movetime was given but wtime/btime or winc/binc was provided, derive a reasonable per-move budget
-            else if movetime == 0 && (wtime.is_some() || btime.is_some() || winc.is_some() || binc.is_some()) {
+            if !is_infinite && !movetime_specified && time_inputs {
                 let time_left = if white_is_active { wtime.unwrap_or(0) } else { btime.unwrap_or(0) };
                 let inc = if white_is_active { winc.unwrap_or(0) } else { binc.unwrap_or(0) };
 
@@ -265,7 +269,7 @@ pub fn run_uci() -> io::Result<()> {
                         budget = (time_left / mtg.max(1)).max(1);
                         // Add a safe portion of the increment if available.
                         if inc > 0 {
-                            let bonus = ((inc as f64) * 0.6) as usize; // ~60% of increment
+                            let bonus = ((inc as f64) * 0.8) as usize; // ~80% of increment
                             budget = budget.saturating_add(bonus);
                         }
                         // Cap so we don't spend too much: at most time_left / max(2, mtg)
@@ -273,10 +277,10 @@ pub fn run_uci() -> io::Result<()> {
                         if max_cap > 0 && budget > max_cap { budget = max_cap; }
                     } else {
                         // No movestogo: use a dynamic fraction of remaining time and some increment.
-                        budget = ((time_left as f64) * 0.02) as usize; // ~2%
+                        budget = ((time_left as f64) * MOVE_TIME_AS_PERCENTAGE_OF_TIME_LEFT) as usize;
                         if budget < 10 { budget = 10; } // at least 10ms
                         if inc > 0 {
-                            let bonus = ((inc as f64) * 0.7) as usize; // ~70% of increment
+                            let bonus = ((inc as f64) * 0.90) as usize;
                             budget = budget.saturating_add(bonus);
                         }
                         let max_cap = time_left / 3; // at most a third of remaining time
@@ -290,7 +294,7 @@ pub fn run_uci() -> io::Result<()> {
                     }
                 } else if inc > 0 { // no main time, only increment
                     // When only increment is available, use most of it but not all
-                    budget = ((inc as f64) * 0.9) as usize; // 90% of increment
+                    budget = ((inc as f64) * 0.95) as usize;
                     if budget < 10 { budget = 10; }
                     // Cap at twice the increment to avoid overthinking
                     let max_cap = inc.saturating_mul(2);
@@ -309,13 +313,20 @@ pub fn run_uci() -> io::Result<()> {
             let searching_inner = Arc::clone(&searching);
             let line_copy = line.to_string();
             thread::spawn(move || {
+                let ctx = {
+                    let guard = engine_inner.lock().unwrap();
+                    guard.search_context_arc()
+                };
                 // Measure elapsed time and reset telemetry for info lines
                 let start = std::time::Instant::now();
-                reset_search_telemetry();
+                ctx.reset_search_telemetry();
                 // Install a temporary info callback so we can emit progress while searching.
                 // The callback prints UCI-compliant info lines with the current best root move scores.
-                let white_is_active_inner = white_is_active;
-                let info_cb = Arc::new(move |_mv: ((usize, usize), (usize, usize), Option<char>), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize), Option<char>)>, hashfull: u16| {
+                let ctx_for_cb = Arc::clone(&ctx);
+                let last_info_depth = Arc::new(AtomicUsize::new(0));
+                let last_info_depth_cb = Arc::clone(&last_info_depth);
+                let info_cb: Arc<InfoCb> = Arc::new(move |_mv: ((usize, usize), (usize, usize), Option<char>), score_cp: i32, depth_used: usize, pv_moves: Vec<((usize, usize), (usize, usize), Option<char>)>, hashfull: u16| {
+                    last_info_depth_cb.store(depth_used, Ordering::SeqCst);
                     let mut pv_parts: Vec<String> = Vec::with_capacity(pv_moves.len());
                     for (f, t, p) in pv_moves {
                         let mut m_str = as_move_str(f, t);
@@ -326,31 +337,55 @@ pub fn run_uci() -> io::Result<()> {
                     }
                     let pv = pv_parts.join(" ");
                     // Compute current nodes and nps
-                    let nodes = get_nodes();
+                    let nodes = ctx_for_cb.get_nodes();
                     let ms = start.elapsed().as_millis().max(1);
                     let nps = (nodes as u128 * 1000u128) / ms;
                     // Print directly to stdout; ignore logging for async updates
-                    let log_text = format!("info depth {} score cp {} nodes {} nps {} hashfull {} pv {}", depth_used, score_cp, nodes, nps, hashfull, pv);
+                    let log_text = format!(
+                        "info depth {} score cp {} time {} nodes {} nps {} hashfull {} pv {}",
+                        depth_used,
+                        ((score_cp as f32) / SCORE_DIVISOR) as i32,
+                        ms,
+                        nodes,
+                        nps,
+                        hashfull,
+                        pv
+                    );
                     write_to_stdout_and_log_with_flush("OUT", &log_text);
                 });
-                set_info_callback(Some(info_cb));
+                ctx.set_info_callback(Some(info_cb));
 
                 // Apply a time budget for this Search
+                let time_budget_ms = if is_infinite || !time_inputs {
+                    None
+                } else {
+                    Some(movetime)
+                };
                 let (best_move_str, info_opt) = {
                     let mut engine_locked = engine_inner.lock().unwrap();
-                    go_bestmove_with_info(&mut engine_locked, &line_copy, movetime)
+                    go_bestmove_with_info(&mut engine_locked, &line_copy, time_budget_ms)
                 };
                 // Clear the callback after Search completes
-                set_info_callback(None);
+                ctx.set_info_callback(None);
                 let elapsed_ms = start.elapsed().as_millis();
-                let nodes = get_nodes();
-                let nps = if elapsed_ms == 0 { 0 } else { ((nodes as u128 * 1000u128) / elapsed_ms) as u128 };
+                let nodes = ctx.get_nodes();
+                let nps = if elapsed_ms == 0 { 0 } else { (nodes as u128 * 1000u128) / elapsed_ms };
 
                 // If we have extra info from the Search, emit a UCI info line
                 if let Some((score_cp, depth_used)) = info_opt {
-                    let score_cp_from_white_perspective = if white_is_active { score_cp } else { -score_cp };
-                    let log_text = format!("info depth {} score cp {} time {} nodes {} nps {} pv {}", depth_used, score_cp_from_white_perspective, elapsed_ms, nodes, nps, best_move_str);
-                    write_to_stdout_and_log_with_flush("OUT", &log_text);
+                    let info_depth = last_info_depth.load(Ordering::SeqCst);
+                    if info_depth != depth_used {
+                        let log_text = format!(
+                            "info depth {} score cp {} time {} nodes {} nps {} pv {}",
+                            depth_used,
+                            ((score_cp as f32) / SCORE_DIVISOR) as i32,
+                            elapsed_ms,
+                            nodes,
+                            nps,
+                            best_move_str
+                        );
+                        write_to_stdout_and_log_with_flush("OUT", &log_text);
+                    }
                 }
 
                 let out = format!("bestmove {}", best_move_str);
@@ -362,7 +397,7 @@ pub fn run_uci() -> io::Result<()> {
         if line == "stop" {
             // Immediately expire the time budget to stop search
             // Set to 1ms to trigger immediate abort on next time check
-            set_time_budget_ms(1);
+            engine.lock().unwrap().search_context().set_time_budget_ms(1);
             // Wait for search to complete (flag will be cleared by search thread)
             while searching.load(Ordering::SeqCst) {
                 thread::sleep(std::time::Duration::from_millis(10));
@@ -381,27 +416,30 @@ pub fn run_uci() -> io::Result<()> {
     Ok(())
 }
 
-fn send_uci_response() {
+fn send_uci_response(engine: &Chess) {
     let m1 = format!("id name Rokade-AI v{} (build#{})", VERSION, BUILD_NUMBER).to_string();
     write_to_stdout_and_log_with_flush("OUT", &m1);
 
     let m2 = "id author Erik van Barneveld".to_string();
     write_to_stdout_and_log_with_flush("OUT", &m2);
 
+    let opt_hash = format!("option name Hash type spin default {} min 1 max 2048", crate::search::state::tt::DEFAULT_HASH_MB);
+    write_to_stdout_and_log_with_flush("OUT", &opt_hash);
+
     // Strength levels as combo
     let opt_strenghth = "option name Strength type combo default Strength-10 var Strength-10 var Strength-9 var Strength-8 var Strength-7 var Strength-6 var Strength-5 var Strength-4 var Strength-3 var Strength-2 var Strength-1".to_string();
     write_to_stdout_and_log_with_flush("OUT", &opt_strenghth);
 
-    let opt_parallel = format!("option name parallel search type check default {}", is_parallel_search());
+    let opt_parallel = format!("option name parallel search type check default {}", engine.is_parallel_search());
     write_to_stdout_and_log_with_flush("OUT", &opt_parallel);
 
-    let opt_deterministic = format!("option name Deterministic type check default {}", get_deterministic());
+    let opt_deterministic = format!("option name Deterministic type check default {}", engine.is_deterministic());
     write_to_stdout_and_log_with_flush("OUT", &opt_deterministic);
 
-    let opt_order_book = format!("option name Order Book type check default {}", get_order_book_enabled());
+    let opt_order_book = format!("option name Order Book type check default {}", engine.get_order_book_enabled());
     write_to_stdout_and_log_with_flush("OUT", &opt_order_book);
 
-    let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test (slow)".to_string();
+    let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test".to_string();
     write_to_stdout_and_log_with_flush("OUT", &opt_searchmode);
 
     let m3 = "uciok".to_string();
@@ -476,7 +514,11 @@ fn apply_uci_move(engine: &mut Chess, mv: &str) -> bool {
     engine.move_piece(from_idx, to_idx, promo)
 }
 
-pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time_in_ms: usize) -> (String, Option<(i32, usize)>) {
+pub fn go_bestmove_with_info(
+    engine: &mut Chess,
+    line: &str,
+    time_budget_ms: Option<usize>,
+) -> (String, Option<(i32, usize)>) {
     // Similar to go_bestmove but also returns (score_cp, depth_used) for UCI info line.
     let mut depth = parse_depth(line).unwrap_or(DEFAULT_SEARCH_DEPTH);
     if depth > MAX_SEARCH_DEPTH { depth = MAX_SEARCH_DEPTH; }
@@ -487,9 +529,14 @@ pub fn go_bestmove_with_info(engine: &mut Chess, line: &str, move_time_in_ms: us
     let playing_strength = engine.get_playing_strength();
 
     // Apply a time budget for this Search
-    set_time_budget_ms(move_time_in_ms);
-    let best = find_best_move_with_mode(engine.get_search_mode(), &gs_copy, &history_clone, depth, playing_strength);
-    clear_time_budget();
+    let ctx = engine.search_context();
+    if let Some(ms) = time_budget_ms {
+        ctx.set_time_budget_ms(ms);
+    } else {
+        ctx.clear_time_budget();
+    }
+    let best = find_best_move_with_mode(ctx, engine.get_search_mode(), &gs_copy, &history_clone, depth, playing_strength);
+    ctx.clear_time_budget();
 
     if let Some(((fr, fc), (tr, tc), promo, score_cp, depth_used)) = best {
         let mut mv = as_move_str((fr, fc), (tr, tc));

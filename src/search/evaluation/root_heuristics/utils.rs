@@ -1,7 +1,7 @@
 //! Common utilities and constants for root heuristics.
 
 use crate::board::Board;
-use crate::piece::pieces::{Color, Piece};
+use crate::piece::pieces::{Color, Piece, PieceType};
 
 // ============================================================
 // CONSTANTS
@@ -50,12 +50,68 @@ pub fn apply_for_side(v: i32, side: Color) -> i32 {
 
 /// Simulate a move on a cloned board, returning the new board and the moved piece.
 #[inline]
-pub fn simulate_move(board: &Board, from: (usize, usize), to: (usize, usize)) -> (Board, Option<Piece>) {
+pub fn simulate_move(
+    board: &Board,
+    from: (usize, usize),
+    to: (usize, usize),
+    promo: Option<char>,
+) -> (Board, Option<Piece>) {
     let mut b = *board;
     let moved = board.get(from.0, from.1);
-    b.set(from.0, from.1, None);
-    if let Some(p) = moved {
+    if let Some(mut p) = moved {
+        let is_pawn = p.get_type() == PieceType::Pawn;
+        let is_king = p.get_type() == PieceType::King;
+
+        // En passant capture: pawn moved diagonally to an empty square.
+        if is_pawn && from.1 != to.1 && b.get(to.0, to.1).is_none() {
+            let cap_sq = (from.0, to.1);
+            b.set(cap_sq.0, cap_sq.1, None);
+        }
+
+        // Castling: move rook to the correct square.
+        if is_king && from.1 == 4 && from.0 == to.0 {
+            if to.1 == 6 {
+                let rf = (from.0, 7);
+                let rt = (from.0, 5);
+                if let Some(r) = b.get(rf.0, rf.1)
+                    && r.get_type() == PieceType::Rook {
+                        b.set(rt.0, rt.1, Some(r));
+                        b.set(rf.0, rf.1, None);
+                    }
+            } else if to.1 == 2 {
+                let rf = (from.0, 0);
+                let rt = (from.0, 3);
+                if let Some(r) = b.get(rf.0, rf.1)
+                    && r.get_type() == PieceType::Rook {
+                        b.set(rt.0, rt.1, Some(r));
+                        b.set(rf.0, rf.1, None);
+                    }
+            }
+        }
+
+        // Promotion: upgrade pawn when reaching the last rank.
+        if is_pawn {
+            let promote = match p.get_color() {
+                Color::White => to.0 == 7,
+                Color::Black => to.0 == 0,
+            };
+            if promote {
+                let pt = match promo {
+                    Some('q') => PieceType::Queen,
+                    Some('r') => PieceType::Rook,
+                    Some('b') => PieceType::Bishop,
+                    Some('n') => PieceType::Knight,
+                    _ => PieceType::Queen,
+                };
+                p = Piece::new(pt, p.get_color());
+            }
+        }
+
+        b.set(from.0, from.1, None);
         b.set(to.0, to.1, Some(p));
+        if is_king {
+            b.set_king_location(p.get_color(), to);
+        }
     }
     (b, moved)
 }

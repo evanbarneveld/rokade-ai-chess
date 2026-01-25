@@ -1,18 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::piece::pieces::{PieceType};
 use crate::state::game_state::GameState;
 use crate::search::core::advanced_search::find_all_valid_moves;
 use rand::{rng, Rng};
-
-static ORDER_BOOK_ENABLED: AtomicBool = AtomicBool::new(true);
-
-pub fn get_order_book_enabled() -> bool {
-    ORDER_BOOK_ENABLED.load(Ordering::Relaxed)
-}
-
-pub fn set_order_book_enabled(enabled: bool) {
-    ORDER_BOOK_ENABLED.store(enabled, Ordering::Relaxed);
-}
 
 // A tiny in-code opening book keyed by truncated FEN (first 4 fields).
 // Values are (UCI move string, weight).
@@ -456,9 +445,8 @@ fn parse_uci_move(uci: &str) -> Option<((usize, usize), (usize, usize), Option<P
 
 // Pick a move from the opening book for the given state.
 // Returns a legal (from,to) if a book entry exists and passes validation.
-pub fn book_pick(game_state: &GameState) -> Option<((usize, usize), (usize, usize))> {
+pub fn book_pick(game_state: &GameState, deterministic: bool) -> Option<((usize, usize), (usize, usize))> {
     use crate::state::fen::writer::game_state_to_fen_string;
-    use crate::search::is_deterministic;
     // Build truncated FEN key (first 4 fields)
     let fen = game_state_to_fen_string(*game_state);
     let key: String = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
@@ -466,7 +454,7 @@ pub fn book_pick(game_state: &GameState) -> Option<((usize, usize), (usize, usiz
     // Find entry
     let entry = BOOK.iter().find(|(k, _)| k == &key)?.1;
     // Deterministic: pick the highest-weight move; tie-break by lexicographical order.
-    let chosen = if is_deterministic() {
+    let chosen = if deterministic {
         let mut best: Option<(&str, u32)> = None;
         for (uci, w) in entry.iter().copied() {
             best = match best {

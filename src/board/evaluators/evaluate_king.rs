@@ -1,6 +1,6 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluator::{opponent, is_piece};
+use crate::board::evaluation_helpers::{is_piece, opponent, PawnFileCounts};
 
 pub fn is_king_in_front_of_pawn(king: (usize, usize), pawn_r: usize, pawn_c: usize, pawn_color: Color) -> bool {
     let (kr, kc) = king;
@@ -11,18 +11,44 @@ pub fn is_king_in_front_of_pawn(king: (usize, usize), pawn_r: usize, pawn_c: usi
     }
 }
 
-pub fn king_safety(board: &Board, color: Color, phase: i32, king_pos: Option<(usize, usize)>) -> i32 {
+pub fn king_safety(
+    board: &Board,
+    color: Color,
+    phase: i32,
+    king_pos: Option<(usize, usize)>,
+    pawn_counts: &PawnFileCounts,
+) -> i32 {
     let mut score = 0;
     if let Some((r, c)) = king_pos {
         let mut shield = 0;
+        let mut shield_gaps = 0;
         let shield_row = match color { Color::White => 1, Color::Black => 6 };
+        let shield_row2 = match color { Color::White => 2, Color::Black => 5 };
         for dc in [-1, 0, 1] {
             let nc = c as i32 + dc;
-            if (0..=7).contains(&nc) && is_piece(board, shield_row, nc as usize, color, PieceType::Pawn) { shield += 1; }
+            if (0..=7).contains(&nc) {
+                let file = nc as usize;
+                let home = is_piece(board, shield_row, file, color, PieceType::Pawn);
+                let advanced = is_piece(board, shield_row2, file, color, PieceType::Pawn);
+                if home {
+                    shield += 2;
+                } else if advanced {
+                    shield += 1;
+                } else {
+                    shield_gaps += 1;
+                }
+            }
         }
-        score += (shield * 12 * phase) / 24;
 
         let enemy = opponent(color);
+        let enemy_has_queen = has_piece_type(board, enemy, PieceType::Queen);
+        let queen_scale = if enemy_has_queen { 100 } else { 60 };
+        score += (shield * 6 * phase) / 24;
+        if shield_gaps > 0 {
+            let gap_penalty = shield_gaps * 14;
+            score -= (gap_penalty * phase * queen_scale) / 2400;
+        }
+
         let mut attacker_count = 0;
         let mut attack_weight = 0;
 
@@ -61,7 +87,10 @@ pub fn king_safety(board: &Board, color: Color, phase: i32, king_pos: Option<(us
         };
 
         let danger = (attack_weight * scaling_factor) / 10;
-        score -= (danger * phase) / 24;
+        score -= (danger * phase * queen_scale) / 2400;
+
+        let file_penalty = king_file_pressure(board, color, (r, c), pawn_counts);
+        score -= (file_penalty * phase * queen_scale) / 2400;
     }
     score
 }
@@ -202,4 +231,85 @@ pub fn evaluate_king_shelter_patterns(board: &Board, color: Color, phase: i32, k
     }
 
     -(penalty * phase) / 24
+}
+
+fn has_piece_type(board: &Board, color: Color, pt: PieceType) -> bool {
+    for r in 0..8 {
+        for c in 0..8 {
+            if let Some(p) = board.get(r, c)
+                && p.get_color() == color
+                && p.get_type() == pt
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn king_file_pressure(
+    board: &Board,
+    color: Color,
+    king_pos: (usize, usize),
+    pawn_counts: &PawnFileCounts,
+) -> i32 {
+    const OPEN_FILE_PENALTY: i32 = 16;
+    const SEMI_OPEN_FILE_PENALTY: i32 = 10;
+    const FILE_ATTACKER_BONUS: i32 = 8;
+
+    let enemy = opponent(color);
+    let (r, c) = king_pos;
+    let mut penalty = 0i32;
+
+    for df in [-1i32, 0, 1] {
+        let file_i = c as i32 + df;
+        if !(0..=7).contains(&file_i) {
+            continue;
+        }
+        let file = file_i as usize;
+        let friendly_pawns = match color {
+            Color::White => pawn_counts.white[file],
+            Color::Black => pawn_counts.black[file],
+        };
+        if friendly_pawns > 0 {
+            continue;
+        }
+        let enemy_pawns = match color {
+            Color::White => pawn_counts.black[file],
+            Color::Black => pawn_counts.white[file],
+        };
+        let mut file_pen = if enemy_pawns == 0 {
+            OPEN_FILE_PENALTY
+        } else {
+            SEMI_OPEN_FILE_PENALTY
+        };
+        if file == c {
+            file_pen += 4;
+        }
+        if has_rook_or_queen_on_file(board, enemy, file, r) {
+            file_pen += FILE_ATTACKER_BONUS;
+        }
+        penalty += file_pen;
+    }
+
+    penalty
+}
+
+fn has_rook_or_queen_on_file(
+    board: &Board,
+    enemy: Color,
+    file: usize,
+    king_row: usize,
+) -> bool {
+    for step in [-1i32, 1] {
+        let mut r = king_row as i32 + step;
+        while (0..8).contains(&r) {
+            if let Some(p) = board.get(r as usize, file) {
+                return p.get_color() == enemy
+                    && matches!(p.get_type(), PieceType::Rook | PieceType::Queen);
+            }
+            r += step;
+        }
+    }
+    false
 }

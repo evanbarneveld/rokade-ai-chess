@@ -4,7 +4,10 @@ use crate::history::history::History;
 use crate::piece::pieces::{Piece, Color, PieceType};
 use crate::state::outcome::{recompute_outcome, OutcomeType};
 use crate::state::castling::CastlingRights;
-use crate::search::state::zobrist::compute_zobrist_full;
+use crate::search::state::zobrist::{
+    compute_zobrist_full, zobrist_toggle_piece, zobrist_toggle_side,
+    zobrist_update_castling, zobrist_update_ep,
+};
 
 // ============================================================
 // GAME STATE - Chess Rules + Game Management
@@ -161,6 +164,11 @@ impl GameState {
         self.zobrist_key
     }
 
+    #[inline]
+    pub fn set_zobrist_key(&mut self, key: u64) {
+        self.zobrist_key = key;
+    }
+
     // ============================================================
     // GAME STATE MUTATIONS
     // ============================================================
@@ -194,6 +202,33 @@ impl GameState {
         if self.active_color == Color::White {
             self.increment_full_move_number();
         }
+
+        self.recompute_zobrist_key();
+    }
+
+    /// Fast side toggle that updates Zobrist key incrementally.
+    #[inline]
+    pub fn switch_player_turn_fast(&mut self) {
+        self.active_color = match self.active_color {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        };
+
+        if self.active_color == Color::White {
+            self.increment_full_move_number();
+        }
+
+        self.zobrist_key = zobrist_toggle_side(self.zobrist_key);
+    }
+
+    /// Recompute the Zobrist hash after state changes that affect it.
+    pub fn recompute_zobrist_key(&mut self) {
+        self.zobrist_key = compute_zobrist_full(
+            &self.board,
+            self.active_color,
+            &self.castling_rights,
+            self.en_passant_target,
+        );
     }
 
     pub fn update_king_location(&mut self, color: Color, location: (usize, usize)) {
@@ -284,6 +319,7 @@ impl GameState {
         let prev_half_move_clock = self.half_move_clock;
         let prev_full_move_number = self.full_move_number;
         let prev_zobrist_key = self.zobrist_key;
+        let mut key = prev_zobrist_key;
 
         let moving_piece = self.board.get(from.0, from.1);
 
@@ -301,12 +337,23 @@ impl GameState {
             ep_captured_piece = self.board.get(cap_row, to.1);
         }
 
+        if let Some(p) = moving_piece {
+            key = zobrist_toggle_piece(key, p.get_type(), p.get_color(), from);
+        }
+
         // Apply board move (handles castling and normal captures)
         let board_undo = self.board.make_move_simple(from, to, promo);
+
+        if let Some(cap) = board_undo.captured {
+            key = zobrist_toggle_piece(key, cap.get_type(), cap.get_color(), to);
+        }
 
         // Clear en passant captured pawn
         if let (Some(sq), Some(_)) = (ep_captured_sq, ep_captured_piece) {
             self.board.clear(sq.0, sq.1);
+        }
+        if let (Some(sq), Some(cap)) = (ep_captured_sq, ep_captured_piece) {
+            key = zobrist_toggle_piece(key, cap.get_type(), cap.get_color(), sq);
         }
 
         // Handle promotion (make_move_simple already does this, but ensure correctness)
@@ -414,6 +461,37 @@ impl GameState {
             }
         }
 
+        if let (Some(rf), Some(rt)) = (board_undo.castle_rook_from, board_undo.castle_rook_to)
+            && let Some(p) = moving_piece
+        {
+            key = zobrist_toggle_piece(key, PieceType::Rook, p.get_color(), rf);
+            key = zobrist_toggle_piece(key, PieceType::Rook, p.get_color(), rt);
+        }
+
+        let mut placed_piece = moving_piece;
+        if let Some(p) = moving_piece
+            && p.get_type() == PieceType::Pawn
+        {
+            if let Some(pc) = promo {
+                let promote_to = match pc {
+                    'q' | 'Q' => PieceType::Queen,
+                    'r' | 'R' => PieceType::Rook,
+                    'b' | 'B' => PieceType::Bishop,
+                    'n' | 'N' => PieceType::Knight,
+                    _ => PieceType::Queen,
+                };
+                placed_piece = Some(Piece::new(promote_to, p.get_color()));
+            } else if (p.get_color() == Color::White && to.0 == 7)
+                || (p.get_color() == Color::Black && to.0 == 0)
+            {
+                placed_piece = Some(Piece::new(PieceType::Queen, p.get_color()));
+            }
+        }
+
+        if let Some(p) = placed_piece {
+            key = zobrist_toggle_piece(key, p.get_type(), p.get_color(), to);
+        }
+
         // Update en passant target
         self.en_passant_target = None;
 
@@ -448,14 +526,10 @@ impl GameState {
             self.full_move_number += 1;
         }
 
-        // Recompute Zobrist key for the new position
-        // (Incremental update would be faster but more complex due to castling/ep/promotion)
-        self.zobrist_key = compute_zobrist_full(
-            &self.board,
-            self.active_color,
-            &self.castling_rights,
-            self.en_passant_target,
-        );
+        key = zobrist_update_castling(key, &prev_castling_rights, &self.castling_rights);
+        key = zobrist_update_ep(key, prev_en_passant_target, self.en_passant_target);
+        key = zobrist_toggle_side(key);
+        self.zobrist_key = key;
 
         UndoGameState {
             board_undo,

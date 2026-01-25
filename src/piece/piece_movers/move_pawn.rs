@@ -1,4 +1,3 @@
-use crate::board::Board;
 use crate::piece::pieces::{Color, Piece, PieceType};
 use crate::state::game_state::GameState;
 
@@ -52,21 +51,6 @@ pub fn move_pawn(game_state: &mut GameState, piece: Piece, from: (usize, usize),
 
     game_state.reset_half_move_clock();
 
-    true
-}
-
-pub fn move_pawn_promotion2(board : &mut Board, from: (usize, usize), to: (usize, usize), promotion_piece: Option<Piece>) -> bool {
-    let mut piece = board.get(from.0, from.1);
-    if piece.is_none() {
-        return false;
-    }
-
-    if promotion_piece.is_some() {
-        piece = promotion_piece;
-    }
-
-    board.set(to.0, to.1, piece);
-    board.set(from.0, from.1, None);
     true
 }
 

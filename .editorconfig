@@ -15,4 +15,6 @@ max_line_length = off
 
 # Disable syntax checking in documentation
 [ARCHITECTURE.md]
+[CLAUDE.md]
+[AGENTS.md]
 # This file contains pseudocode and examples, not actual code

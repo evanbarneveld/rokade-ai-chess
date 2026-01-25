@@ -23,7 +23,7 @@ pub fn king_safety_root_heuristics(
         return 0;
     }
 
-    let (mut postk, _) = simulate_move(base_board, from, to);
+    let (mut postk, _) = simulate_move(base_board, from, to, None);
     let mut delta = 0;
 
     if is_square_attacked_by_opponent(&mut postk, to, side) {

@@ -1,7 +1,5 @@
 use rand::{rng, Rng};
 
-use crate::search::is_deterministic;
-
 pub const PLAYING_STRENGTH_MAX: usize = 1000;
 
 // Helper function containing common strength-based selection logic
@@ -72,13 +70,14 @@ fn select_move_index(list_len: usize, playing_strength: usize) -> usize {
 pub fn select_move_based_using_strength(
     sorted_moves: &Vec<((usize, usize), (usize, usize), i32)>,
     playing_strength: usize,
+    deterministic: bool,
 ) -> Option<((usize, usize), (usize, usize))> {
     if sorted_moves.is_empty() {
         return None;
     }
 
     // Deterministic mode: always pick the best move (index 0) from the already sorted list.
-    if is_deterministic() {
+    if deterministic {
         let pick = &sorted_moves[0];
         return Some((pick.0, pick.1));
     }
@@ -91,13 +90,14 @@ pub fn select_move_based_using_strength(
 pub fn select_move_based_using_strength_promo(
     sorted_moves: &Vec<((usize, usize), (usize, usize), Option<char>, i32)>,
     playing_strength: usize,
+    deterministic: bool,
 ) -> Option<((usize, usize), (usize, usize), Option<char>)> {
     if sorted_moves.is_empty() {
         return None;
     }
 
     // Deterministic mode: always pick the best move (index 0) from the already sorted list.
-    if is_deterministic() {
+    if deterministic {
         let pick = &sorted_moves[0];
         return Some((pick.0, pick.1, pick.2));
     }
