@@ -41,15 +41,11 @@ Tests
 cargo test -- --nocapture
 ```
 
-Known Issues
-- Deterministic mode still shows move variations (non-determinism) in some runs.
-
 Roadmap
-- Improve heuristics with targeted tests for poor moves.
-- Make the engine play a decent endgame.
+- Improve the engine
 
 Contributing
-This is primarily a learning project, but suggestions, bug reports, and PRs are welcome. Please keep the learning spirit and AI-assisted approach in mind when proposing changes.
+Suggestions, bug reports, and PRs are welcome.
 
 License
 This project is licensed under the MIT License. You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software under the terms of the MIT license. See the LICENSE file for the full text.
