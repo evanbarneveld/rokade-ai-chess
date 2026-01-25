@@ -1,10 +1,8 @@
-Rokade-AI Chess — UCI Chess Engine
+Rokade-AI Chess — UCI Chess Engine (+/- 1400 ELO)
 
-This repository contains a chess engine written (mostly) by AI in Rust. 
-Expect rough edges, active iteration, and frequent improvements.
+This repository contains a chess engine written in Rust, with the help of Junie, Claude, and Codex. 
 
-Disclaimer: the code in this project does not reflect what I (evanbarneveld) consider clean code.
-A lot of refactoring (by AI) is required to clean up the code and make it more readable/maintainable.
+Disclaimer: the code in this project does not reflect what I consider 'clean' code but it isn't bad either.
 
 <img src="https://github.com/evanbarneveld/rokade-ai-chess/blob/main/rokade-ai-chess.png?raw=true" alt="Rokade-Ai Chess" style="width:30%; height:auto;">
 
@@ -14,22 +12,13 @@ Start the engine 'rokade-ai-chess' and try the 'help' command for a list of comm
 (When used as an UCI engine by a chess GUI, the GUI will send the 'uci' command to the engine)
 
 This engine works with Arena, Cute Chess, En-Croissant, Hiarcs Chess, and other UCI-compatible Chess GUIs.
-The engine logs to 'rokade-ai-chess.#####.log' in the current directory.
+The engine logs to 'rokade-ai-chess.#.log' in the current directory.
 
 Highlights
 - Written in Rust, with a modular layout (board, move generation, search, parsing, UCI/CLI, etc.)
 - Parallel search via Rayon
 - CLI entry point for playing/running locally
-- PGN parsing utilities and test suites
-
-Project Status
-- Work in progress: playable, working, but strength and stability are evolving.
-- Learning-focused: learning how to co-engineer with AI is prioritized over ultimate engine strength (for now).
-- AI-assisted development: significant parts were generated or refactored with AI help.
-
-Why this exists
-- Provide a playable engine for local play and its source code. 
-- For me: learning the Rust language and explore chess engine architecture and search heuristics.
+- UCI Interface
 
 Getting Started
 
