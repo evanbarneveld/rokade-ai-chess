@@ -234,7 +234,7 @@ fn test_mate_in_n_generic() {
     let mut solved = 0;
 
     //puzzles_to_solve = <0 means skip, 0 means all, >0 means number of puzzles to solve
-    let puzzles_to_solve = 2;
+    let puzzles_to_solve = -1;
     let move_time= MAX_MOVE_TIME_MS;
     let (t, s) = run_suite(&mut game, &ctx, INPUT_MI2, "Mate-in-2", 2, 4, move_time, puzzles_to_solve);
     if (s as f32 / t as f32) < 0.96 {

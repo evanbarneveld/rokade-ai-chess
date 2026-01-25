@@ -3,8 +3,10 @@ use chess::board::test_support::{
     development_penalty_on_backrank,
     evaluate_king_shelter_patterns,
     is_king_in_front_of_pawn,
+    king_ring_pressure,
     king_safety,
     pawn_file_counts,
+    build_attack_maps,
 };
 use chess::piece::pieces::{Color, Piece, PieceType};
 
@@ -101,4 +103,46 @@ fn king_safety_prefers_home_pawn_shield() {
     let adv_score = king_safety(&advanced, Color::White, 24, Some((0, 6)), &counts_adv);
 
     assert!(home_score > adv_score);
+}
+
+#[test]
+fn king_ring_pressure_penalizes_direct_check_lines() {
+    let mut open = Board::empty();
+    open.set(0, 4, Some(Piece::new(PieceType::King, Color::White)));
+    open.set(7, 7, Some(Piece::new(PieceType::King, Color::Black)));
+    open.set(7, 4, Some(Piece::new(PieceType::Rook, Color::Black)));
+    open.find_and_set_location_of_kings();
+    let (att_w, att_b) = build_attack_maps(&open);
+    let open_score = king_ring_pressure(&open, Color::White, 24, Some((0, 4)), &att_w, &att_b);
+
+    let mut blocked = open;
+    blocked.set(1, 4, Some(Piece::new(PieceType::Pawn, Color::White)));
+    let (att_w_blocked, att_b_blocked) = build_attack_maps(&blocked);
+    let blocked_score = king_ring_pressure(
+        &blocked, Color::White, 24, Some((0, 4)), &att_w_blocked, &att_b_blocked
+    );
+
+    assert!(open_score < blocked_score);
+}
+
+#[test]
+fn king_ring_pressure_rewards_non_king_defenders() {
+    let mut unsafe_board = Board::empty();
+    unsafe_board.set(0, 6, Some(Piece::new(PieceType::King, Color::White)));
+    unsafe_board.set(7, 7, Some(Piece::new(PieceType::King, Color::Black)));
+    unsafe_board.set(4, 2, Some(Piece::new(PieceType::Bishop, Color::Black)));
+    unsafe_board.find_and_set_location_of_kings();
+    let (att_w, att_b) = build_attack_maps(&unsafe_board);
+    let unsafe_score = king_ring_pressure(
+        &unsafe_board, Color::White, 24, Some((0, 6)), &att_w, &att_b
+    );
+
+    let mut defended_board = unsafe_board;
+    defended_board.set(0, 7, Some(Piece::new(PieceType::Knight, Color::White)));
+    let (att_w_def, att_b_def) = build_attack_maps(&defended_board);
+    let defended_score = king_ring_pressure(
+        &defended_board, Color::White, 24, Some((0, 6)), &att_w_def, &att_b_def
+    );
+
+    assert!(defended_score > unsafe_score);
 }

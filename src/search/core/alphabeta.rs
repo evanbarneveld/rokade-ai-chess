@@ -17,6 +17,21 @@ const MOVE_ORDER_CONTINUATION_DIV: i32 = 16;
 const MOVE_ORDER_CONTINUATION_CAP: i32 = 150_000;
 const MOVE_ORDER_SEE_SCALE: i32 = 4;
 const MOVE_ORDER_SEE_CAP: i32 = 2_000;
+const RAZORING_MAX_DEPTH: usize = 1;
+const RFP_MAX_DEPTH: usize = 2;
+const LMP_MAX_DEPTH: usize = 2;
+const LMP_QUIET_BASE: i32 = 6;
+const LMP_QUIET_PER_DEPTH: i32 = 4;
+const CHECK_EXTENSION_MAX_DEPTH: usize = 3;
+pub(crate) const CHECK_EXTENSION_BUDGET: u8 = 1;
+const SINGULAR_EXTENSION_MIN_DEPTH: usize = 6;
+const SINGULAR_SEARCH_REDUCTION: usize = 2;
+const SINGULAR_MARGIN: i32 = 80;
+const SINGULAR_ALT_LIMIT: usize = 6;
+const RAZOR_MARGIN_DEPTH_1: i32 = 220;
+const RAZOR_MARGIN_DEPTH_2: i32 = 420;
+const RFP_MARGIN_DEPTH_2: i32 = 160;
+const RFP_MARGIN_DEPTH_3: i32 = 260;
 
 
 // ============================================================
@@ -37,6 +52,7 @@ pub fn alphabeta(
     rep_stack: &mut RepetitionStack,
     allow_null_move: bool,
     prev_move: Option<((usize, usize), (usize, usize))>,
+    check_extension_budget: u8,
 ) -> i32 {
     let to_move = game_state.active_color();
     ctx.bump_node();
@@ -106,6 +122,24 @@ pub fn alphabeta(
     // Extract TT move hint before any mutable borrows
     let tt_entry = tt.probe(key);
     let tt_move_hint: Option<(u8, u8)> = tt_entry.map(|e| (e.best_from, e.best_to));
+    let singular_info = tt_entry.and_then(|entry| {
+        if entry.bound != Bound::Exact {
+            return None;
+        }
+        let entry_depth = entry.depth as usize;
+        if entry_depth + 1 < depth {
+            return None;
+        }
+        let score = from_tt_score(entry.score, ply);
+        if score.abs() >= MATE_VALUE - 100 {
+            return None;
+        }
+        Some(SingularInfo {
+            mv: decode_move(entry.best_from, entry.best_to),
+            score,
+            depth: entry_depth,
+        })
+    });
 
     if let Some(entry) = tt_entry
         && entry.depth as usize >= depth {
@@ -176,6 +210,69 @@ pub fn alphabeta(
         return value;
     }
 
+    // Reverse futility pruning and razoring at shallow depths (skip in check)
+    let ply_u = if ply < 0 { 0 } else { ply as usize };
+    if (depth <= RFP_MAX_DEPTH || depth <= RAZORING_MAX_DEPTH)
+        && ply >= 2
+        && ply_u.saturating_add(depth) >= 5 {
+        let in_check = game_state.mutable_board().is_side_in_check(to_move);
+        if !in_check {
+            let is_pv = beta.saturating_sub(alpha) > 1;
+            if is_pv {
+                // Skip shallow pruning in PV nodes to avoid missing tactical lines.
+            } else {
+                if !has_checking_move(game_state, to_move) {
+                    let static_eval = evaluate_position(game_state.board(), to_move);
+                    let maximizing = to_move == Color::White;
+
+                if depth >= 2 && depth <= RFP_MAX_DEPTH {
+                    let margin = rfp_margin(depth);
+                    let rfp_cut = if maximizing {
+                        static_eval - margin >= beta
+                    } else {
+                        static_eval + margin <= alpha
+                    };
+                    if rfp_cut {
+                        if pushed_rep {
+                            rep_stack.pop();
+                        }
+                        return static_eval;
+                    }
+                }
+
+                    if depth <= RAZORING_MAX_DEPTH {
+                    let margin = razor_margin(depth);
+                    let razor_cut = if maximizing {
+                        static_eval + margin <= alpha
+                    } else {
+                        static_eval - margin >= beta
+                    };
+                    if razor_cut {
+                        let score = qsearch(ctx, game_state, alpha, beta, rep_stack);
+                        if score == SEARCH_ABORTED {
+                            if pushed_rep {
+                                rep_stack.pop();
+                            }
+                            return SEARCH_ABORTED;
+                        }
+                        let should_prune = if maximizing {
+                            score <= alpha
+                        } else {
+                            score >= beta
+                        };
+                        if should_prune {
+                            if pushed_rep {
+                                rep_stack.pop();
+                            }
+                            return score;
+                        }
+                    }
+                    }
+                }
+            }
+        }
+    }
+
     // Generate and order moves
     let moves = find_all_valid_moves(game_state);
 
@@ -216,6 +313,8 @@ pub fn alphabeta(
         prev_move,
         ctx,
         heuristics,
+        singular_info,
+        check_extension_budget,
     );
 
     // Pop repetition stack
@@ -258,6 +357,13 @@ struct MoveSearchResult {
     best_from_to: Option<((usize, usize), (usize, usize))>,
 }
 
+#[derive(Copy, Clone)]
+struct SingularInfo {
+    mv: ((usize, usize), (usize, usize)),
+    score: i32,
+    depth: usize,
+}
+
 /// Search all moves and update alpha/beta bounds
 fn search_moves(
     moves: Vec<((usize, usize), (usize, usize), Option<char>)>,
@@ -272,6 +378,8 @@ fn search_moves(
     prev_move: Option<((usize, usize), (usize, usize))>,
     ctx: &SearchContext,
     heuristics: &mut SearchHeuristics,
+    singular_info: Option<SingularInfo>,
+    check_extension_budget: u8,
 ) -> MoveSearchResult {
     let maximizing = to_move == Color::White;
     let mut current_value = initial_value(maximizing);
@@ -279,6 +387,13 @@ fn search_moves(
     let mut is_first_move = true;
     let mut move_index: i32 = 0;
     let history_bonus = (depth as i32) * (depth as i32);
+    let in_check = game_state.mutable_board().is_side_in_check(to_move);
+    let is_pv = beta.saturating_sub(alpha) > 1;
+    let singular_candidate = if is_pv && !in_check && depth >= SINGULAR_EXTENSION_MIN_DEPTH && moves.len() > 1 {
+        singular_info
+    } else {
+        None
+    };
 
     #[cfg(feature = "debug-search")]
     let indent = "  ".repeat(ply as usize);
@@ -296,11 +411,34 @@ fn search_moves(
         None
     };
 
-    for (from, to, promo) in moves {
+    for &(from, to, promo) in moves.iter() {
+        let mut singular_extend = false;
+        if let Some(singular) = singular_candidate
+            && singular.mv == (from, to)
+            && singular.depth + 1 >= depth
+            && move_index == 0
+        {
+            singular_extend = is_singular_extension(
+                ctx,
+                game_state,
+                depth,
+                ply,
+                tt,
+                rep_stack,
+                to_move,
+                singular.mv,
+                singular.score,
+                &moves,
+                prev_move,
+            );
+        }
+
         let u = game_state.make_move_fast(from, to, promo);
 
         // Passed-pawn extension
         let mut child_depth = depth.saturating_sub(1);
+        let mut extended = false;
+        let mut check_extension_used = false;
         let is_capture = u.ep_captured_piece.is_some() || u.board_undo.captured.is_some();
 
         {
@@ -316,15 +454,37 @@ fn search_moves(
                 };
                 if adv >= 5 {
                     child_depth = child_depth.saturating_add(1);
+                    extended = true;
                 }
             }
         }
 
         let gives_check = game_state.mutable_board().is_side_in_check(opponent(to_move));
         let quiet = !is_capture && promo.is_none();
-        let allow_reduce = !gives_check;
+        let allow_reduce = !gives_check && !singular_extend;
         let captured_piece = u.board_undo.captured.or(u.ep_captured_piece);
         let moved_piece_type = u.board_undo.moved.map(|p| p.get_type());
+
+        if singular_extend {
+            child_depth = child_depth.saturating_add(1);
+            extended = true;
+        }
+
+        if !extended && check_extension_budget > 0 && should_check_extend(depth, in_check, gives_check) {
+            child_depth = child_depth.saturating_add(1);
+            check_extension_used = true;
+        }
+        let next_check_extension_budget = if check_extension_used {
+            check_extension_budget.saturating_sub(1)
+        } else {
+            check_extension_budget
+        };
+
+        if should_late_move_prune(depth, move_index, quiet, gives_check, in_check, is_pv) {
+            game_state.unmake_move_fast(u);
+            move_index += 1;
+            continue;
+        }
 
         // Frontier futility pruning: skip quiet moves at depth=1 that can't improve position
         if let Some(eval) = static_eval
@@ -380,6 +540,7 @@ fn search_moves(
                 rep_stack,
                 true,
                 Some((from, to)),
+                next_check_extension_budget,
             )
         } else {
             // Null-window search (PVS)
@@ -405,6 +566,7 @@ fn search_moves(
                 rep_stack,
                 true,
                 Some((from, to)),
+                next_check_extension_budget,
             );
 
             // Re-search with full window if needed
@@ -440,6 +602,7 @@ fn search_moves(
                     rep_stack,
                     true,
                     Some((from, to)),
+                    next_check_extension_budget,
                 );
             }
             sc
@@ -584,6 +747,24 @@ fn search_moves(
 struct MoveOrderingContext {
     half_move_clock: u32,
     prev_move: Option<((usize, usize), (usize, usize))>,
+}
+
+#[inline]
+fn razor_margin(depth: usize) -> i32 {
+    match depth {
+        1 => RAZOR_MARGIN_DEPTH_1,
+        2 => RAZOR_MARGIN_DEPTH_2,
+        _ => RAZOR_MARGIN_DEPTH_2,
+    }
+}
+
+#[inline]
+fn rfp_margin(depth: usize) -> i32 {
+    match depth {
+        2 => RFP_MARGIN_DEPTH_2,
+        3 => RFP_MARGIN_DEPTH_3,
+        _ => RFP_MARGIN_DEPTH_3,
+    }
 }
 
 #[inline]
@@ -932,5 +1113,123 @@ fn opponent(color: Color) -> Color {
         Color::White => Color::Black,
         Color::Black => Color::White,
     }
+}
+
+#[inline]
+pub(crate) fn should_late_move_prune(
+    depth: usize,
+    move_index: i32,
+    is_quiet: bool,
+    gives_check: bool,
+    in_check: bool,
+    is_pv: bool,
+) -> bool {
+    if depth == 0 || depth > LMP_MAX_DEPTH {
+        return false;
+    }
+    if in_check || is_pv || !is_quiet || gives_check {
+        return false;
+    }
+    let limit = LMP_QUIET_BASE + (depth as i32 * LMP_QUIET_PER_DEPTH);
+    move_index >= limit
+}
+
+#[inline]
+pub(crate) fn should_check_extend(depth: usize, in_check: bool, gives_check: bool) -> bool {
+    if depth == 0 || depth > CHECK_EXTENSION_MAX_DEPTH {
+        return false;
+    }
+    in_check || gives_check
+}
+
+#[inline]
+pub(crate) fn is_singular_extension(
+    ctx: &SearchContext,
+    game_state: &mut GameState,
+    depth: usize,
+    ply: i32,
+    tt: &TranspositionTable,
+    rep_stack: &mut RepetitionStack,
+    to_move: Color,
+    best_move: ((usize, usize), (usize, usize)),
+    best_score: i32,
+    moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
+    _prev_move: Option<((usize, usize), (usize, usize))>,
+) -> bool {
+    if depth < SINGULAR_EXTENSION_MIN_DEPTH || moves.len() <= 1 {
+        return false;
+    }
+
+    let verify_depth = depth.saturating_sub(1 + SINGULAR_SEARCH_REDUCTION);
+    if verify_depth == 0 {
+        return false;
+    }
+
+    let maximizing = to_move == Color::White;
+    let target = if maximizing {
+        best_score.saturating_sub(SINGULAR_MARGIN)
+    } else {
+        best_score.saturating_add(SINGULAR_MARGIN)
+    };
+    let (a, b) = if maximizing {
+        (target.saturating_sub(1), target)
+    } else {
+        (target, target.saturating_add(1))
+    };
+
+    let mut local_heuristics = SearchHeuristics::new(128);
+    let mut checked = 0usize;
+
+    for &(from, to, promo) in moves.iter() {
+        if (from, to) == best_move {
+            continue;
+        }
+        let u = game_state.make_move_fast(from, to, promo);
+        let sc = alphabeta(
+            ctx,
+            &mut local_heuristics,
+            game_state,
+            verify_depth,
+            a,
+            b,
+            ply + 1,
+            tt,
+            rep_stack,
+            false,
+            Some((from, to)),
+            0,
+        );
+        game_state.unmake_move_fast(u);
+        if sc == SEARCH_ABORTED {
+            return false;
+        }
+        if maximizing {
+            if sc >= target {
+                return false;
+            }
+        } else if sc <= target {
+            return false;
+        }
+        checked += 1;
+        if checked >= SINGULAR_ALT_LIMIT {
+            break;
+        }
+    }
+
+    checked > 0
+}
+
+#[inline]
+fn has_checking_move(game_state: &mut GameState, side: Color) -> bool {
+    let moves = find_all_valid_moves(game_state);
+    for &(from, to, promo) in moves.iter() {
+        let u = game_state.make_move_fast(from, to, promo);
+        let gives_check = game_state.mutable_board().is_side_in_check(opponent(side));
+        game_state.unmake_move_fast(u);
+        if gives_check {
+            return true;
+        }
+    }
+    false
 }
 

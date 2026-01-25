@@ -95,6 +95,65 @@ pub fn king_safety(
     score
 }
 
+const KING_RING_ATTACK_WEIGHT: i32 = 4;
+const KING_RING_UNSAFE_WEIGHT: i32 = 6;
+const KING_RING_CHECK_WEIGHT: i32 = 10;
+
+pub fn king_ring_pressure(
+    board: &Board,
+    color: Color,
+    phase: i32,
+    king_pos: Option<(usize, usize)>,
+    att_w: &[[bool; 8]; 8],
+    att_b: &[[bool; 8]; 8],
+) -> i32 {
+    let (r, c) = match king_pos {
+        Some(pos) => pos,
+        None => return 0,
+    };
+
+    let enemy = opponent(color);
+    let enemy_has_queen = has_piece_type(board, enemy, PieceType::Queen);
+    let queen_scale = if enemy_has_queen { 100 } else { 60 };
+
+    let enemy_att = match color {
+        Color::White => att_b,
+        Color::Black => att_w,
+    };
+
+    let mut ring_attacks = 0i32;
+    let mut unsafe_attacks = 0i32;
+
+    for dr in -1..=1 {
+        for dc in -1..=1 {
+            if dr == 0 && dc == 0 {
+                continue;
+            }
+            let nr = r as i32 + dr;
+            let nc = c as i32 + dc;
+            if !(0..8).contains(&nr) || !(0..8).contains(&nc) {
+                continue;
+            }
+            let nr = nr as usize;
+            let nc = nc as usize;
+            if enemy_att[nr][nc] {
+                ring_attacks += 1;
+                if !is_square_attacked_by_color_excluding_king(board, (nr, nc), color) {
+                    unsafe_attacks += 1;
+                }
+            }
+        }
+    }
+
+    let direct_check = if enemy_att[r][c] { 1 } else { 0 };
+    let ring_penalty = ring_attacks * KING_RING_ATTACK_WEIGHT
+        + unsafe_attacks * KING_RING_UNSAFE_WEIGHT
+        + direct_check * KING_RING_CHECK_WEIGHT;
+
+    let scaled = (ring_penalty * phase * queen_scale) / 2400;
+    -scaled
+}
+
 pub fn king_activity_endgame(king_pos: Option<(usize, usize)>) -> i32 {
     if let Some((r, c)) = king_pos {
         let centers: [(i32, i32); 4] = [(3,3),(3,4),(4,3),(4,4)];
@@ -244,6 +303,75 @@ fn has_piece_type(board: &Board, color: Color, pt: PieceType) -> bool {
             }
         }
     }
+    false
+}
+
+fn is_square_attacked_by_color_excluding_king(
+    board: &Board,
+    square: (usize, usize),
+    color: Color,
+) -> bool {
+    let (r, c) = square;
+
+    let pawn_row = match color {
+        Color::White => r.checked_sub(1),
+        Color::Black => if r < 7 { Some(r + 1) } else { None },
+    };
+    if let Some(pr) = pawn_row {
+        for dc in [-1i32, 1] {
+            let pc_i = c as i32 + dc;
+            if (0..=7).contains(&pc_i)
+                && is_piece(board, pr, pc_i as usize, color, PieceType::Pawn)
+            {
+                return true;
+            }
+        }
+    }
+
+    for (dr, dc) in [
+        (2, 1), (1, 2), (-1, 2), (-2, 1),
+        (-2, -1), (-1, -2), (1, -2), (2, -1),
+    ] {
+        let nr = r as i32 + dr;
+        let nc = c as i32 + dc;
+        if (0..8).contains(&nr)
+            && (0..8).contains(&nc)
+            && is_piece(board, nr as usize, nc as usize, color, PieceType::Knight)
+        {
+            return true;
+        }
+    }
+
+    for (dr, dc) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+        let mut nr = r as i32 + dr;
+        let mut nc = c as i32 + dc;
+        while (0..8).contains(&nr) && (0..8).contains(&nc) {
+            if let Some(p) = board.get(nr as usize, nc as usize) {
+                if p.get_color() == color && matches!(p.get_type(), PieceType::Bishop | PieceType::Queen) {
+                    return true;
+                }
+                break;
+            }
+            nr += dr;
+            nc += dc;
+        }
+    }
+
+    for (dr, dc) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let mut nr = r as i32 + dr;
+        let mut nc = c as i32 + dc;
+        while (0..8).contains(&nr) && (0..8).contains(&nc) {
+            if let Some(p) = board.get(nr as usize, nc as usize) {
+                if p.get_color() == color && matches!(p.get_type(), PieceType::Rook | PieceType::Queen) {
+                    return true;
+                }
+                break;
+            }
+            nr += dr;
+            nc += dc;
+        }
+    }
+
     false
 }
 

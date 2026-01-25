@@ -1,6 +1,12 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluation_helpers::{find_king, is_piece, opponent, FileClearance, PawnFileCounts};
+use crate::board::evaluation_helpers::{count_rook_mobility, find_king, is_piece, opponent, taper_general, FileClearance, PawnFileCounts};
+
+// Rook mobility constants
+const ROOK_MOBILITY_BASELINE: i32 = 7;   // Average rook has ~7 safe squares
+const ROOK_MOBILITY_MG: i32 = 3;         // Centipawns per safe square above baseline
+const ROOK_MOBILITY_EG: i32 = 4;         // More important in endgame
+const ROOK_UNSAFE_PENALTY: i32 = 1;      // Small penalty (rooks often operate on open files)
 
 pub fn evaluate_rook(
     board: &Board,
@@ -14,6 +20,18 @@ pub fn evaluate_rook(
     file_clearance: &FileClearance,
 ) -> i32 {
     let mut val = 0;
+
+    // Safe mobility evaluation
+    let (total, safe) = count_rook_mobility(board, row, col, color);
+    let mobility_delta = safe - ROOK_MOBILITY_BASELINE;
+    val += taper_general(mobility_delta * ROOK_MOBILITY_MG, mobility_delta * ROOK_MOBILITY_EG, phase);
+
+    // Small penalty for squares only reachable unsafely
+    let unsafe_squares = total - safe;
+    if unsafe_squares > 0 {
+        val -= (unsafe_squares * ROOK_UNSAFE_PENALTY * phase) / 24;
+    }
+
     if eg > 0 {
         let enemy = opponent(color);
         // Rook on 7th

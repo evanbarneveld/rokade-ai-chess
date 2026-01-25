@@ -145,42 +145,156 @@ pub(crate) fn apply_color_score(score: i32, color: Color) -> i32 {
     }
 }
 
+/// Count knight mobility, distinguishing safe vs unsafe squares.
+/// Returns (total_targets, safe_targets) where safe means not attacked by enemy pawn.
 #[inline]
-pub(crate) fn count_knight_targets(board: &Board, r: usize, c: usize, color: Color) -> usize {
+pub(crate) fn count_knight_mobility(board: &Board, r: usize, c: usize, color: Color) -> (i32, i32) {
     const K: [(i32, i32); 8] = [(2, 1), (1, 2), (-1, 2), (-2, 1), (-2, -1), (-1, -2), (1, -2), (2, -1)];
-    let mut n = 0usize;
+    let enemy = opponent(color);
+    let mut total = 0i32;
+    let mut safe = 0i32;
+
     for (dr, dc) in K {
         let nr = r as i32 + dr;
         let nc = c as i32 + dc;
-        if (0..8).contains(&nr) && (0..8).contains(&nc) {
-            match board.get(nr as usize, nc as usize) {
-                None => n += 1,
-                Some(tp) if tp.get_color() != color => n += 1,
-                _ => {}
+        if !(0..8).contains(&nr) || !(0..8).contains(&nc) {
+            continue;
+        }
+        let nr_u = nr as usize;
+        let nc_u = nc as usize;
+
+        // Check if square is accessible (empty or enemy piece)
+        let accessible = match board.get(nr_u, nc_u) {
+            None => true,
+            Some(p) => p.get_color() != color,
+        };
+
+        if accessible {
+            total += 1;
+            // Check if the target square is safe (not attacked by enemy pawn)
+            if !square_attacked_by_enemy_pawn(board, nr_u, nc_u, enemy) {
+                safe += 1;
             }
         }
     }
-    n
+
+    (total, safe)
 }
 
+/// Count bishop mobility, distinguishing safe vs unsafe squares.
+/// Returns (total_targets, safe_targets) where safe means not attacked by enemy pawn.
 #[inline]
-pub(crate) fn count_slider_targets(board: &Board, r: usize, c: usize, color: Color, dirs: &[(i32, i32)]) -> usize {
-    let mut n = 0usize;
-    for (dr, dc) in dirs.iter() {
+pub(crate) fn count_bishop_mobility(board: &Board, r: usize, c: usize, color: Color) -> (i32, i32) {
+    const DIRS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+    let enemy = opponent(color);
+    let mut total = 0i32;
+    let mut safe = 0i32;
+
+    for (dr, dc) in DIRS {
         let mut nr = r as i32 + dr;
         let mut nc = c as i32 + dc;
         while (0..8).contains(&nr) && (0..8).contains(&nc) {
-            if let Some(tp) = board.get(nr as usize, nc as usize) {
-                if tp.get_color() != color {
-                    n += 1;
+            let nr_u = nr as usize;
+            let nc_u = nc as usize;
+
+            if let Some(p) = board.get(nr_u, nc_u) {
+                // Can capture enemy piece (except king)
+                if p.get_color() != color && p.get_type() != PieceType::King {
+                    total += 1;
+                    if !square_attacked_by_enemy_pawn(board, nr_u, nc_u, enemy) {
+                        safe += 1;
+                    }
                 }
                 break;
             } else {
-                n += 1;
+                total += 1;
+                if !square_attacked_by_enemy_pawn(board, nr_u, nc_u, enemy) {
+                    safe += 1;
+                }
             }
             nr += dr;
             nc += dc;
         }
     }
-    n
+
+    (total, safe)
+}
+
+/// Count rook mobility, distinguishing safe vs unsafe squares.
+/// Returns (total_targets, safe_targets) where safe means not attacked by enemy pawn.
+#[inline]
+pub(crate) fn count_rook_mobility(board: &Board, r: usize, c: usize, color: Color) -> (i32, i32) {
+    const DIRS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+    let enemy = opponent(color);
+    let mut total = 0i32;
+    let mut safe = 0i32;
+
+    for (dr, dc) in DIRS {
+        let mut nr = r as i32 + dr;
+        let mut nc = c as i32 + dc;
+        while (0..8).contains(&nr) && (0..8).contains(&nc) {
+            let nr_u = nr as usize;
+            let nc_u = nc as usize;
+
+            if let Some(p) = board.get(nr_u, nc_u) {
+                if p.get_color() != color && p.get_type() != PieceType::King {
+                    total += 1;
+                    if !square_attacked_by_enemy_pawn(board, nr_u, nc_u, enemy) {
+                        safe += 1;
+                    }
+                }
+                break;
+            } else {
+                total += 1;
+                if !square_attacked_by_enemy_pawn(board, nr_u, nc_u, enemy) {
+                    safe += 1;
+                }
+            }
+            nr += dr;
+            nc += dc;
+        }
+    }
+
+    (total, safe)
+}
+
+/// Count queen mobility, distinguishing safe vs unsafe squares.
+/// Returns (total_targets, safe_targets) where safe means not attacked by enemy pawn.
+#[inline]
+pub(crate) fn count_queen_mobility(board: &Board, r: usize, c: usize, color: Color) -> (i32, i32) {
+    const DIRS: [(i32, i32); 8] = [
+        (1, 0), (-1, 0), (0, 1), (0, -1),
+        (1, 1), (1, -1), (-1, 1), (-1, -1),
+    ];
+    let enemy = opponent(color);
+    let mut total = 0i32;
+    let mut safe = 0i32;
+
+    for (dr, dc) in DIRS {
+        let mut nr = r as i32 + dr;
+        let mut nc = c as i32 + dc;
+        while (0..8).contains(&nr) && (0..8).contains(&nc) {
+            let nr_u = nr as usize;
+            let nc_u = nc as usize;
+
+            if let Some(p) = board.get(nr_u, nc_u) {
+                if p.get_color() != color && p.get_type() != PieceType::King {
+                    total += 1;
+                    if !square_attacked_by_enemy_pawn(board, nr_u, nc_u, enemy) {
+                        safe += 1;
+                    }
+                }
+                break;
+            } else {
+                total += 1;
+                if !square_attacked_by_enemy_pawn(board, nr_u, nc_u, enemy) {
+                    safe += 1;
+                }
+            }
+            nr += dr;
+            nc += dc;
+        }
+    }
+
+    (total, safe)
 }

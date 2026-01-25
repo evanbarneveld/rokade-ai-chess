@@ -101,6 +101,7 @@ pub fn prune_null_moves(
                     rep_stack,
                     false, // Prevent consecutive null moves
                     prev_move,
+                    0,
                 );
 
                 // Unmake null move

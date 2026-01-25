@@ -1,6 +1,6 @@
 use crate::history::history::History;
 use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
-use crate::search::management::aspiration::{probe_with_aspiration, ASP_WINDOW_INIT_CP};
+use crate::search::management::aspiration::{next_aspiration_window, probe_with_aspiration, ASP_WINDOW_INIT_CP};
 use crate::search::integration::playing_strength::select_move_based_using_strength_promo;
 
 // Re-export find_all_valid_moves for backward compatibility
@@ -224,6 +224,7 @@ fn find_best_move_internal(
 
     // Iterative Deepening + Aspiration windows at root (serial evaluation for stability)
     let mut _last_score: i32 = 0;
+    let mut window: i32 = ASP_WINDOW_INIT_CP;
     let mut chosen: Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> = None;
 
     if ID_ITERATIONS_ENABLED {
@@ -239,7 +240,6 @@ fn find_best_move_internal(
             }
             tt.next_age();
             // Reset aspiration window at the start of each iteration
-            let mut window: i32 = ASP_WINDOW_INIT_CP;
             // Only collect scores on final depth iteration
             let should_collect = depth_now == effective_depth && all_move_scores.is_some();
             let ((bf, bt, bpromo), best_adj, best_raw) = if ASPIRATION_WINDOWS_ENABLED {
@@ -312,7 +312,11 @@ fn find_best_move_internal(
                 last_best_move = Some((bf, bt, bpromo));
             }
 
+            let score_delta = (best_raw - _last_score).abs();
             _last_score = best_raw;
+            if ASPIRATION_WINDOWS_ENABLED {
+                window = next_aspiration_window(window, score_delta);
+            }
             // Emit PV/info for this iteration, including TT hashfull permille
             let hf = tt.hashfull_permille();
             let pv = build_pv_for_root(&gs, bf, bt, bpromo, tt, depth_now);

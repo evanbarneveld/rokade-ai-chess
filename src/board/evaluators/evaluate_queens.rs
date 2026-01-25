@@ -1,12 +1,30 @@
 use crate::board::Board;
-use crate::board::evaluation_helpers::{chebyshev_dist, is_piece, PawnFileCounts};
+use crate::board::evaluation_helpers::{chebyshev_dist, count_queen_mobility, is_piece, taper_general, PawnFileCounts};
 use crate::piece::pieces::{Color, PieceType};
 
 const QUEEN_CENTER_BONUS: i32 = 4;
 const QUEEN_CENTER_MAX_DIST: i32 = 4;
 
+// Queen mobility constants (lower weights - queen mobility is less critical)
+const QUEEN_MOBILITY_BASELINE: i32 = 14;  // Queens have high mobility
+const QUEEN_MOBILITY_MG: i32 = 1;         // Small bonus per safe square
+const QUEEN_MOBILITY_EG: i32 = 2;         // Slightly more in endgame
+const QUEEN_UNSAFE_PENALTY: i32 = 1;      // Penalty for unsafe squares
+
 pub fn evaluate_queen(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> i32 {
     let mut val = 0;
+
+    // Safe mobility evaluation
+    let (total, safe) = count_queen_mobility(board, row, col, color);
+    let mobility_delta = safe - QUEEN_MOBILITY_BASELINE;
+    val += taper_general(mobility_delta * QUEEN_MOBILITY_MG, mobility_delta * QUEEN_MOBILITY_EG, phase);
+
+    // Penalty for squares only reachable unsafely
+    let unsafe_squares = total - safe;
+    if unsafe_squares > 0 {
+        val -= (unsafe_squares * QUEEN_UNSAFE_PENALTY * phase) / 24;
+    }
+
     if phase > 0 {
         if col == 0 || col == 7 {
             let deep = match color { Color::White => row >= 3, Color::Black => row <= 4 };

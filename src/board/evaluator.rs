@@ -1,6 +1,6 @@
 use crate::board::attack_maps::build_attack_maps;
 use crate::board::evaluation_helpers::{
-    apply_color_score, chebyshev_dist, count_knight_targets, count_slider_targets, find_king,
+    apply_color_score, chebyshev_dist, find_king,
     get_piece_type, is_color, is_piece, material_value, square_attacked_by_enemy_pawn,
 };
 use crate::board::Board;
@@ -57,6 +57,7 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     score += ctx.evaluate_global_features();
     score += ctx.evaluate_piece_interactions();
     score += ctx.evaluate_threats();
+    score += ctx.evaluate_minor_piece_imbalance();
 
     apply_drawish_tweaks(&ctx.stats, score)
 }
@@ -73,6 +74,11 @@ struct BoardStats {
     white_bishop_on_dark: bool,
     black_bishop_on_dark: bool,
     drawish_material: MaterialDrawishness,
+    blocked_pawns: i32,      // Pawns blocked by enemy pawn directly ahead
+    white_knights: i32,
+    black_knights: i32,
+    white_bishops: i32,
+    black_bishops: i32,
 }
 
 #[derive(Default)]
@@ -93,6 +99,11 @@ impl BoardStats {
         let mut white_bishop_on_dark = false;
         let mut black_bishop_on_dark = false;
         let mut drawish = MaterialDrawishness::default();
+        let mut blocked_pawns = 0;
+        let mut white_knights = 0;
+        let mut black_knights = 0;
+        let mut white_bishops = 0;
+        let mut black_bishops = 0;
 
         for r in 0..8 {
             for c in 0..8 {
@@ -114,19 +125,37 @@ impl BoardStats {
                         PieceType::Pawn => {
                             if color == Color::White {
                                 white_pawns += 1;
+                                // Check if blocked by enemy pawn
+                                if r < 7 {
+                                    if let Some(blocker) = board.get(r + 1, c) {
+                                        if blocker.get_type() == PieceType::Pawn && blocker.get_color() == Color::Black {
+                                            blocked_pawns += 1;
+                                        }
+                                    }
+                                }
                             } else {
                                 black_pawns += 1;
+                                // Check if blocked by enemy pawn
+                                if r > 0 {
+                                    if let Some(blocker) = board.get(r - 1, c) {
+                                        if blocker.get_type() == PieceType::Pawn && blocker.get_color() == Color::White {
+                                            blocked_pawns += 1;
+                                        }
+                                    }
+                                }
                             }
                             drawish.pawns += 1;
                         }
                         PieceType::Bishop => {
                             if color == Color::White {
                                 drawish.white_bishops += 1;
+                                white_bishops += 1;
                                 if (r + c) % 2 == 1 {
                                     white_bishop_on_dark = true;
                                 }
                             } else {
                                 drawish.black_bishops += 1;
+                                black_bishops += 1;
                                 if (r + c) % 2 == 1 {
                                     black_bishop_on_dark = true;
                                 }
@@ -134,6 +163,11 @@ impl BoardStats {
                             drawish.minors += 1;
                         }
                         PieceType::Knight => {
+                            if color == Color::White {
+                                white_knights += 1;
+                            } else {
+                                black_knights += 1;
+                            }
                             drawish.minors += 1;
                         }
                         PieceType::Rook => {
@@ -155,6 +189,11 @@ impl BoardStats {
             white_bishop_on_dark,
             black_bishop_on_dark,
             drawish_material: drawish,
+            blocked_pawns,
+            white_knights,
+            black_knights,
+            white_bishops,
+            black_bishops,
         }
     }
 
@@ -217,6 +256,66 @@ impl<'a> EvalContext<'a> {
         self.stats.phase
     }
 
+    /// Calculate position openness: 0 = very closed, 100 = very open.
+    /// Based on total pawns and blocked pawns.
+    fn openness(&self) -> i32 {
+        let total_pawns = self.stats.white_pawns + self.stats.black_pawns;
+        let blocked = self.stats.blocked_pawns;
+
+        // Fewer pawns = more open
+        // More blocked pawns = more closed
+        // Start with 100, subtract for pawns and blocked pawns
+        let pawn_factor = (16 - total_pawns) * 4;  // 0-64 range
+        let blocked_factor = -blocked * 8;          // Penalty for blocked pawns
+
+        (50 + pawn_factor + blocked_factor).clamp(0, 100)
+    }
+
+    /// Evaluate knight vs bishop imbalance based on position openness.
+    /// Returns score adjustment in White's perspective.
+    fn evaluate_minor_piece_imbalance(&self) -> i32 {
+        let openness = self.openness();
+        let phase = self.phase();
+
+        // Adjustment per piece: positive = good in this position type
+        // Open positions (openness > 60): bishops +, knights -
+        // Closed positions (openness < 40): knights +, bishops -
+        // Neutral (40-60): no adjustment
+
+        let adjustment_per_piece = if openness > 60 {
+            // Open position: bishops better
+            (openness - 60) / 4  // Max +10 per piece
+        } else if openness < 40 {
+            // Closed position: knights better (we'll apply opposite sign)
+            (40 - openness) / 4  // Max +10 per piece
+        } else {
+            0
+        };
+
+        if adjustment_per_piece == 0 {
+            return 0;
+        }
+
+        let mut score = 0;
+
+        if openness > 60 {
+            // Bishops get bonus, knights get penalty
+            score += adjustment_per_piece * self.stats.white_bishops;
+            score -= adjustment_per_piece * self.stats.white_knights;
+            score -= adjustment_per_piece * self.stats.black_bishops;
+            score += adjustment_per_piece * self.stats.black_knights;
+        } else {
+            // Knights get bonus, bishops get penalty
+            score += adjustment_per_piece * self.stats.white_knights;
+            score -= adjustment_per_piece * self.stats.white_bishops;
+            score -= adjustment_per_piece * self.stats.black_knights;
+            score += adjustment_per_piece * self.stats.black_bishops;
+        }
+
+        // Scale by phase (more important in middlegame)
+        (score * phase) / 24
+    }
+
     fn evaluate_piece(&self, pt: PieceType, row: usize, col: usize, color: Color) -> i32 {
         let mut val = material_value(pt) + pst_value_tapered(pt, row, col, color, self.phase());
 
@@ -270,45 +369,10 @@ impl<'a> EvalContext<'a> {
     }
 
     fn evaluate_mobility(&self) -> i32 {
-        // Calculate mobility from existing attack maps instead of recalculating
-        let mut mob_w = 0;
-        let mut mob_b = 0;
-
-        // Count attacked squares, weighted by piece type
-        for r in 0..8 {
-            for c in 0..8 {
-                if let Some(p) = self.board.get(r, c) {
-                    let color = p.get_color();
-                    let pt = p.get_type();
-
-                    // Count pseudo-legal moves based on piece type
-                    let mobility = match pt {
-                        PieceType::Knight => count_knight_targets(self.board, r, c, color) as i32 * 2,
-                        PieceType::Bishop => count_slider_targets(self.board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1)]) as i32 * 3,
-                        PieceType::Rook => count_slider_targets(self.board, r, c, color, &[(1,0),(-1,0),(0,1),(0,-1)]) as i32 * 3,
-                        PieceType::Queen => count_slider_targets(self.board, r, c, color, &[(1,1),(1,-1),(-1,1),(-1,-1),(1,0),(-1,0),(0,1),(0,-1)]) as i32,
-                        _ => 0,
-                    };
-
-                    if matches!(color, Color::White) {
-                        mob_w += mobility;
-                    } else {
-                        mob_b += mobility;
-                    }
-                }
-            }
-        }
-
-        let mut score = (mob_w * self.phase()) / 24;
-        score -= (mob_b * self.phase()) / 24;
-
-        if self.phase() > 12 {
-            let damp_w = (mob_w / 20) * (self.phase() - 12) / 12;
-            let damp_b = (mob_b / 20) * (self.phase() - 12) / 12;
-            score -= damp_w;
-            score += damp_b;
-        }
-        score
+        // Mobility is now handled by individual piece evaluators (evaluate_knights, etc.)
+        // which compute safe mobility (squares not attacked by enemy pawns).
+        // This avoids duplicate computation and provides more accurate evaluation.
+        0
     }
 
     fn evaluate_holes(&self) -> i32 {
@@ -489,12 +553,16 @@ impl<'a> EvalContext<'a> {
             let safety = crate::board::evaluators::evaluate_king::king_safety(
                 self.board, color, self.phase(), king_pos, &self.pawn_counts
             );
+            let ring_pressure = crate::board::evaluators::evaluate_king::king_ring_pressure(
+                self.board, color, self.phase(), king_pos, &self.att_w, &self.att_b
+            );
             let activity = crate::board::evaluators::evaluate_king::king_activity_endgame(king_pos);
             let shelter = crate::board::evaluators::evaluate_king::evaluate_king_shelter_patterns(
                 self.board, color, self.phase(), king_pos
             );
 
             score += apply_color_score((safety * self.phase()) / 24, color);
+            score += apply_color_score(ring_pressure, color);
             score += apply_color_score((activity * self.eg) / 24, color);
             score += apply_color_score(shelter, color);
 

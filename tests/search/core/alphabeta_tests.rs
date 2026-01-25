@@ -2,7 +2,8 @@ use chess::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE, MATE_VALUE};
 use chess::search::context::SearchContext;
 use chess::search::core::advanced_search::SEARCH_ABORTED;
 use chess::search::core::alphabeta::alphabeta;
-use chess::search::test_support::{calculate_lmr_reduction, RepetitionStack, SearchHeuristics};
+use chess::search::core::advanced_search::find_all_valid_moves;
+use chess::search::test_support::{calculate_lmr_reduction, check_extension_budget, is_singular_extension, should_check_extend, should_late_move_prune, RepetitionStack, SearchHeuristics};
 use chess::state::fen::reader::reset_from_fen;
 use std::time::Duration;
 use chess::piece::pieces::{Color, opposite_color};
@@ -25,7 +26,34 @@ fn run_alphabeta(fen: &str, depth: usize) -> i32 {
         &mut rep_stack,
         true,
         None,
+        check_extension_budget(),
     )
+}
+
+fn run_alphabeta_with_nodes(fen: &str, depth: usize, alpha: i32, beta: i32, ply: i32) -> (i32, u64) {
+    let mut gs = reset_from_fen(fen).expect("Invalid FEN");
+    let ctx = SearchContext::new();
+    let mut heuristics = SearchHeuristics::new(128);
+    let tt = ctx.tt();
+    let mut rep_stack = RepetitionStack::new();
+    ctx.reset_search_telemetry();
+
+    let score = alphabeta(
+        &ctx,
+        &mut heuristics,
+        &mut gs,
+        depth,
+        alpha,
+        beta,
+        ply,
+        tt,
+        &mut rep_stack,
+        true,
+        None,
+        check_extension_budget(),
+    );
+
+    (score, ctx.get_nodes())
 }
 
 fn lmr_reduction_for_move(
@@ -126,6 +154,7 @@ fn alphabeta_returns_zero_for_repetition() {
         &mut rep_stack,
         true,
         None,
+        check_extension_budget(),
     );
     assert_eq!(score, 0);
 }
@@ -152,6 +181,7 @@ fn alphabeta_returns_zero_for_fifty_move_rule() {
         &mut rep_stack,
         true,
         None,
+        check_extension_budget(),
     );
     assert_eq!(score, 0);
 }
@@ -180,6 +210,7 @@ fn alphabeta_returns_search_aborted_when_time_is_up() {
         &mut rep_stack,
         true,
         None,
+        check_extension_budget(),
     );
     assert_eq!(score, SEARCH_ABORTED);
 }
@@ -225,4 +256,128 @@ fn lmr_reduction_respects_killer_and_counter_moves() {
     counter_heuristics.set_counter_move(Color::White, prev_from, prev_to, from, to);
     let counter = lmr_reduction_for_move(fen, from, to, 12, 12, Some((prev_from, prev_to)), &counter_heuristics);
     assert!(counter <= base);
+}
+
+#[test]
+fn razoring_reduces_nodes_on_fail_low() {
+    let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    let (_score_razor, nodes_razor) = run_alphabeta_with_nodes(fen, 1, 10_000, 10_001, 4);
+    let (_score_full, nodes_full) = run_alphabeta_with_nodes(
+        fen,
+        1,
+        MIN_EVAL_VALUE + 1,
+        MAX_EVAL_VALUE - 1,
+        4,
+    );
+
+    assert!(nodes_full > 1);
+    assert!(nodes_razor < nodes_full);
+}
+
+#[test]
+fn reverse_futility_pruning_reduces_nodes_on_fail_high() {
+    let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    let (_score_rfp, nodes_rfp) = run_alphabeta_with_nodes(
+        fen,
+        2,
+        -401,
+        -400,
+        2,
+    );
+    let (_score_full, nodes_full) = run_alphabeta_with_nodes(
+        fen,
+        2,
+        MIN_EVAL_VALUE + 1,
+        MAX_EVAL_VALUE - 1,
+        2,
+    );
+
+    assert!(nodes_full > 1);
+    assert!(nodes_rfp < nodes_full);
+}
+
+#[test]
+fn lmp_prunes_late_quiet_moves() {
+    assert!(should_late_move_prune(1, 12, true, false, false, false));
+    assert!(should_late_move_prune(2, 16, true, false, false, false));
+}
+
+#[test]
+fn lmp_skips_checks_pv_or_in_check() {
+    assert!(!should_late_move_prune(2, 20, true, true, false, false));
+    assert!(!should_late_move_prune(2, 20, true, false, true, false));
+    assert!(!should_late_move_prune(2, 20, true, false, false, true));
+    assert!(!should_late_move_prune(3, 20, true, false, false, false));
+}
+
+#[test]
+fn check_extension_triggers_for_shallow_checks() {
+    assert!(should_check_extend(1, true, false));
+    assert!(should_check_extend(2, false, true));
+    assert!(should_check_extend(3, true, true));
+}
+
+#[test]
+fn check_extension_skips_deep_or_non_checks() {
+    assert!(!should_check_extend(0, true, false));
+    assert!(!should_check_extend(3, false, false));
+    assert!(!should_check_extend(4, true, false));
+}
+
+#[test]
+fn singular_extension_true_for_large_score_gap() {
+    let fen = "8/8/8/8/8/8/4K3/6k1 w - - 0 1";
+    let mut gs = reset_from_fen(fen).expect("Invalid FEN");
+    let ctx = SearchContext::new();
+    let tt = ctx.tt();
+    let mut rep_stack = RepetitionStack::new();
+    let moves = find_all_valid_moves(&mut gs);
+    assert!(moves.len() > 1);
+    let best_move = (moves[0].0, moves[0].1);
+    let to_move = gs.active_color();
+
+    let singular = is_singular_extension(
+        &ctx,
+        &mut gs,
+        6,
+        2,
+        tt,
+        &mut rep_stack,
+        to_move,
+        best_move,
+        10_000,
+        &moves,
+        None,
+    );
+
+    assert!(singular);
+}
+
+#[test]
+fn singular_extension_false_for_nearby_scores() {
+    let fen = "8/8/8/8/8/8/4K3/6k1 w - - 0 1";
+    let mut gs = reset_from_fen(fen).expect("Invalid FEN");
+    let ctx = SearchContext::new();
+    let tt = ctx.tt();
+    let mut rep_stack = RepetitionStack::new();
+    let moves = find_all_valid_moves(&mut gs);
+    assert!(moves.len() > 1);
+    let best_move = (moves[0].0, moves[0].1);
+    let to_move = gs.active_color();
+
+    let singular = is_singular_extension(
+        &ctx,
+        &mut gs,
+        6,
+        2,
+        tt,
+        &mut rep_stack,
+        to_move,
+        best_move,
+        0,
+        &moves,
+        None,
+    );
+
+    assert!(!singular);
 }

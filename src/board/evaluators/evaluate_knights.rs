@@ -1,9 +1,27 @@
 use crate::board::Board;
 use crate::piece::pieces::{Color, PieceType};
-use crate::board::evaluation_helpers::{is_piece, opponent, taper_general};
+use crate::board::evaluation_helpers::{count_knight_mobility, is_piece, opponent, taper_general};
+
+// Knight mobility constants
+const KNIGHT_MOBILITY_BASELINE: i32 = 4; // Average knight has ~4 safe squares
+const KNIGHT_MOBILITY_MG: i32 = 4;       // Centipawns per safe square above baseline
+const KNIGHT_MOBILITY_EG: i32 = 3;       // Slightly less important in endgame
+const KNIGHT_UNSAFE_PENALTY: i32 = 2;    // Penalty per square only reachable unsafely
 
 pub fn evaluate_knight(board: &Board, row: usize, col: usize, color: Color, phase: i32) -> i32 {
     let mut val = 0;
+
+    // Mobility evaluation
+    let (total, safe) = count_knight_mobility(board, row, col, color);
+    let mobility_delta = safe - KNIGHT_MOBILITY_BASELINE;
+    val += taper_general(mobility_delta * KNIGHT_MOBILITY_MG, mobility_delta * KNIGHT_MOBILITY_EG, phase);
+
+    // Penalty for squares that are only reachable unsafely (attacked by enemy pawns)
+    let unsafe_squares = total - safe;
+    if unsafe_squares > 0 {
+        val -= (unsafe_squares * KNIGHT_UNSAFE_PENALTY * phase) / 24;
+    }
+
     if phase > 0 {
         let dev_bonus = match color {
             Color::White => match (row, col) {
@@ -23,7 +41,7 @@ pub fn evaluate_knight(board: &Board, row: usize, col: usize, color: Color, phas
         val -= taper_general(14, 6, phase);
     }
     if is_knight_outpost(board, row, col, color) {
-        val += taper_general(phase, 22, 8);
+        val += taper_general(22, 8, phase);
     }
     val
 }

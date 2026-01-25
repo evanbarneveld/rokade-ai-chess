@@ -30,7 +30,7 @@ const MOVE_OVERHEAD_MS: usize = 50;
 const SCORE_DIVISOR : f32 = 8.0f32;
 
 static LOG: OnceLock<Mutex<File>> = OnceLock::new();
-const MOVE_TIME_AS_PERCENTAGE_OF_TIME_LEFT: f64 = 0.02;
+const MOVE_TIME_AS_FRACTION_OF_TIME_LEFT: f64 = 0.020;
 
 pub fn run_uci() -> io::Result<()> {
     let stdin = io::stdin();
@@ -277,7 +277,7 @@ pub fn run_uci() -> io::Result<()> {
                         if max_cap > 0 && budget > max_cap { budget = max_cap; }
                     } else {
                         // No movestogo: use a dynamic fraction of remaining time and some increment.
-                        budget = ((time_left as f64) * MOVE_TIME_AS_PERCENTAGE_OF_TIME_LEFT) as usize;
+                        budget = ((time_left as f64) * MOVE_TIME_AS_FRACTION_OF_TIME_LEFT) as usize;
                         if budget < 10 { budget = 10; } // at least 10ms
                         if inc > 0 {
                             let bonus = ((inc as f64) * 0.90) as usize;

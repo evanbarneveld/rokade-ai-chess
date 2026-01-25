@@ -12,6 +12,28 @@ use crate::search::core::advanced_search::SEARCH_ABORTED;
 // With a stronger, more stable evaluator we can start tighter and cap lower.
 pub(crate) const ASP_WINDOW_INIT_CP: i32 = 30; // initial aspiration half-window
 pub(crate) const ASP_WINDOW_MAX_CP: i32 = 400; // maximum expanded half-window
+const ASP_VERIFY_MIN_DEPTH: usize = 5;
+const ASP_VERIFY_WINDOW_MAX_CP: i32 = 200;
+const ASP_VERIFY_SCORE_LIMIT: i32 = 2000;
+
+#[inline]
+pub(crate) fn next_aspiration_window(prev_window: i32, score_delta: i32) -> i32 {
+    let delta = score_delta.abs();
+    let target = (ASP_WINDOW_INIT_CP + delta).clamp(ASP_WINDOW_INIT_CP, ASP_WINDOW_MAX_CP);
+    let blended = (prev_window + target) / 2;
+    blended.clamp(ASP_WINDOW_INIT_CP, ASP_WINDOW_MAX_CP)
+}
+
+#[inline]
+pub(crate) fn should_verify_aspiration(depth_now: usize, window: i32, best_raw: i32) -> bool {
+    if depth_now < ASP_VERIFY_MIN_DEPTH {
+        return false;
+    }
+    if window > ASP_VERIFY_WINDOW_MAX_CP {
+        return false;
+    }
+    best_raw.abs() <= ASP_VERIFY_SCORE_LIMIT
+}
 
 #[inline]
 pub(crate) fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32) -> (i32, i32) {
@@ -108,14 +130,15 @@ pub(crate) fn probe_with_aspiration(
                 eprintln!("[ASP] SUCCESS: score {} within [{}, {}] after {} attempt(s)",
                     best_raw, a, b, tried);
             }
-            if collect_all_scores.is_some() {
+            let needs_verify = should_verify_aspiration(depth_now, *window, best_raw);
+            if collect_all_scores.is_some() || needs_verify {
                 let (mv_final, adj_final, raw_final) = evaluate_root_for_bounds(
                     ctx,
                     active_color,
                     root_moves,
                     depth_now,
-                    a,
-                    b,
+                    if needs_verify { MIN_EVAL_VALUE + 1 } else { a },
+                    if needs_verify { MAX_EVAL_VALUE - 1 } else { b },
                     tt,
                     game_state,
                     history,
@@ -123,9 +146,8 @@ pub(crate) fn probe_with_aspiration(
                     collect_all_scores,
                 );
                 return (mv_final, adj_final, raw_final);
-            } else {
-                return (_mv, _best_adj, best_raw);
             }
+            return (_mv, _best_adj, best_raw);
         }
 
         // At this point we have tried a few widened windows but still failed to land inside bounds.

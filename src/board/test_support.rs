@@ -136,6 +136,19 @@ pub fn king_safety(
     crate::board::evaluators::evaluate_king::king_safety(board, color, phase, king_pos, pawn_counts)
 }
 
+pub fn king_ring_pressure(
+    board: &Board,
+    color: Color,
+    phase: i32,
+    king_pos: Option<(usize, usize)>,
+    att_w: &[[bool; 8]; 8],
+    att_b: &[[bool; 8]; 8],
+) -> i32 {
+    crate::board::evaluators::evaluate_king::king_ring_pressure(
+        board, color, phase, king_pos, att_w, att_b
+    )
+}
+
 pub fn king_activity_endgame(king_pos: Option<(usize, usize)>) -> i32 {
     crate::board::evaluators::evaluate_king::king_activity_endgame(king_pos)
 }

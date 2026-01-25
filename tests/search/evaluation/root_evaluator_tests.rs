@@ -3,9 +3,12 @@ use chess::history::history::History;
 use chess::search::core::advanced_search::{find_all_valid_moves, SEARCH_ABORTED};
 use chess::search::SearchContext;
 use chess::search::test_support::{
+    Bound,
+    compute_zobrist_full,
     evaluate_root_for_bounds,
     has_search_aborted,
     set_test_sleep_after_pv_ms,
+    to_tt_score,
     SearchHeuristics,
 };
 use chess::state::fen::reader::reset_from_fen;
@@ -74,4 +77,47 @@ fn evaluate_root_for_bounds_parallel_aborts_on_timeout() {
 
     assert_eq!(best_raw, SEARCH_ABORTED);
     assert_eq!(best_adj, SEARCH_ABORTED);
+}
+
+#[test]
+fn evaluate_root_for_bounds_keeps_tt_move_first() {
+    let fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 1";
+    let mut gs = reset_from_fen(fen).expect("Invalid FEN");
+    let history = History::new();
+    let ctx = SearchContext::new();
+    ctx.set_deterministic(true);
+    ctx.set_parallel_search(false);
+
+    let root_moves = find_all_valid_moves(&mut gs);
+    let tt_move = ((0, 3), (1, 3)); // Qd1d2
+    assert!(root_moves.iter().any(|(f, t, _)| (*f, *t) == tt_move));
+
+    let key = compute_zobrist_full(
+        gs.board(),
+        gs.active_color(),
+        &gs.castling_rights(),
+        gs.en_passant_target(),
+    );
+    let bf = (tt_move.0 .0 as u8) * 8 + (tt_move.0 .1 as u8);
+    let bt = (tt_move.1 .0 as u8) * 8 + (tt_move.1 .1 as u8);
+    ctx.tt().store(key, 1, Bound::Exact, to_tt_score(0, 0), Some(bf), Some(bt));
+
+    let mut heuristics = SearchHeuristics::new(64);
+    let mut collected = Vec::new();
+    let _ = evaluate_root_for_bounds(
+        &ctx,
+        gs.active_color(),
+        &root_moves,
+        1,
+        MIN_EVAL_VALUE + 1,
+        MAX_EVAL_VALUE - 1,
+        ctx.tt(),
+        &mut gs,
+        &history,
+        &mut heuristics,
+        Some(&mut collected),
+    );
+
+    let first = collected.first().expect("expected at least one root move").0;
+    assert_eq!(first, (tt_move.0, tt_move.1, None));
 }

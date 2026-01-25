@@ -204,6 +204,8 @@ ITERATIVE DEEPENING (depth 1 -> target)
 - **Aspiration Windows**: Narrows alpha-beta window around expected score
   - Faster search when guess is correct
   - Re-searches with wider window if guess is wrong
+  - Initial window adapts to prior depth score delta to reduce re-searches
+  - Tight windows at deeper depths trigger a full-width verification to avoid tactical misses
 
 - **Dual Scoring System**:
   - `score_raw`: Pure search evaluation (what the position is worth)
@@ -212,6 +214,10 @@ ITERATIVE DEEPENING (depth 1 -> target)
 - **Playing Strength Mode**:
   - Uses TT-cached root scores to select suboptimal moves at lower strength
   - Adds Gaussian noise when not deterministic
+
+- **Root Ordering & Pruning**:
+  - TT/PV move is kept first; light opening bias reorders the remaining moves only
+  - Late quiet non-check moves can be skipped at deep roots if a static eval is far behind the current best
 
 ### 2. Alpha-Beta Search (`src/search/core/alphabeta.rs`)
 
@@ -273,6 +279,10 @@ fn alphabeta(position, depth, alpha, beta) -> score {
 
 5. **Other pruning and extensions**:
    - Frontier futility pruning at depth=1 for quiet moves
+   - Reverse futility pruning and razoring at shallow depths on non-PV nodes away from root (ply/depth guard, skip in check)
+   - Late-move pruning for quiet moves at low depth (non-PV, not in check)
+   - Check extensions at shallow depths when in check or when a move gives check (capped by a small per-line budget)
+   - Singular extensions on TT best moves when alternatives fall below a margin
    - Passed-pawn extension in late endgames
 
 **Score Returns**:
@@ -335,6 +345,7 @@ fn qsearch(position, alpha, beta) -> score {
    - Passed pawn quality (blockades, connected passers, king distance)
    - Rook/queen activity (open/semi-open files, king file, alignment, endgame centralization)
    - King safety, shelter, and endgame activity (open-file pressure, queen scaling)
+   - King ring pressure (enemy attacks on ring squares, unsafe ring squares)
    - Piece interactions (defended pieces, tropism, batteries)
    - Safe exchange threats against defended pieces
    - Tempo bonus scaled by phase

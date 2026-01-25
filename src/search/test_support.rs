@@ -165,6 +165,22 @@ pub fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i3
     crate::search::management::aspiration::aspiration_bounds_for_depth(depth_now, last_score, window)
 }
 
+pub fn aspiration_window_init() -> i32 {
+    crate::search::management::aspiration::ASP_WINDOW_INIT_CP
+}
+
+pub fn aspiration_window_max() -> i32 {
+    crate::search::management::aspiration::ASP_WINDOW_MAX_CP
+}
+
+pub fn next_aspiration_window(prev_window: i32, score_delta: i32) -> i32 {
+    crate::search::management::aspiration::next_aspiration_window(prev_window, score_delta)
+}
+
+pub fn should_verify_aspiration(depth_now: usize, window: i32, best_raw: i32) -> bool {
+    crate::search::management::aspiration::should_verify_aspiration(depth_now, window, best_raw)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn probe_with_aspiration(
     ctx: &SearchContext,
@@ -429,6 +445,61 @@ pub fn build_pv_for_root(
         root_promo,
         tt,
         max_len,
+    )
+}
+
+pub fn should_late_move_prune(
+    depth: usize,
+    move_index: i32,
+    is_quiet: bool,
+    gives_check: bool,
+    in_check: bool,
+    is_pv: bool,
+) -> bool {
+    crate::search::core::alphabeta::should_late_move_prune(
+        depth,
+        move_index,
+        is_quiet,
+        gives_check,
+        in_check,
+        is_pv,
+    )
+}
+
+pub fn check_extension_budget() -> u8 {
+    crate::search::core::alphabeta::CHECK_EXTENSION_BUDGET
+}
+
+pub fn should_check_extend(depth: usize, in_check: bool, gives_check: bool) -> bool {
+    crate::search::core::alphabeta::should_check_extend(depth, in_check, gives_check)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn is_singular_extension(
+    ctx: &SearchContext,
+    game_state: &mut GameState,
+    depth: usize,
+    ply: i32,
+    tt: &TranspositionTable,
+    rep_stack: &mut RepetitionStack,
+    to_move: Color,
+    best_move: ((usize, usize), (usize, usize)),
+    best_score: i32,
+    moves: &Vec<((usize, usize), (usize, usize), Option<char>)>,
+    prev_move: Option<((usize, usize), (usize, usize))>,
+) -> bool {
+    crate::search::core::alphabeta::is_singular_extension(
+        ctx,
+        game_state,
+        depth,
+        ply,
+        tt,
+        rep_stack,
+        to_move,
+        best_move,
+        best_score,
+        moves,
+        prev_move,
     )
 }
 

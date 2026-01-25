@@ -6,7 +6,7 @@
 use crate::board::Board;
 use crate::history::history::History;
 use crate::piece::pieces::{capture_value_cp, opposite_color, Color, PieceType};
-use crate::search::core::alphabeta::alphabeta;
+use crate::search::core::alphabeta::{alphabeta, CHECK_EXTENSION_BUDGET};
 use crate::search::advanced_search::find_all_valid_moves;
 use crate::search::context::SearchContext;
 use crate::search::evaluation::heuristics::SearchHeuristics;
@@ -322,6 +322,7 @@ pub fn evaluate_after_root_move(
             &mut rep_stack,
             true, // Allow null move at root
             Some((from, to)),
+            CHECK_EXTENSION_BUDGET,
         )
     };
 

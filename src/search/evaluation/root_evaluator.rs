@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::board::evaluator::{evaluate_position, MATE_VALUE};
 use crate::history::history::History;
 use crate::piece::pieces::{Color, PieceType};
 use crate::search::evaluation::repetition::apply_repetition_avoidance_bias;
@@ -16,6 +17,10 @@ use crate::search::core::advanced_search::{QUIESCENCE_ENABLED, SEARCH_ABORTED};
 // Root parallelization settings
 const ROOT_PARALLEL_MIN_DEPTH: usize = 6;
 const ROOT_PARALLEL_MIN_MOVES: usize = 4;
+const ROOT_PARALLEL_MIN_TIME_MS: usize = 200;
+const ROOT_PRUNE_MIN_DEPTH: usize = 6;
+const ROOT_PRUNE_START_INDEX: usize = 4;
+const ROOT_PRUNE_MARGIN: i32 = 300;
 
 #[inline]
 pub(crate) fn has_search_aborted(results: &[((usize, usize), (usize, usize), Option<char>, i32, i32)]) -> bool {
@@ -96,18 +101,46 @@ pub(crate) fn evaluate_root_for_bounds(
         }}}
         if phase < 0 { 0 } else if phase > 24 { 24 } else { phase }
     };
-    if depth_now >= 1 {
+    if depth_now >= 1 && ordered.len() > 1 {
+        let head = ordered[0];
+        let mut checks = Vec::new();
+        let mut captures = Vec::new();
+        let mut quiets = Vec::new();
+
+        for &(from, to, promo) in ordered.iter().skip(1) {
+            let u = game_state.make_move_fast(from, to, promo);
+            let side_to_move = game_state.active_color();
+            let gives_check = game_state.mutable_board().is_side_in_check(side_to_move);
+            let is_capture = u.board_undo.captured.is_some() || u.ep_captured_piece.is_some();
+            game_state.unmake_move_fast(u);
+
+            if gives_check {
+                checks.push((from, to, promo));
+            } else if is_capture {
+                captures.push((from, to, promo));
+            } else {
+                quiets.push((from, to, promo));
+            }
+        }
+
         let b = game_state.board();
-        ordered.sort_by(|&(f1,t1, _), &(f2,t2, _)| {
+        quiets.sort_by(|&(f1, t1, _), &(f2, t2, _)| {
             let score1 = root_move_order_bias(b, active_color, f1, t1, phase_for_scale);
             let score2 = root_move_order_bias(b, active_color, f2, t2, phase_for_scale);
             score2.cmp(&score1) // higher bias first
         });
+
+        ordered.clear();
+        ordered.push(head);
+        ordered.extend(checks);
+        ordered.extend(captures);
+        ordered.extend(quiets);
     }
 
     let enable_parallel = ctx.is_parallel_search()
         && depth_now >= ROOT_PARALLEL_MIN_DEPTH
-        && ordered.len() >= ROOT_PARALLEL_MIN_MOVES;
+        && ordered.len() >= ROOT_PARALLEL_MIN_MOVES
+        && (ctx.time_budget_ms() == 0 || ctx.time_remaining_ms() >= ROOT_PARALLEL_MIN_TIME_MS);
     if enable_parallel {
         // 1) Search the first (best-ordered) move serially to establish PV and bounds
         let &(pv_from, pv_to, pv_promo) = ordered.first().unwrap();
@@ -270,7 +303,21 @@ pub(crate) fn evaluate_root_for_bounds(
         }
     } else {
         // Search sequentially over root moves
-        for &(from, to, promo) in &ordered {
+        let maximizing = active_color == Color::White;
+        for (move_index, &(from, to, promo)) in ordered.iter().enumerate() {
+            if should_prune_root_move(
+                game_state,
+                from,
+                to,
+                promo,
+                depth_now,
+                move_index,
+                best_score_raw,
+                best_from_to_promo.is_some(),
+                maximizing,
+            ) {
+                continue;
+            }
             let (score_raw, is_capture, moved_is_pawn) = evaluate_after_root_move(
                 ctx,
                 heuristics,
@@ -414,5 +461,43 @@ pub(crate) fn root_move_order_bias(board: &Board, side: Color, from: (usize, usi
         bias -= (demote * scale) / 24;
     }
     bias
+}
+
+#[inline]
+fn should_prune_root_move(
+    game_state: &mut GameState,
+    from: (usize, usize),
+    to: (usize, usize),
+    promo: Option<char>,
+    depth_now: usize,
+    move_index: usize,
+    best_score_raw: i32,
+    has_best: bool,
+    maximizing: bool,
+) -> bool {
+    if !has_best || depth_now < ROOT_PRUNE_MIN_DEPTH || move_index < ROOT_PRUNE_START_INDEX {
+        return false;
+    }
+    if best_score_raw.abs() >= MATE_VALUE - 100 {
+        return false;
+    }
+
+    let u = game_state.make_move_fast(from, to, promo);
+    let side_to_move = game_state.active_color();
+    let gives_check = game_state.mutable_board().is_side_in_check(side_to_move);
+    let is_capture = u.board_undo.captured.is_some() || u.ep_captured_piece.is_some();
+
+    let mut prune = false;
+    if !is_capture && !gives_check {
+        let stand_pat = evaluate_position(game_state.board(), side_to_move);
+        if maximizing {
+            prune = stand_pat + ROOT_PRUNE_MARGIN <= best_score_raw;
+        } else {
+            prune = stand_pat - ROOT_PRUNE_MARGIN >= best_score_raw;
+        }
+    }
+
+    game_state.unmake_move_fast(u);
+    prune
 }
 
