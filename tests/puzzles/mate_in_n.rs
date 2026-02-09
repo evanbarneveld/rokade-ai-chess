@@ -1,10 +1,9 @@
+use chess::piece::pieces::Color;
+use chess::state::outcome::OutcomeType;
+use chess::Chess;
+use std::fs::File;
 use std::io;
 use std::io::Write;
-use std::fs::OpenOptions;
-use chess::Chess;
-use chess::piece::pieces::Color;
-use chess::search::core::advanced_search::MAX_MOVE_TIME_MS;
-use chess::state::outcome::OutcomeType;
 
 #[test]
 fn test_mate_in_n_generic() {
@@ -22,9 +21,7 @@ fn test_mate_in_n_generic() {
 
     // Helper to strip trailing annotations like +, #, !?, etc.
     fn clean_token(tok: &str) -> String {
-        tok.trim()
-            .trim_end_matches(['!', '?'])
-            .to_string()
+        tok.trim().trim_end_matches(['!', '?']).to_string()
     }
 
     // Extract SAN tokens from a solution line like:
@@ -44,8 +41,19 @@ fn test_mate_in_n_generic() {
         out
     }
 
-    fn run_suite(game: &mut Chess, ctx: &SearchContext, input: &str, label: &str, max_moves: usize, max_search_depth: usize, move_time_in_ms: usize, max_puzzles: i32) -> (usize, usize) {
-        if max_puzzles < 0 { return (0, 0); }
+    fn run_suite(
+        game: &mut Chess,
+        ctx: &SearchContext,
+        input: &str,
+        label: &str,
+        max_moves: usize,
+        max_search_depth: usize,
+        move_time_in_ms: usize,
+        max_puzzles: i32,
+    ) -> (usize, usize) {
+        if max_puzzles < 0 {
+            return (0, 0);
+        }
 
         let mut total: usize = 0;
         let mut solved: usize = 0;
@@ -53,12 +61,8 @@ fn test_mate_in_n_generic() {
 
         // Create/truncate the failure file at the start
         let filename = format!("mate_in_{}_failures.txt", max_moves);
-        let mut failure_file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&filename)
-            .ok();
+
+        let mut file = File::create(filename.clone()).ok().unwrap();
 
         let mut lines = input.lines().enumerate().peekable();
         // Track the most recent header lines before each FEN:
@@ -150,16 +154,24 @@ fn test_mate_in_n_generic() {
                 continue;
             }
 
-            game.set_starting_fen(&fen).expect("Could not set starting FEN");
+            game.set_starting_fen(&fen)
+                .expect("Could not set starting FEN");
 
             let mut ply_count = 1;
-            let mut puzzle_solved = false;
 
             loop {
                 let gs = game.get_game_state().clone();
                 let hs = game.get_history().clone();
 
-                let engine_move_san = generate_move_as_san(ctx, SearchMode::Normal, &gs, &hs, max_search_depth, move_time_in_ms, 1000);
+                let engine_move_san = generate_move_as_san(
+                    ctx,
+                    SearchMode::Normal,
+                    &gs,
+                    &hs,
+                    max_search_depth,
+                    move_time_in_ms,
+                    1000,
+                );
                 if !game.move_piece_san(&engine_move_san.clone().unwrap()) {
                     println!("Warning: Invalid move {}", engine_move_san.unwrap());
                 } else {
@@ -171,47 +183,48 @@ fn test_mate_in_n_generic() {
                 game.get_game_state().recompute_outcome(&hs);
                 let outcome = game.get_game_state().get_outcome().unwrap();
 
-                if outcome.eq(&OutcomeType::Checkmate { winner: Color::Black }) ||
-                    outcome.eq(&OutcomeType::Checkmate { winner: Color::White })
-                {
-                    println!(" ... mate in {} moves, Outcome: {:?}", ply_count / 2, outcome);
+                if outcome.eq(&OutcomeType::Checkmate {
+                    winner: Color::Black,
+                }) || outcome.eq(&OutcomeType::Checkmate {
+                    winner: Color::White,
+                }) {
+                    println!(
+                        " ... mate in {} moves, Outcome: {:?}",
+                        ply_count / 2,
+                        outcome
+                    );
                     solved += 1;
-                    puzzle_solved = true;
+                    println!("Current puzzle {}, solved {}", total, solved);
                     break;
                 }
 
                 if ply_count >= max_moves * 2 {
                     println!("Failed finding find mate in {} moves.", max_moves);
-                    break;
-                }
-            }
 
-            if max_puzzles > 0 && total as i32 >= max_puzzles {
-                break;
-            }
-
-            // Write failure immediately if puzzle was not solved
-            if !puzzle_solved {
-                failure_count += 1;
-                if let Some(ref mut file) = failure_file {
+                    failure_count += 1;
                     writeln!(file, "{}", current_title).ok();
+                    if let Some(p) = last_header_players.take() {
+                        writeln!(file, "{}", p).ok();
+                    }
                     writeln!(file, "FEN: {}", fen).ok();
                     writeln!(file, "Solution: {}", solution).ok();
                     writeln!(file, "").ok();
                     file.flush().ok();
-                }
-            }
 
-            println!("Current puzzle {}, solved {}", total, solved)
+                    break;
+                }
+            } //loop
+
+            if max_puzzles > 0 && total as i32 >= max_puzzles {
+                break;
+            }
         }
 
         // Write summary at the end
         if failure_count > 0 {
-            if let Some(ref mut file) = failure_file {
-                writeln!(file, "---").ok();
-                writeln!(file, "Summary: {}/{} puzzles failed", failure_count, total).ok();
-                file.flush().ok();
-            }
+            writeln!(file, "---").ok();
+            writeln!(file, "Summary: {}/{} puzzles failed", failure_count, total).ok();
+            file.flush().ok();
             println!("Wrote {} failures to {}", failure_count, filename);
         }
 
@@ -234,31 +247,72 @@ fn test_mate_in_n_generic() {
     let mut solved = 0;
 
     //puzzles_to_solve = <0 means skip, 0 means all, >0 means number of puzzles to solve
+
+    //------------------
+    // MATE_IN_2 PUZZLES
+    //------------------
     let puzzles_to_solve = -1;
-    let move_time= MAX_MOVE_TIME_MS;
-    let (t, s) = run_suite(&mut game, &ctx, INPUT_MI2, "Mate-in-2", 2, 4, move_time, puzzles_to_solve);
+    let move_time = 100;
+    let (t, s) = run_suite(
+        &mut game,
+        &ctx,
+        INPUT_MI2,
+        "Mate-in-2",
+        2,
+        4,
+        move_time,
+        puzzles_to_solve,
+    );
     if (s as f32 / t as f32) < 0.96 {
-        panic!("Failed to solve enough mate in 2 puzzles. Increase time or depth or improve engine");
+        panic!(
+            "Failed to solve enough mate in 2 puzzles. Increase time or depth or improve engine"
+        );
     }
-
     total += t;
     solved += s;
 
+    //------------------
+    // MATE_IN_3 PUZZLES
+    //------------------
     let puzzles_to_solve = -1; //none
-
-    let (t, s) = run_suite(&mut game, &ctx, INPUT_MI3, "Mate-in-3", 3, 6, move_time,  puzzles_to_solve);
+    let move_time = 2000;
+    let (t, s) = run_suite(
+        &mut game,
+        &ctx,
+        INPUT_MI3,
+        "Mate-in-3",
+        3,
+        6,
+        move_time,
+        puzzles_to_solve,
+    );
     if (s as f32 / t as f32) < 0.92 {
-        panic!("Failed to solve enough mate in 3 puzzles. Increase time or depth or improve engine");
+        panic!(
+            "Failed to solve enough mate in 3 puzzles. Increase time or depth or improve engine"
+        );
     }
-
     total += t;
     solved += s;
 
+    //------------------
+    // MATE_IN_4 PUZZLES
+    //------------------
     let puzzles_to_solve = -1; //none
-
-    let (t, s) = run_suite(&mut game, &ctx, INPUT_MI4, "Mate-in-4", 4, 8, move_time, puzzles_to_solve);
+    let move_time = 3000;
+    let (t, s) = run_suite(
+        &mut game,
+        &ctx,
+        INPUT_MI4,
+        "Mate-in-4",
+        4,
+        8,
+        move_time,
+        puzzles_to_solve,
+    );
     if (s as f32 / t as f32) < 0.84 {
-        panic!("Failed to solve enough mate in 4 puzzles. Increase time or depth or improve engine");
+        panic!(
+            "Failed to solve enough mate in 4 puzzles. Increase time or depth or improve engine"
+        );
     }
 
     total += t;

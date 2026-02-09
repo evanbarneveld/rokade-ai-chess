@@ -1,5 +1,4 @@
 use crate::board::Board;
-use crate::board::checks::square_attacked::is_square_attacked_by_opponent;
 use crate::piece::pieces::{opposite_color, piece_value_cp, Color, Piece, PieceType};
 
 // Root SEE-based gating and penalties
@@ -268,83 +267,9 @@ pub fn attacked_by_pawn(board: &Board, sq: (usize, usize), attacker: Color) -> b
     }
 }
 
-/// Find the king square on a board for a given color.
-#[inline]
-fn find_king_square(board: &Board, color: Color) -> Option<(usize, usize)> {
-    for r in 0..8 {
-        for c in 0..8 {
-            if let Some(p) = board.get(r, c)
-                && p.get_color() == color && p.get_type() == PieceType::King {
-                    return Some((r, c));
-                }
-        }
-    }
-    None
-}
-
-/// Check if two squares are adjacent (within 1 step in any direction).
-#[inline]
-fn squares_adjacent(a: (usize, usize), b: (usize, usize)) -> bool {
-    let dr = a.0.abs_diff(b.0);
-    let dc = a.1.abs_diff(b.1);
-    dr <= 1 && dc <= 1
-}
-
 // ============================================================
 // SEE PENALTY HEURISTICS
 // ============================================================
-
-/// Check if opponent king can safely capture a piece on the destination square.
-#[inline]
-pub fn king_can_safely_capture(
-    post_after: &Board,
-    side: Color,
-    to: (usize, usize),
-    moved_pt: PieceType,
-) -> Option<i32> {
-    let opp = opposite_color(side);
-
-    // Find opponent king
-    let king_sq = find_king_square(post_after, opp)?;
-
-    // King can only capture if adjacent
-    if !squares_adjacent(king_sq, to) {
-        return None;
-    }
-
-    // Ensure destination holds our piece
-    let on_to = post_after.get(to.0, to.1)?;
-    if on_to.get_color() != side {
-        return None;
-    }
-
-    // Simulate king capture
-    let mut after_kx = *post_after;
-    after_kx.set(king_sq.0, king_sq.1, None);
-    after_kx.set(to.0, to.1, Some(Piece::new(PieceType::King, opp)));
-
-    // Check if king is safe after capture
-    let mut tmp_chk = after_kx;
-    let unsafe_for_king = is_square_attacked_by_opponent(&mut tmp_chk, to, opp);
-
-    if unsafe_for_king {
-        return None;
-    }
-
-    // Apply penalty scaled by piece importance
-    let base_pen = match moved_pt {
-        PieceType::Queen => 900,
-        PieceType::Rook => 500,
-        PieceType::Bishop | PieceType::Knight => 300,
-        _ => 200,
-    };
-    let scale = match moved_pt {
-        PieceType::Queen | PieceType::Rook => 8,
-        PieceType::Bishop | PieceType::Knight => 10,
-        _ => 8,
-    };
-    Some((base_pen * scale).clamp(2400, 8000))
-}
 
 /// Calculate SEE-based penalty for checking piece attacked by pawn.
 #[inline]
@@ -366,6 +291,11 @@ pub fn pawn_attacked_minor_penalty(
 }
 
 /// Apply SEE-based penalties for destination square vulnerabilities.
+///
+/// IMPORTANT: For checking moves, we apply NO SEE penalties. The search has already
+/// evaluated the full tactical consequences of the check. Applying SEE penalties to
+/// checks can cause the engine to miss brilliant sacrifices where the piece appears
+/// to be hanging but the check leads to a forced win (e.g., Qxb7+ Kxb7 a8=Q#).
 #[inline]
 pub fn apply_destination_see_penalties(
     base_board: &Board,
@@ -378,59 +308,34 @@ pub fn apply_destination_see_penalties(
     gives_check: bool,
     _moved_is_queen: bool,
 ) -> i32 {
+    // For checking moves: trust the search result, don't apply SEE penalties.
+    // The opponent must respond to check, so static SEE is unreliable.
+    // This allows brilliant sacrifices like Qxb7+! to be evaluated correctly.
+    if gives_check {
+        return 0;
+    }
+
     let mut delta = 0;
     let captured = base_board.get(to.0, to.1);
 
-    if !gives_check {
-        // Non-checking moves: simple SEE penalty
-        let see = see_after(post_after, side, to, captured);
-        if see < 0 {
-            // Scale penalty by piece importance, don't cap too low for queen/rook blunders
-            let moved_pt = base_board.get(from.0, from.1).map(|p| p.get_type());
-            let pen = match moved_pt {
-                Some(PieceType::Queen) => ((-see) * 6).clamp(600, 6000),
-                Some(PieceType::Rook) => ((-see) * 4).clamp(SEE_PENALTY_MIN_CP, 3000),
-                _ => (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP),
-            };
-            // Penalty makes score worse for the moving side
-            // For White: reduce score (negative penalty from White's perspective)
-            // For Black: increase score (positive penalty from White's perspective = worse for Black)
-            delta += apply_for_side(-pen, side);
-            if !is_capture && moved_is_pawn {
-                delta += apply_for_side(-SEE_PENALTY_MIN_CP, side);
-            }
-        }
-        return delta;
-    }
-
-    // Checking moves: guard against suicidal checks
+    // Non-checking moves: apply SEE penalty
     let see = see_after(post_after, side, to, captured);
-    let moved_pt = base_board.get(from.0, from.1).map(|p| p.get_type());
-
     if see < 0 {
-        // Scale penalty by piece importance
+        // Scale penalty by piece importance, don't cap too low for queen/rook blunders
+        let moved_pt = base_board.get(from.0, from.1).map(|p| p.get_type());
         let pen = match moved_pt {
             Some(PieceType::Queen) => ((-see) * 6).clamp(600, 6000),
-            Some(PieceType::Rook) => ((-see) * 4).clamp(3600, 6000),
-            Some(PieceType::Bishop) | Some(PieceType::Knight) => ((-see) * 4).clamp(600, 3600),
-            Some(PieceType::Pawn) => ((-see) * 2).clamp(200, 2000),
-            _ => ((-see) * 3).clamp(300, 3000),
+            Some(PieceType::Rook) => ((-see) * 4).clamp(SEE_PENALTY_MIN_CP, 3000),
+            _ => (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP),
         };
+        // Penalty makes score worse for the moving side
+        // For White: reduce score (negative penalty from White's perspective)
+        // For Black: increase score (positive penalty from White's perspective = worse for Black)
         delta += apply_for_side(-pen, side);
+        if !is_capture && moved_is_pawn {
+            delta += apply_for_side(-SEE_PENALTY_MIN_CP, side);
+        }
     }
-
-    // Additional penalty for minors attacked by pawn after check
-    if let Some(pt) = moved_pt {
-        let pawn_pen = pawn_attacked_minor_penalty(post_after, side, to, pt);
-        delta += apply_for_side(-pawn_pen, side);
-    }
-
-    // Check if opponent king can safely capture the checking piece
-    if let Some(pt) = moved_pt
-        && matches!(pt, PieceType::Rook | PieceType::Queen | PieceType::Bishop | PieceType::Knight)
-            && let Some(pen) = king_can_safely_capture(post_after, side, to, pt) {
-                delta += apply_for_side(-pen, side);
-            }
 
     delta
 }

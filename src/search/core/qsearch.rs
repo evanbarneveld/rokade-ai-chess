@@ -7,9 +7,10 @@ use crate::search::management::see::{see_dest_estimate, QSEE_CAPTURE_TOLERANCE};
 // Note: Zobrist key is now maintained incrementally in GameState
 use crate::search::state::rep_stack::RepetitionStack;
 use crate::search::context::SearchContext;
+use crate::search::core::alphabeta::HUNDRED_HALF_MOVES;
 
 // Tighter margins with a stronger static evaluator
-const FUT_MARGIN: i32 = 80;
+const FUT_MARGIN: i32 = 80; // Futility margin in centipawns - buffer for pruning captures that can't improve position
 const DELTA_MARGIN: i32 = 925; // Queen value (900) + pawn promotion buffer (25)
 const MAX_QUIET_PUSHES: usize = 2;
 
@@ -29,6 +30,13 @@ pub fn qsearch(
     qsearch_with_quiescence(ctx, game_state, alpha, beta, rep_stack, QUIESCENCE_ENABLED)
 }
 
+const PLY_OFFSET_FOR_MATE_SCORES: i32 = 100;
+const ESTIMATED_CP_VALUE_OF_PAWN_PUSH: i32 = 100;
+const QUEEN_PROMOTION_BONUS_FOR_MOVE_ORDERING: i32 = 900;
+const ROOK_PROMOTION_BONUS_FOR_MOVE_ORDERING: i32 = 500;
+const BISHOP_PROMOTION_BONUS_FOR_MOVE_ORDERING: i32 = 330;
+const KNIGHT_PROMOTION_BONUS_FOR_MOVE_ORDERING: i32 = 320;
+
 pub(crate) fn qsearch_with_quiescence(
     ctx: &SearchContext,
     game_state: &mut GameState,
@@ -39,7 +47,7 @@ pub(crate) fn qsearch_with_quiescence(
 ) -> i32 {
     #[cfg(feature = "debug-search")]
     let qdepth = QSEARCH_DEPTH.with(|d| d.get());
-    
+
     let to_move = game_state.active_color();
     let maximizing = to_move == Color::White;
 
@@ -58,9 +66,9 @@ pub(crate) fn qsearch_with_quiescence(
             if in_check {
                 // Checkmate: the side to move is mated
                 return if maximizing {
-                    -MATE_VALUE + 100  // White is mated (very bad for White)
+                    -MATE_VALUE + PLY_OFFSET_FOR_MATE_SCORES  // White is mated (very bad for White)
                 } else {
-                    MATE_VALUE - 100   // Black is mated (very good for White)
+                    MATE_VALUE - PLY_OFFSET_FOR_MATE_SCORES   // Black is mated (very good for White)
                 };
             } else {
                 return 0;  // Stalemate is a draw
@@ -96,7 +104,7 @@ pub(crate) fn qsearch_with_quiescence(
             }
         }
     }
-    if game_state.half_move_clock() >= 100 {
+    if game_state.half_move_clock() >= HUNDRED_HALF_MOVES {
         #[cfg(feature = "debug-search")]
         if qdepth <= 2 {
             let indent = "    ".repeat(qdepth + 1);
@@ -154,6 +162,13 @@ pub(crate) fn qsearch_with_quiescence(
     } else {
         find_all_capture_moves(game_state)
     };
+
+    #[cfg(feature = "debug-search")] {
+        if qdepth <= 3 && in_check {
+            let indent = "    ".repeat(qdepth + 1);
+            eprintln!("{}[QS] in_check=true, evasion_moves.len()={}", indent, moves.len());
+        }
+    }
     let ep_target = game_state.en_passant_target();
     if !in_check {
         if QSEE_PRUNING_ENABLED {
@@ -267,7 +282,7 @@ pub(crate) fn qsearch_with_quiescence(
                 // Futility pruning for quiet pawn pushes: skip if cannot improve position
                 if QSEE_PRUNING_ENABLED {
                     // Estimate pawn push value at ~100cp (depends on advancement)
-                    let push_bonus = 100;
+                    let push_bonus = ESTIMATED_CP_VALUE_OF_PAWN_PUSH;
                     if maximizing {
                         if stand_pat + push_bonus + FUT_MARGIN <= alpha {
                             continue;
@@ -289,11 +304,19 @@ pub(crate) fn qsearch_with_quiescence(
         // If in check with no legal moves, it's checkmate
         // Use a large offset (100) since we don't track exact ply in qsearch
         if in_check {
+            #[cfg(feature = "debug-search")] {
+                let indent = "    ".repeat(qdepth + 1);
+                eprintln!("{}[QS] CHECKMATE DETECTED: side={:?} maximizing={}", indent, to_move, maximizing);
+            }
             return if maximizing {
-                -MATE_VALUE + 100  // White is mated (very bad for White)
+                -MATE_VALUE + PLY_OFFSET_FOR_MATE_SCORES  // White is mated (very bad for White)
             } else {
-                MATE_VALUE - 100   // Black is mated (very good for White)
+                MATE_VALUE - PLY_OFFSET_FOR_MATE_SCORES   // Black is mated (very good for White)
             };
+        }
+        #[cfg(feature = "debug-search")] {
+            let indent = "    ".repeat(qdepth + 1);
+            eprintln!("{}[QS] no moves, not in check -> stand_pat={}", indent, stand_pat);
         }
         return stand_pat;
     }
@@ -304,10 +327,10 @@ pub(crate) fn qsearch_with_quiescence(
             let mut score = game_state.board().move_score_mvv_lva(from, to);
             if let Some(p) = promo {
                 score += match p {
-                    'q' => 900,
-                    'r' => 500,
-                    'b' => 330,
-                    'n' => 320,
+                    'q' => QUEEN_PROMOTION_BONUS_FOR_MOVE_ORDERING,
+                    'r' => ROOK_PROMOTION_BONUS_FOR_MOVE_ORDERING,
+                    'b' => BISHOP_PROMOTION_BONUS_FOR_MOVE_ORDERING,
+                    'n' => KNIGHT_PROMOTION_BONUS_FOR_MOVE_ORDERING,
                     _ => 0,
                 };
             }
@@ -319,6 +342,7 @@ pub(crate) fn qsearch_with_quiescence(
     // Note: SEE-based bad capture filtering is already done during move generation
 
     let mut best = if maximizing { MIN_EVAL_VALUE } else { MAX_EVAL_VALUE };
+    let mut searched_any = false;
 
     for (from, to, promo) in moves.into_iter() {
         // Futility in qsearch: if even taking the victim cannot improve our position, skip
@@ -353,6 +377,7 @@ pub(crate) fn qsearch_with_quiescence(
         if score == SEARCH_ABORTED {
             return SEARCH_ABORTED;
         }
+        searched_any = true;
 
         #[cfg(feature = "debug-search")] {
             if qdepth <= 2 {
@@ -391,6 +416,18 @@ pub(crate) fn qsearch_with_quiescence(
             }
             break;
         }
+    }
+
+    // If no moves were actually searched (all pruned by futility), return stand_pat.
+    // This prevents returning MIN_EVAL_VALUE or MAX_EVAL_VALUE which can corrupt the search.
+    if !searched_any {
+        #[cfg(feature = "debug-search")] {
+            if qdepth <= 2 {
+                let indent = "    ".repeat(qdepth + 1);
+                eprintln!("{}[QS] all moves pruned, returning stand_pat={}", indent, stand_pat);
+            }
+        }
+        return stand_pat;
     }
 
     #[cfg(feature = "debug-search")] {

@@ -163,7 +163,7 @@ fn test_mate_in_3_using_advanced_search_2() {
 }
 
 // TODO fix this test later #[test]
-fn test_mate_in_3_using_advanced_search_3() {
+fn _test_mate_in_3_using_advanced_search_3() {
     //from Stellan Brynell vs Lars Karlsson, Malme, 1986
     let fen = "r4r2/p1p4p/1p2R3/5p2/2B2K2/7k/PPP2P2/8 w - - 0 1";
     let gs = reset_from_fen(fen).expect("Invalid FEN");

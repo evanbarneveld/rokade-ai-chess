@@ -1,0 +1,94 @@
+[Event "Computer chess game"]
+[Site "LIVINGROOM"]
+[Date "2026.01.27"]
+[Round "?"]
+[White "DeepHiarcs15.4-engine"]
+[Black "Rokade-ai-chess-engine"]
+[Result "1-0"]
+[WhiteElo "900"]
+[BlackElo "900"]
+[ECO "A40"]
+[PlyCount "69"]
+[BlackType "program"]
+[Opening "Queen's Pawn"]
+[Termination "normal"]
+[Time "19:27:15"]
+[TimeControl "300"]
+[Variation "Bozo-Indian Defence"]
+[WhiteType "program"]
+
+1.d4 Nc6 {Deep HIARCS 15.4: +0.30/16} ( {Theory prefers} 1...Nf6 $1 ) ( 1...Nf6 
+{Deep HIARCS 15.4: +0.09/16} 2.Nf3 d5 3.Bf4 c5 4.c3 cxd4 5.cxd4 Nc6 6.Nc3 Bf5 
+7.e3 e6 8.Be2 Be7 9.O-O O-O ) 2.d5 Ne5 3.Nc3 e6 ( 3...e6 {Deep HIARCS 15.4:
++0.29/14} 4.e4 exd5 5.f4 d4 6.Qxd4 Nc6 7.Qc4 Nf6 8.Bd2 Bb4 9.O-O-O O-O 10.Kb1 
+d6 ) 4.e4 c6 {Deep HIARCS 15.4: +0.68/15} ( 4...exd5 {Deep HIARCS 15.4:
++0.28/13} 5.exd5 Bc5 6.Qe2 Qe7 7.Be3 Bxe3 8.Qxe3 Ng4 9.Qxe7+ Nxe7 10.Nf3 d6 
+11.Bb5+ c6 12.dxc6 bxc6 ) 5.dxe6 dxe6 ( 5...dxe6 {Deep HIARCS 15.4: +0.66/15} 
+6.Qxd8+ Kxd8 7.a3 Bd7 8.f4 Ng6 9.Be3 f5 10.e5 N8e7 11.O-O-O Nd5 12.Nxd5 exd5 
+13.g3 Be7 14.Nf3 Kc7 15.Kb1 Rhf8 ) 6.Qxd8+ Kxd8 ( 6...Kxd8 {Deep HIARCS 15.4:
++0.73/14} 7.Be2 Nf6 8.a3 Ng6 9.Be3 Bd7 10.f4 Be7 11.Nh3 Kc7 12.O-O e5 13.f5 ) 
+7.f4 Nd7 ( 7...Nd7 {Deep HIARCS 15.4: +0.65/16} 8.Bd2 Ngf6 9.Nf3 a5 10.e5 Nd5 
+11.Ne4 Bb4 12.c3 Bc5 13.O-O-O b5 14.c4 bxc4 15.Bxc4 Ke7 16.Kb1 Be3 17.Bxd5 cxd5 
+18.Bxe3 dxe4 19.Nd4 ) 8.Be3 f5 {Deep HIARCS 15.4: +1.32/15} ( 8...Ngf6 {Deep
+HIARCS 15.4: +0.50/15} 9.Nf3 Bc5 10.Bxc5 Nxc5 11.O-O-O+ Ke7 12.Rd4 b5 13.a4 
+Nxa4 14.Nxa4 bxa4 15.Rxa4 Ng4 16.Bd3 Nf2 17.Rf1 Nxd3+ 18.cxd3 Bd7 19.Ra3 ) 
+9.O-O-O Nf6 ( 9...Nf6 {Deep HIARCS 15.4: +1.09/16} 10.Nf3 ) 10.exf5 exf5 ( 
+10...exf5 {Deep HIARCS 15.4: +0.65/14} 11.Nf3 Kc7 12.Bc4 Nb6 13.Bf7 Bd6 14.Rhe1 
+Rf8 15.Bb3 Bd7 16.g3 Rae8 17.Kb1 g6 18.Bd4 Rxe1 19.Rxe1 Bb4 20.Be5+ Kc8 ) 
+11.Be2 Kc7 ( 11...Kc7 {Deep HIARCS 15.4: -0.06/17} 12.Nf3 Bc5 13.Bxc5 Nxc5 
+14.Rhe1 Re8 15.a3 Be6 16.Ng5 Nce4 17.Ncxe4 fxe4 18.h3 Ba2 19.c4 a5 ) 12.Nf3 Nc5 
+{Deep HIARCS 15.4: +0.57/16} ( 12...Bc5 {Deep HIARCS 15.4: +0.18/15} 13.Nd4 Re8 
+14.Bf2 b5 15.Bf3 Bb7 16.Rhe1 a5 17.Bg1 Bxd4 18.Bxd4 b4 19.Na4 Ne4 20.Bxe4 fxe4 
+21.Nc5 Nxc5 22.Bxc5 g6 23.Bd6+ Kb6 ) 13.Rhe1 Nce4 {Deep HIARCS 15.4: +0.85/16} 
+( 13...b5 {Deep HIARCS 15.4: +0.60/14} 14.Ng5 b4 15.Nb1 h6 16.Nf7 Rg8 17.Bc4 
+Be6 18.Nd2 Bxc4 19.Nxc4 Nce4 20.Bd4 Nd5 21.g3 a5 22.Nd2 Nxd2 23.Rxd2 a4 24.Kb1 
+a3 25.Ne5 ) 14.Bd4 Nc5 $4 {Deep HIARCS 15.4: +5.10/16} ( 14...Bd6 {Deep HIARCS
+15.4: +0.82/15} 15.g3 Re8 16.Ng5 Re7 17.Bf3 Nxg5 18.fxg5 Ng4 19.Rxe7+ Bxe7 
+20.h4 Bd6 21.Bxg4 fxg4 22.Ne4 Bf5 23.Nxd6 Kxd6 24.Bxg7+ Ke6 25.Bf6 Kf7 26.Rf1 
+Be6 27.h5 ) 15.Be5+ Kb6 ( 15...Kb6 {Deep HIARCS 15.4: +5.14/15} 16.b4 Nfd7 
+17.bxc5+ Nxc5 18.Kb1 Bd7 19.Na4+ Nxa4 20.Rxd7 a5 21.Bc7+ Ka7 22.Bxa5 Bc5 
+23.Rxg7 Rag8 24.Rxg8 Rxg8 25.Bd3 Rxg2 26.Bxf5 ) 16.b4 Nfe4 {Deep HIARCS 15.4:
++6.33/13} ( 16...Nfd7 {Deep HIARCS 15.4: +5.00/15} 17.bxc5+ Nxc5 18.Kb1 Be6 
+19.Nd4 Re8 20.Ka1 a6 21.Nxe6 Rxe6 22.Bc4 Re7 23.Rd8 Ka5 24.Rb1 Rd7 25.Rxd7 Nxd7 
+26.Rxb7 Nxe5 27.fxe5 Bc5 28.Ne2 Re8 29.Rxg7 Rxe5 30.Rxh7 Be3 31.Kb2 Bg5 ) 
+17.bxc5+ Kxc5 {Deep HIARCS 15.4: +5.72/14} ( 17...Nxc5 {Deep HIARCS 15.4:
++4.36/14} 18.Bc4 Be6 19.Na4+ Ka5 20.Nxc5 Bxc4 21.Nxb7+ Kb6 22.Nd6 Bxa2 23.Nxf5 
+Ba3+ 24.Bb2 Rhf8 25.Nxg7 Bb4 26.Re4 Bc5 27.Be5 Bd5 ) 18.Kb2 h6 {Deep HIARCS
+15.4: #8/20} ( 18...Kb6 {Deep HIARCS 15.4: +5.56/15} 19.Nxe4 ) 19.Bd4+ Kb4 ( 
+19...Kb4 {Deep HIARCS 15.4: +7.17/17} 20.Bd3 ) 20.Bd3 Nxc3 {Deep HIARCS 15.4:
++10.67/16} ( 20...Ka5 {Deep HIARCS 15.4: +6.96/16} 21.Nxe4 fxe4 22.Bxe4 Bg4 
+23.Rd3 Rd8 24.Bc3+ Bb4 25.Bxb4+ Kxb4 26.Rb3+ Kc5 27.Ne5 Bc8 28.Rc3+ Kb6 29.Nf7 
+Rhg8 30.Rb3+ Kc5 31.Nxd8 Rxd8 32.Rg3 Rf8 33.Rxg7 Rxf4 34.Rh7 Bf5 35.Bxf5 ) 
+21.Bxc3+ Ka4 {Deep HIARCS 15.4: +11.29/17} ( 21...Kc5 {Deep HIARCS 15.4:
++10.00/15} 22.Re5+ Kd6 23.Nh4 Kc7 24.Ng6 Bd6 25.Nxh8 Bxe5 26.Bxe5+ Kb6 27.Bc4 
+Ka5 28.Bxg7 b5 29.Bb3 Bb7 30.Rd7 Ka6 31.Nf7 c5 32.Nxh6 Bxg2 33.Rd6+ Ka5 ) 
+22.Re5 b5 {Deep HIARCS 15.4: +11.51/14} ( 22...Ba3+ {Deep HIARCS 15.4: +8.77/19} 
+23.Ka1 c5 24.Rb1 a6 25.Bc4 Rd8 26.Nd2 Rd6 27.Bb3+ Kb5 28.Bd5+ Bb4 29.Bxb4 cxb4 
+30.Bxb7+ Kb6 31.Nc4+ Kxb7 32.Nxd6+ Kc6 33.Nxf5 Bxf5 34.Rxf5 b3 35.axb3 Kd6 ) 
+23.Bd2 g6 {Deep HIARCS 15.4: +14.40/15} ( 23...Ba3+ {Deep HIARCS 15.4: +5.26/16} 
+24.Kb1 Rb8 25.Nd4 Bd6 26.Ree1 Rb7 27.Nxf5 Bf8 28.h3 a6 29.Re4+ b4 30.Nd4 Rc7 
+31.Ne6 Bxe6 ) 24.c4 Bb4 {Deep HIARCS 15.4: +14.81/16} ( 24...Ba3+ {Deep HIARCS
+15.4: +14.10/18} 25.Kb1 Bb4 26.Nd4 Bd7 27.Bc2+ Ka5 28.Nb3+ Kb6 29.Bxb4 a5 
+30.Nxa5 Be8 31.cxb5 Rxa5 32.Bxa5+ Kxa5 33.bxc6+ Kb6 34.Rd8 g5 35.Bxf5 Rf8 
+36.Be4 Rxf4 37.Rdxe8 Rf1+ 38.Kb2 Rf2+ 39.Kb3 ) 25.Nd4 c5 {Deep HIARCS 15.4:
+#12/18} ( 25...Bd7 {Deep HIARCS 15.4: +14.32/15} 26.Bc2+ Ka5 27.Nb3+ Kb6 
+28.Bxb4 a5 29.Nxa5 Be8 30.cxb5 Rxa5 31.Bxa5+ Kxa5 32.bxc6+ Kb6 33.Rd8 g5 34.Ba4 
+gxf4 35.Rexe8 Rxe8 36.Rxe8 Kc7 37.Re7+ Kd8 38.c7+ Kc8 39.Bc6 h5 ) 26.Bc2+ Ka5 ( 
+26...Ka5 {Deep HIARCS 15.4: #11/18} 27.Bxb4+ Ka6 28.cxb5+ Kb7 29.Re7+ Bd7 
+30.Rxd7+ Kc8 31.Nxf5 gxf5 32.Bxf5 Re8 33.Bxc5 Re2+ 34.Kb3 Re3+ 35.Bxe3 Kb8 
+36.Rd8+ Kb7 37.R1d7# ) 27.Bxb4+ Ka6 ( 27...Ka6 {Deep HIARCS 15.4: #10/16} 
+28.cxb5+ Kb7 29.Re7+ Bd7 30.Rxd7+ Kc8 31.Nxf5 gxf5 32.Bxf5 Re8 33.Bxc5 Re2+ 
+34.Kb3 Rb2+ 35.Kxb2 Kb8 36.Bd6+ Kc8 37.Rc1# ) 28.cxb5+ Kb7 ( 28...Kb7 {Deep
+HIARCS 15.4: #9/16} 29.Re7+ Bd7 30.Rxd7+ Kc8 31.Nxf5 gxf5 32.Bxf5 Re8 33.Bxc5 
+Re2+ 34.Kb3 Rb2+ 35.Kxb2 Kb8 36.Bd6+ Kc8 37.Rc1# ) 29.Bxc5 a6 {Deep HIARCS 15.4:
+#6/27} ( 29...Rd8 {Deep HIARCS 15.4: +19.12/17} 30.Re7+ Rd7 31.Nxf5 Kc7 32.Be4 
+Rxe7 33.Nxe7 Bg4 34.Rc1 Re8 35.Bxg6 Bd7 36.Bxe8 Bxe8 37.Bxa7+ Kb7 38.Be3 Bxb5 
+39.f5 Be8 40.Bxh6 Bf7 41.g4 Kb6 42.g5 ) 30.Re7+ Bd7 ( 30...Bd7 {Deep HIARCS
+15.4: #5/35} 31.Rxd7+ Kc8 32.Nc6 Ra7 33.Bxa7 Re8 34.b6 g5 35.Rc7# ) 31.Rxd7+ 
+Kc8 ( 31...Kc8 {Deep HIARCS 15.4: #4/45} 32.Nc6 Ra7 33.Bxa7 Re8 34.b6 g5 
+35.Rc7# ) 32.Nc6 Re8 {Deep HIARCS 15.4: #3/121} ( 32...Ra7 {Deep HIARCS 15.4:
+#3/37} 33.Bxa7 Re8 34.b6 g5 35.Rc7# ) 33.b6 Ra7 ( 33...Ra7 {Deep HIARCS 15.4:
+#2/63} 34.Rxa7 g5 35.Rc7# ) 34.Rxa7 g5 {Deep HIARCS 15.4: #1/121} ( 34...Re2 
+{Deep HIARCS 15.4: #1/121} 35.Rd8# ) 35.Rc7# {Black loses 0.3 pawn per move (1
+blunder).} 1-0
+

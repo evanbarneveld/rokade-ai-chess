@@ -20,9 +20,10 @@ pub fn init_rayon_pool_if_needed() {
             .num_threads(num_threads)
             .stack_size(stack_bytes)
             .build_global();
-        match result {
-            Ok(_) => {}
-            Err(e) => panic!("Failed to initialize rayon thread pool: {}", e),
+        // Ignore error if pool already initialized (e.g., by test harness)
+        // The pool is already usable in that case
+        if let Err(_) = result {
+            // Pool was already initialized, which is fine
         }
     });
 }

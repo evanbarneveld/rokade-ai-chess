@@ -441,3 +441,82 @@ fn has_rook_or_queen_on_file(
     }
     false
 }
+
+/// Evaluate king virtual mobility (escape squares).
+/// Penalizes kings with few safe squares to move to.
+/// A safe escape square is:
+/// - Accessible (empty or enemy piece, not blocked by own piece)
+/// - Not attacked by the enemy
+///
+/// Returns a penalty (negative value) scaled by phase and queen presence.
+pub fn king_virtual_mobility(
+    board: &Board,
+    color: Color,
+    phase: i32,
+    king_pos: Option<(usize, usize)>,
+    att_w: &[[bool; 8]; 8],
+    att_b: &[[bool; 8]; 8],
+) -> i32 {
+    let (r, c) = match king_pos {
+        Some(pos) => pos,
+        None => return 0,
+    };
+
+    let enemy = opponent(color);
+    let enemy_has_queen = has_piece_type(board, enemy, PieceType::Queen);
+
+    // Scale by queen presence: 100% with queen, 60% without
+    let queen_scale = if enemy_has_queen { 100 } else { 60 };
+
+    let enemy_att = match color {
+        Color::White => att_b,
+        Color::Black => att_w,
+    };
+
+    let mut safe_escapes = 0;
+
+    // Check all 8 surrounding squares
+    for dr in -1..=1 {
+        for dc in -1..=1 {
+            if dr == 0 && dc == 0 {
+                continue;
+            }
+
+            let nr = r as i32 + dr;
+            let nc = c as i32 + dc;
+
+            if !(0..8).contains(&nr) || !(0..8).contains(&nc) {
+                continue;
+            }
+
+            let nr = nr as usize;
+            let nc = nc as usize;
+
+            // Check if square is accessible (empty or has enemy piece, not blocked by own piece)
+            let accessible = match board.get(nr, nc) {
+                None => true,
+                Some(p) => p.get_color() != color,
+            };
+
+            if !accessible {
+                continue;
+            }
+
+            // Check if square is not attacked by enemy
+            if !enemy_att[nr][nc] {
+                safe_escapes += 1;
+            }
+        }
+    }
+
+    // Penalties: 0 safe = -24cp, 1 safe = -16cp, 2 safe = -8cp, 3+ safe = 0
+    let penalty = match safe_escapes {
+        0 => 24,
+        1 => 16,
+        2 => 8,
+        _ => 0,
+    };
+
+    // Return negative penalty, scaled by phase and queen presence
+    -(penalty * phase * queen_scale) / 2400
+}

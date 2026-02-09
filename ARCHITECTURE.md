@@ -1,8 +1,29 @@
 # Rokade AI Chess Engine - Architecture Documentation
 
+## Build & Test Commands
+
+```bash
+# Build
+cargo build                           # Debug build
+cargo build --release                 # Release build (optimized)
+
+# Run
+cargo run --release                   # CLI mode
+cargo run --release --bin rokade-ai-chess-engine  # Pure UCI mode
+
+# Tests
+cargo test                            # All tests
+cargo test -- --nocapture             # With output
+cargo test test_blunder_move_5        # Single test by name
+cargo test --test main -- chess::move_tests  # Move test suite
+cargo test --test main -- chess::blunder_tests  # Blunder test suite
+```
+
+
 ## Overview
 
-This document explains the internal architecture of the Rokade AI Chess Engine. It focuses on how the engine evaluates positions, searches for moves, and selects the best move to play. Understanding these concepts is essential for maintaining and extending the engine.
+This document explains the internal architecture of the Rokade AI Chess Engine. It focuses on how the engine evaluates positions,
+searches for moves, and selects the best move to play. Understanding these concepts is essential for maintaining and extending the engine.
 
 ---
 
@@ -50,7 +71,8 @@ These scores must be converted to White-perspective before being used in the mai
 
 ### The Perspective Rule
 
-**Critical Understanding**: After making a move at root level, the search evaluates the resulting position from the **opponent's turn perspective**.
+**Critical Understanding**: After making a move at root level, the search evaluates the resulting position 
+from the **opponent's turn perspective**.
 
 **What this means**:
 
@@ -86,7 +108,8 @@ pub fn apply_for_side(v: i32, side: Color) -> i32 {
 - `apply_for_side(100, White)` = `+100` (increases White's advantage)
 - `apply_for_side(100, Black)` = `-100` (decreases White's advantage = good for Black)
 
-This function ensures heuristics that calculate "good for side" bonuses are correctly converted to the engine's White-perspective scoring system.
+This function ensures heuristics that calculate "good for side" bonuses are correctly converted to the engine's
+White-perspective scoring system.
 
 ---
 
@@ -94,7 +117,8 @@ This function ensures heuristics that calculate "good for side" bonuses are corr
 
 ### Overview
 
-The engine uses a **minimax alpha-beta search** with PVS/LMR, null-move pruning, and a quiescence search. Root search runs iterative deepening with aspiration windows, root ordering, and optional parallel evaluation.
+The engine uses a **minimax alpha-beta search** with PVS/LMR, null-move pruning, and a quiescence search. 
+Root search runs iterative deepening with aspiration windows, root ordering, and optional parallel evaluation.
 
 ```
 Root Level
@@ -365,7 +389,7 @@ At the root level (where the engine chooses its move), additional heuristics pro
 1. **Development/Centralization Bonus**
    - Light development bias for minors
 
-2. **SEE (Static Exchange Evaluation) Penalties**
+2. **SEE (Static Exchange Evaluation: this is basically calculating repeating captures on the same square) Penalties**
    - Penalize bad destination exchanges
 
 3. **Threat Resolution & Evacuation**

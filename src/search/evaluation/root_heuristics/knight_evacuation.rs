@@ -40,6 +40,10 @@ pub fn knight_safe_squares(board: &Board, side: Color, from: (usize, usize)) -> 
     v
 }
 
+const PENALTY_FOR_NO_EVAC_WHEN_ATTACKED_KNIGHT_HAS_SAFE_SQUARES: i32 = 250;
+const BASE_CENTER_PROXIMITY_BONUS_BEFORE_DISTANCE_PENALTY: i32 = 20;
+const PENALTY_FOR_EVAC_TO_UNSAFE_SQUARE: i32 = 150;
+
 /// Priority adjustment for knight evacuations from pawn threats.
 #[inline]
 pub fn knight_evacuations_priority(
@@ -80,7 +84,7 @@ pub fn knight_evacuations_priority(
         if has_safe_squares {
             // Reduced from 500 to 250 to avoid overriding legitimately good moves
             // (e.g., winning material elsewhere)
-            delta -= apply_for_side(250, side);
+            delta -= apply_for_side(PENALTY_FOR_NO_EVAC_WHEN_ATTACKED_KNIGHT_HAS_SAFE_SQUARES, side);
         }
     } else if let Some(p) = base_board.get(from.0, from.1)
         && p.get_type() == PieceType::Knight {
@@ -97,7 +101,7 @@ pub fn knight_evacuations_priority(
                     let dr = tr.abs_diff(cr) as i32;
                     let dc = tc.abs_diff(cc) as i32;
                     let dist = dr.saturating_add(dc);
-                    let center_bonus = 20_i32.saturating_sub(KNIGHT_CENTER_STEP.saturating_mul(dist));
+                    let center_bonus = BASE_CENTER_PROXIMITY_BONUS_BEFORE_DISTANCE_PENALTY.saturating_sub(KNIGHT_CENTER_STEP.saturating_mul(dist));
                     evac = evac.saturating_add(center_bonus.max(0));
                 }
                 // Extra bonus for d4 square
@@ -106,7 +110,7 @@ pub fn knight_evacuations_priority(
                 }
                 delta += apply_for_side(evac, side);
             } else {
-                delta -= apply_for_side(150, side);
+                delta -= apply_for_side(PENALTY_FOR_EVAC_TO_UNSAFE_SQUARE, side);
             }
         }
     delta

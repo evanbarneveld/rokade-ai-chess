@@ -1,3 +1,47 @@
+28-01-2026
+Fixed LMR being disabled too aggressively in endgames, causing slow mate-in-4 searches.
+- Changed LMR phase threshold from 8 to 5 (was disabling all reductions when phase <= 8)
+- Phase 8 includes positions with 2 rooks + 2 minors, which is not a deep endgame
+- test_mate_in_4_failure_2 now runs in ~8 seconds instead of 50+ seconds (6x speedup)
+
+27-01-2026
+Implemented evaluation refinements for improved engine strength.
+- King Virtual Mobility: Penalizes kings with few safe escape squares (-24cp for 0 escapes, scaled by phase/queen)
+- Bishop Outposts: Bonus for bishops on protected squares that can't be attacked by enemy pawns (+14cp MG, +6cp EG)
+- Bishop Pair Scaling: Bonus now scales with position openness (80-120% of base +36/+24cp)
+- Enhanced Opposite Bishops: Draw factor scales with pawn count (25-50% score reduction)
+- Enhanced Threats: Extra bonus for pawn threats (+12cp), multi-threat synergy (+8cp per additional threat)
+- Passed Pawn King Distance Ratio: Compares relative king distances (±15cp max)
+- Tarrasch Rule: Rook behind passed pawn bonus/penalty (±12cp endgame)
+Added tests in:
+- evaluate_bishops_tests.rs, evaluate_king_tests.rs, evaluate_pawns_tests.rs, evaluator_tests.rs
+
+26-01-2026
+Added configurable evaluation heuristics for testing which heuristics are most effective.
+- Added `eval_config.rs` module with bitflags for 10 evaluation categories
+- Categories: TEMPO, HANGING, MOBILITY, CENTER, PAWN_STRUCTURE, KING_SAFETY, ROOK_ACTIVITY, THREATS, INTERACTIONS, IMBALANCE
+- CLI command `eval-config` to show/set flags (e.g., `eval-config +KING_SAFETY -THREATS`)
+- UCI option `EvalFlags` for GUI integration (e.g., `setoption name EvalFlags value KING_SAFETY,PAWN_STRUCTURE`)
+- Material + PST evaluation always enabled; all other heuristics can be toggled
+- Added tests in `tests/board/eval_config_tests.rs`
+
+26-01-2026
+Implemented staged move generation for more efficient search.
+- Added `move_picker.rs` with `MovePicker` that picks moves in stages (TT → captures → killers → quiets)
+- Avoids scoring/sorting moves that are never searched due to early beta cutoffs
+- Separates good captures (SEE >= 0) from bad captures for better ordering
+- Replaced `order_moves` with staged picker in alpha-beta search
+- Added `get_killers` method to `SearchHeuristics` for move picker integration
+- Added tests for move picker
+
+26-01-2026
+Implemented Lazy SMP parallel search for ~39% performance improvement (447k → 620k nps).
+- Added `lazy_smp.rs` module with multi-threaded search using shared transposition table
+- Modified `SearchContext` to use `Arc<TranspositionTable>` for TT sharing across threads
+- Spawns up to 3 helper threads that search at different depths for diversity
+- Lowered root parallel thresholds (depth 6→4, moves 4→3, time 200→50ms)
+- Added tests in lazy_smp.rs
+
 25-01-2026
 Added closed/open position awareness for knight vs bishop evaluation.
 - Knights receive bonus in closed positions (many blocked pawns)

@@ -73,6 +73,24 @@ impl SearchHeuristics {
         let k = self.killers[ply];
         k[0] == m || k[1] == m
     }
+    /// Get killer moves as coordinates for the move picker
+    pub fn get_killers(&self, ply: usize) -> [Option<((usize, usize), (usize, usize))>; 2] {
+        if ply >= self.killers.len() {
+            return [None, None];
+        }
+        let k = self.killers[ply];
+        [
+            Self::unflat(k[0]),
+            Self::unflat(k[1]),
+        ]
+    }
+    #[inline]
+    fn unflat(m: i16) -> Option<((usize, usize), (usize, usize))> {
+        if m < 0 { return None; }
+        let from_sq = (m / 64) as usize;
+        let to_sq = (m % 64) as usize;
+        Some(((from_sq / 8, from_sq % 8), (to_sq / 8, to_sq % 8)))
+    }
     pub fn set_counter_move(
         &mut self,
         side: Color,

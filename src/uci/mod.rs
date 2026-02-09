@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::exit;
 use std::thread;
 use chrono::Local;
+use crate::board::eval_config::{format_flags, get_eval_flags, parse_flags, set_eval_flags, EvalFlags};
 use crate::Chess;
 use crate::cli::{BUILD_NUMBER, VERSION};
 use crate::piece::as_move_str;
@@ -152,6 +153,29 @@ pub fn run_uci() -> io::Result<()> {
                         engine.lock().unwrap().set_order_book_enabled(false);
                     }
                 }
+            else if lower.contains("name evalflags") {
+                if let Some(idx) = lower.find("value ") {
+                    let val = line[(idx + 6)..].trim();
+                    // Try hex format first (0x3FF)
+                    if let Some(hex) = val.strip_prefix("0x").or_else(|| val.strip_prefix("0X")) {
+                        if let Ok(bits) = u32::from_str_radix(hex, 16) {
+                            set_eval_flags(EvalFlags::from_bits_truncate(bits));
+                            let msg = format!("info string EvalFlags set to {} (0x{:03X})",
+                                format_flags(get_eval_flags()), get_eval_flags().bits());
+                            write_to_stdout_and_log_with_flush("OUT", &msg);
+                        }
+                    } else if let Some(flags) = parse_flags(val) {
+                        // Parse as flag names
+                        set_eval_flags(flags);
+                        let msg = format!("info string EvalFlags set to {} (0x{:03X})",
+                            format_flags(get_eval_flags()), get_eval_flags().bits());
+                        write_to_stdout_and_log_with_flush("OUT", &msg);
+                    } else {
+                        let msg = format!("info string Invalid EvalFlags value: {}", val);
+                        write_to_stdout_and_log_with_flush("OUT", &msg);
+                    }
+                }
+            }
             continue;
         }
         if line == "isready" {
@@ -441,6 +465,9 @@ fn send_uci_response(engine: &Chess) {
 
     let opt_searchmode = "option name SearchMode type combo default Normal var Normal var Test".to_string();
     write_to_stdout_and_log_with_flush("OUT", &opt_searchmode);
+
+    let opt_evalflags = format!("option name EvalFlags type string default {}", format_flags(get_eval_flags()));
+    write_to_stdout_and_log_with_flush("OUT", &opt_evalflags);
 
     let m3 = "uciok".to_string();
     write_to_stdout_and_log_with_flush("OUT", &m3)

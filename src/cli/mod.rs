@@ -1,5 +1,9 @@
 use std::io;
 use std::io::Write;
+use crate::board::eval_config::{
+    disable_flags, enable_flags, format_flags, get_eval_flags, parse_flags,
+    reset_eval_flags, set_eval_flags, EvalFlags,
+};
 use crate::board::evaluator::evaluate_position;
 use crate::Chess;
 use crate::generator::move_generator::generate_move_as_san;
@@ -157,6 +161,12 @@ pub fn run_cli() {
                 let side = game.get_game_state().active_color();
                 let score = evaluate_position(game.board(), side);
                 println ! ("Evaluation: {}", score as f32 / 100.0);
+                continue;
+            }
+
+            // Handle eval-config command
+            if some_input.to_ascii_lowercase().starts_with("eval-config") {
+                handle_eval_config(&some_input);
                 continue;
             }
 
@@ -503,6 +513,12 @@ fn print_help() {
     println!("searchmode advanced       - set search mode to advanced");
     println!("searchmode simple         - set search mode to simple");
     println!("clearcache                - clear transposition table");
+    println!("eval-config               - show current evaluation flags");
+    println!("eval-config all           - enable all evaluation heuristics");
+    println!("eval-config none          - disable all evaluation heuristics");
+    println!("eval-config +FLAG         - enable a specific flag (e.g., +KING_SAFETY)");
+    println!("eval-config -FLAG         - disable a specific flag (e.g., -THREATS)");
+    println!("eval-config FLAG,FLAG     - set exactly these flags");
     println!("uci                       - switch to UCI mode (use 'cli' to return)");
 }
 
@@ -512,4 +528,82 @@ fn handle_game_mode_commands(mode: &mut GameMode, some_input: &String) -> bool {
     if some_input.eq_ignore_ascii_case("bvsp") { *mode = GameMode::BotVsPlayer; return true };
     if some_input.eq_ignore_ascii_case("pvp") { *mode = GameMode::PlayerVsPlayer; return true};
     false
+}
+
+/// Handle the eval-config command for configuring evaluation heuristics.
+fn handle_eval_config(input: &str) {
+    let parts: Vec<&str> = input.split_whitespace().collect();
+
+    // No arguments: show current flags
+    if parts.len() == 1 {
+        let flags = get_eval_flags();
+        println!("Evaluation flags: {} (0x{:03X})", format_flags(flags), flags.bits());
+        println!();
+        println!("Available flags:");
+        println!("  TEMPO          - Side-to-move tempo bonus");
+        println!("  HANGING        - Penalty for undefended pieces");
+        println!("  MOBILITY       - Per-piece mobility bonuses");
+        println!("  CENTER         - Holes, center control, space evaluation");
+        println!("  PAWN_STRUCTURE - Pawn islands, chains, tension, storm, majority");
+        println!("  KING_SAFETY    - King safety, ring pressure, shelter, activity");
+        println!("  ROOK_ACTIVITY  - Rook/Queen file activity, doubled rooks");
+        println!("  THREATS        - Threat evaluation");
+        println!("  INTERACTIONS   - Synergy, tropism, batteries, bishop pair");
+        println!("  IMBALANCE      - Knight vs bishop, drawish tweaks");
+        return;
+    }
+
+    let arg = parts[1..].join(" ");
+
+    // Handle special cases
+    if arg.eq_ignore_ascii_case("all") {
+        reset_eval_flags();
+        println!("Enabled all evaluation flags");
+        return;
+    }
+
+    if arg.eq_ignore_ascii_case("none") {
+        set_eval_flags(EvalFlags::empty());
+        println!("Disabled all evaluation flags");
+        return;
+    }
+
+    // Handle +FLAG and -FLAG syntax
+    let mut modified = false;
+    for token in arg.split_whitespace() {
+        if token.starts_with('+') {
+            let name = &token[1..];
+            if let Some(flags) = parse_flags(name) {
+                enable_flags(flags);
+                println!("Enabled: {}", format_flags(flags));
+                modified = true;
+            } else {
+                println!("Unknown flag: {}", name);
+            }
+        } else if token.starts_with('-') {
+            let name = &token[1..];
+            if let Some(flags) = parse_flags(name) {
+                disable_flags(flags);
+                println!("Disabled: {}", format_flags(flags));
+                modified = true;
+            } else {
+                println!("Unknown flag: {}", name);
+            }
+        }
+    }
+
+    if modified {
+        let flags = get_eval_flags();
+        println!("Current flags: {} (0x{:03X})", format_flags(flags), flags.bits());
+        return;
+    }
+
+    // Otherwise try to parse as a comma-separated list of flags to set
+    if let Some(flags) = parse_flags(&arg) {
+        set_eval_flags(flags);
+        println!("Set evaluation flags to: {} (0x{:03X})", format_flags(flags), flags.bits());
+    } else {
+        println!("Invalid flag name(s): {}", arg);
+        println!("Use 'eval-config' to see available flags");
+    }
 }

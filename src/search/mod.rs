@@ -1,5 +1,5 @@
 pub mod core;
-mod management;
+pub mod management;
 mod evaluation;
 pub(crate) mod state;
 pub mod integration;
@@ -9,6 +9,7 @@ pub mod test_support;
 
 use core::simple_search;
 use crate::search::core::advanced_search;
+use crate::search::integration::lazy_smp;
 pub use context::{SearchContext, InfoCb};
 
 pub trait Search {
@@ -42,7 +43,8 @@ pub fn find_best_move_with_mode(
     playing_strength: usize,
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     match mode {
-        SearchMode::Normal => advanced_search::AdvancedSearch::find_best_move(
+        // Use Lazy SMP for normal search mode (parallel search with shared TT)
+        SearchMode::Normal => lazy_smp::lazy_smp_search(
             ctx,
             game_state,
             history,

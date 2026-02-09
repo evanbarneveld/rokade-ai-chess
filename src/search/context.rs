@@ -24,7 +24,7 @@ pub struct SearchContext {
     deadline_ms: AtomicU64,
     node_count: AtomicU64,
     info_cb: Mutex<Option<Arc<InfoCb>>>,
-    tt: TranspositionTable,
+    tt: Arc<TranspositionTable>,
 }
 
 impl std::fmt::Debug for SearchContext {
@@ -49,7 +49,7 @@ impl SearchContext {
             deadline_ms: AtomicU64::new(0),
             node_count: AtomicU64::new(0),
             info_cb: Mutex::new(None),
-            tt: TranspositionTable::new_with_default_size(),
+            tt: Arc::new(TranspositionTable::new_with_default_size()),
         }
     }
 
@@ -63,8 +63,29 @@ impl SearchContext {
             deadline_ms: AtomicU64::new(0),
             node_count: AtomicU64::new(0),
             info_cb: Mutex::new(None),
-            tt: TranspositionTable::with_capacity_pow2(pow2),
+            tt: Arc::new(TranspositionTable::with_capacity_pow2(pow2)),
         }
+    }
+
+    /// Create a helper context for Lazy SMP that shares the TT with another context.
+    /// Helper contexts have parallel search disabled (to avoid nested parallelism)
+    /// and opening book disabled.
+    pub fn new_smp_helper(shared_tt: Arc<TranspositionTable>) -> Self {
+        Self {
+            deterministic: AtomicBool::new(false),
+            parallel_search: AtomicBool::new(false), // Disable nested parallelism
+            order_book_enabled: AtomicBool::new(false), // Skip book in helpers
+            start_ms: AtomicU64::new(0),
+            deadline_ms: AtomicU64::new(0),
+            node_count: AtomicU64::new(0),
+            info_cb: Mutex::new(None),
+            tt: shared_tt,
+        }
+    }
+
+    /// Get the shared TT Arc for creating helper contexts
+    pub fn shared_tt(&self) -> Arc<TranspositionTable> {
+        Arc::clone(&self.tt)
     }
 
     #[inline]

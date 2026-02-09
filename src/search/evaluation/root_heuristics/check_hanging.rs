@@ -12,6 +12,18 @@ use super::utils::{
     CHECK_TIEBREAK_BASE, CHECK_MOBILITY_BONUS_0, CHECK_MOBILITY_BONUS_1_2, CHECK_MOBILITY_BONUS_3_5,
 };
 
+const QUEEN_HANGING_SEE_MULTIPLIER: i32 = 8;
+const QUEEN_SEE_MIN_CLAMP: i32 = 400;
+const QUEEN_SEE_MAX_CLAMP: i32 = 6000;
+const ROOK_HANGING_SEE_MULTIPLIER: i32 = 3;
+const ROOK_SEE_MIN_CLAMP: i32 = 300;
+const ROOK_SEE_MAX_CLAMP: i32 = 2000;
+const SEE_PENALTY_MULTIPLIER: i32 = 2;
+const KNIGHT_SEE_MAX_CLAMP: i32 = 800;
+const EXTRA_PENALTY_PER_ADDITIONAL_HANGING_PIECE_BEYOND_FIRST: i32 = 100;
+const SEE_BONUS_FOR_ADVANCED_PAWN_GIVING_CHECK: i32 = 2000;
+
+
 /// Calculate check mobility bonus based on opponent's available replies.
 #[inline]
 pub fn check_mobility_bonus_for_side(post_after: &Board, checked_side: Color) -> i32 {
@@ -59,9 +71,9 @@ pub fn self_hang_or_check_mobility(
                     hanging_pieces_found += 1;
                     // Scale penalty based on piece type - don't cap too low for valuable pieces
                     let pen = match p.get_type() {
-                        PieceType::Queen => ((-see) * 8).clamp(400, 6000),
-                        PieceType::Rook => ((-see) * 3).clamp(300, 2000),
-                        PieceType::Knight | PieceType::Bishop => ((-see) * 2).clamp(SEE_PENALTY_MIN_CP, 800),
+                        PieceType::Queen => ((-see) * QUEEN_HANGING_SEE_MULTIPLIER).clamp(QUEEN_SEE_MIN_CLAMP, QUEEN_SEE_MAX_CLAMP),
+                        PieceType::Rook => ((-see) * ROOK_HANGING_SEE_MULTIPLIER).clamp(ROOK_SEE_MIN_CLAMP, ROOK_SEE_MAX_CLAMP),
+                        PieceType::Knight | PieceType::Bishop => ((-see) * SEE_PENALTY_MULTIPLIER).clamp(SEE_PENALTY_MIN_CP, KNIGHT_SEE_MAX_CLAMP),
                         _ => (-see).clamp(SEE_PENALTY_MIN_CP, SEE_PENALTY_MAX_CP) / 2,
                     };
                     total_penalty += pen;
@@ -72,7 +84,7 @@ pub fn self_hang_or_check_mobility(
 
     // If multiple pieces are hanging, apply additional penalty for exposing multiple weaknesses
     if hanging_pieces_found > 1 {
-        total_penalty += 100 * (hanging_pieces_found - 1);
+        total_penalty += EXTRA_PENALTY_PER_ADDITIONAL_HANGING_PIECE_BEYOND_FIRST * (hanging_pieces_found - 1);
     }
 
     // Don't cap hanging penalties - they should fully reflect the material at risk
@@ -103,16 +115,17 @@ pub fn self_hang_or_check_mobility(
                 if is_advanced {
                     // Very large bonus for advanced pawn check
                     // This should outweigh most other considerations
-                    check_bonus += 2000;
+                    check_bonus += SEE_BONUS_FOR_ADVANCED_PAWN_GIVING_CHECK;
                 }
             }
     }
 
-    // If we give check, reduce hanging piece penalties significantly
-    // because opponent must respond to check before capturing hanging pieces
-    let adjusted_hang_pen = if gives_check && hang_pen < 0 {
-        // Reduce hanging penalties by 80% when giving check
-        hang_pen / 5
+    // If we give check, skip hanging piece penalties entirely.
+    // The opponent must respond to check first, so static analysis of hanging pieces
+    // is unreliable. The search has already evaluated the full tactical consequences.
+    // This allows brilliant sacrifices to be evaluated correctly.
+    let adjusted_hang_pen = if gives_check {
+        0 // Trust the search for checking moves
     } else {
         hang_pen
     };

@@ -153,3 +153,150 @@ fn pawn_majority_bonus_rewards_wing_majority() {
     let bonus = pawn_majority_bonus(&counts, Color::White, 0);
     assert!(bonus > 0);
 }
+
+#[test]
+fn tarrasch_rule_rewards_rook_behind_passed_pawn() {
+    // White passed pawn with white rook behind it should score higher
+    let mut rook_behind = Board::empty();
+    rook_behind.set(0, 4, Some(Piece::new(PieceType::King, Color::White)));
+    rook_behind.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    rook_behind.set(5, 0, Some(Piece::new(PieceType::Pawn, Color::White)));  // a6 passed pawn
+    rook_behind.set(2, 0, Some(Piece::new(PieceType::Rook, Color::White)));  // Rook behind on a3
+    rook_behind.find_and_set_location_of_kings();
+
+    let (att_w, att_b) = build_attack_maps(&rook_behind);
+    let counts = pawn_file_counts(&rook_behind);
+    let behind_score = evaluate_pawn(
+        &rook_behind,
+        5,
+        0,
+        Color::White,
+        0,  // Endgame phase (Tarrasch matters most in endgame)
+        Some(rook_behind.get_king_location(Color::White)),
+        Some(rook_behind.get_king_location(Color::Black)),
+        &att_w,
+        &att_b,
+        &counts,
+    );
+
+    let mut rook_away = Board::empty();
+    rook_away.set(0, 4, Some(Piece::new(PieceType::King, Color::White)));
+    rook_away.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    rook_away.set(5, 0, Some(Piece::new(PieceType::Pawn, Color::White)));  // a6 passed pawn
+    rook_away.set(2, 7, Some(Piece::new(PieceType::Rook, Color::White)));  // Rook on different file
+    rook_away.find_and_set_location_of_kings();
+
+    let (att_w2, att_b2) = build_attack_maps(&rook_away);
+    let counts2 = pawn_file_counts(&rook_away);
+    let away_score = evaluate_pawn(
+        &rook_away,
+        5,
+        0,
+        Color::White,
+        0,
+        Some(rook_away.get_king_location(Color::White)),
+        Some(rook_away.get_king_location(Color::Black)),
+        &att_w2,
+        &att_b2,
+        &counts2,
+    );
+
+    assert!(behind_score > away_score);
+}
+
+#[test]
+fn tarrasch_rule_penalizes_enemy_rook_behind_passer() {
+    // White passed pawn with black rook behind it should score lower
+    let mut enemy_behind = Board::empty();
+    enemy_behind.set(0, 4, Some(Piece::new(PieceType::King, Color::White)));
+    enemy_behind.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    enemy_behind.set(5, 0, Some(Piece::new(PieceType::Pawn, Color::White)));  // a6 passed pawn
+    enemy_behind.set(2, 0, Some(Piece::new(PieceType::Rook, Color::Black)));  // Enemy rook behind on a3
+    enemy_behind.find_and_set_location_of_kings();
+
+    let (att_w, att_b) = build_attack_maps(&enemy_behind);
+    let counts = pawn_file_counts(&enemy_behind);
+    let enemy_score = evaluate_pawn(
+        &enemy_behind,
+        5,
+        0,
+        Color::White,
+        0,
+        Some(enemy_behind.get_king_location(Color::White)),
+        Some(enemy_behind.get_king_location(Color::Black)),
+        &att_w,
+        &att_b,
+        &counts,
+    );
+
+    let mut no_rook = Board::empty();
+    no_rook.set(0, 4, Some(Piece::new(PieceType::King, Color::White)));
+    no_rook.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    no_rook.set(5, 0, Some(Piece::new(PieceType::Pawn, Color::White)));  // a6 passed pawn
+    no_rook.find_and_set_location_of_kings();
+
+    let (att_w2, att_b2) = build_attack_maps(&no_rook);
+    let counts2 = pawn_file_counts(&no_rook);
+    let no_rook_score = evaluate_pawn(
+        &no_rook,
+        5,
+        0,
+        Color::White,
+        0,
+        Some(no_rook.get_king_location(Color::White)),
+        Some(no_rook.get_king_location(Color::Black)),
+        &att_w2,
+        &att_b2,
+        &counts2,
+    );
+
+    assert!(enemy_score < no_rook_score);
+}
+
+#[test]
+fn king_distance_ratio_favors_closer_friendly_king() {
+    // Passed pawn with friendly king closer should score higher
+    let mut friendly_close = Board::empty();
+    friendly_close.set(4, 0, Some(Piece::new(PieceType::King, Color::White)));  // King close to pawn
+    friendly_close.set(7, 7, Some(Piece::new(PieceType::King, Color::Black)));  // Enemy king far
+    friendly_close.set(5, 1, Some(Piece::new(PieceType::Pawn, Color::White)));  // b6 passed pawn
+    friendly_close.find_and_set_location_of_kings();
+
+    let (att_w, att_b) = build_attack_maps(&friendly_close);
+    let counts = pawn_file_counts(&friendly_close);
+    let close_score = evaluate_pawn(
+        &friendly_close,
+        5,
+        1,
+        Color::White,
+        0,  // Endgame
+        Some(friendly_close.get_king_location(Color::White)),
+        Some(friendly_close.get_king_location(Color::Black)),
+        &att_w,
+        &att_b,
+        &counts,
+    );
+
+    let mut enemy_close = Board::empty();
+    enemy_close.set(0, 7, Some(Piece::new(PieceType::King, Color::White)));  // Friendly king far
+    enemy_close.set(6, 1, Some(Piece::new(PieceType::King, Color::Black)));  // Enemy king close
+    enemy_close.set(5, 1, Some(Piece::new(PieceType::Pawn, Color::White)));  // b6 passed pawn
+    enemy_close.find_and_set_location_of_kings();
+
+    let (att_w2, att_b2) = build_attack_maps(&enemy_close);
+    let counts2 = pawn_file_counts(&enemy_close);
+    let far_score = evaluate_pawn(
+        &enemy_close,
+        5,
+        1,
+        Color::White,
+        0,
+        Some(enemy_close.get_king_location(Color::White)),
+        Some(enemy_close.get_king_location(Color::Black)),
+        &att_w2,
+        &att_b2,
+        &counts2,
+    );
+
+    assert!(close_score > far_score);
+}

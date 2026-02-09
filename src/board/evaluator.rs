@@ -1,4 +1,5 @@
 use crate::board::attack_maps::build_attack_maps;
+use crate::board::eval_config::{is_enabled, EvalFlags};
 use crate::board::evaluation_helpers::{
     apply_color_score, chebyshev_dist, find_king,
     get_piece_type, is_color, is_piece, material_value, square_attacked_by_enemy_pawn,
@@ -19,6 +20,8 @@ const THREAT_MIN_GAIN: i32 = 150;
 const THREAT_BASE_BONUS: i32 = 6;
 const THREAT_VALUE_DIV: i32 = 20;
 const THREAT_MAX_BONUS: i32 = 40;
+const THREAT_BY_PAWN_BONUS: i32 = 12;  // Extra bonus when pawn threatens a piece
+const MULTI_THREAT_BONUS: i32 = 8;     // Bonus per additional threat beyond the first
 
 // Phase weights for game phase calculation (total = 24 at start)
 const PHASE_KNIGHT: i32 = 1;
@@ -35,7 +38,7 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     let ctx = EvalContext::new(board);
     let mut score = 0;
 
-    // Evaluate all pieces
+    // Evaluate all pieces (material + PST - always enabled)
     for row in 0..8 {
         for col in 0..8 {
             if let Some(piece) = board.get(row, col) {
@@ -46,20 +49,47 @@ pub fn evaluate_position(board: &Board, side_to_move: Color) -> i32 {
     }
 
     // Tempo bonus
-    let tempo = (12 * ctx.phase()) / 24;
-    score += apply_color_score(tempo, side_to_move);
+    if is_enabled(EvalFlags::TEMPO) {
+        let tempo = (12 * ctx.phase()) / 24;
+        score += apply_color_score(tempo, side_to_move);
+    }
 
-    score += ctx.evaluate_hanging_pieces();
-    score += ctx.evaluate_mobility();
-    score += ctx.evaluate_holes();
-    score += ctx.evaluate_center_control();
-    score += ctx.evaluate_space();
+    // Hanging pieces
+    if is_enabled(EvalFlags::HANGING) {
+        score += ctx.evaluate_hanging_pieces();
+    }
+
+    // Center control (holes, center, space)
+    if is_enabled(EvalFlags::CENTER) {
+        score += ctx.evaluate_holes();
+        score += ctx.evaluate_center_control();
+        score += ctx.evaluate_space();
+    }
+
+    // Global features (pawn structure, king safety, rook activity, interactions)
     score += ctx.evaluate_global_features();
-    score += ctx.evaluate_piece_interactions();
-    score += ctx.evaluate_threats();
-    score += ctx.evaluate_minor_piece_imbalance();
 
-    apply_drawish_tweaks(&ctx.stats, score)
+    // Threats
+    if is_enabled(EvalFlags::THREATS) {
+        score += ctx.evaluate_threats();
+    }
+
+    // Piece interactions
+    if is_enabled(EvalFlags::INTERACTIONS) {
+        score += ctx.evaluate_piece_interactions();
+    }
+
+    // Minor piece imbalance
+    if is_enabled(EvalFlags::IMBALANCE) {
+        score += ctx.evaluate_minor_piece_imbalance();
+    }
+
+    // Drawish tweaks (part of IMBALANCE)
+    if is_enabled(EvalFlags::IMBALANCE) {
+        apply_drawish_tweaks(&ctx.stats, score)
+    } else {
+        score
+    }
 }
 
 // ============================================================
@@ -77,8 +107,6 @@ struct BoardStats {
     blocked_pawns: i32,      // Pawns blocked by enemy pawn directly ahead
     white_knights: i32,
     black_knights: i32,
-    white_bishops: i32,
-    black_bishops: i32,
 }
 
 #[derive(Default)]
@@ -102,8 +130,6 @@ impl BoardStats {
         let mut blocked_pawns = 0;
         let mut white_knights = 0;
         let mut black_knights = 0;
-        let mut white_bishops = 0;
-        let mut black_bishops = 0;
 
         for r in 0..8 {
             for c in 0..8 {
@@ -149,13 +175,11 @@ impl BoardStats {
                         PieceType::Bishop => {
                             if color == Color::White {
                                 drawish.white_bishops += 1;
-                                white_bishops += 1;
                                 if (r + c) % 2 == 1 {
                                     white_bishop_on_dark = true;
                                 }
                             } else {
                                 drawish.black_bishops += 1;
-                                black_bishops += 1;
                                 if (r + c) % 2 == 1 {
                                     black_bishop_on_dark = true;
                                 }
@@ -192,8 +216,6 @@ impl BoardStats {
             blocked_pawns,
             white_knights,
             black_knights,
-            white_bishops,
-            black_bishops,
         }
     }
 
@@ -202,14 +224,16 @@ impl BoardStats {
         d.pawns == 0 && d.rooks == 0 && d.queens == 0 && d.minors <= 1
     }
 
-    fn is_opposite_bishops_only(&self) -> bool {
+
+    /// Check if the position has opposite colored bishops (one on light, one on dark).
+    /// Each side must have exactly one bishop.
+    fn has_opposite_colored_bishops(&self) -> bool {
         let d = &self.drawish_material;
-        d.white_bishops == 1
-            && d.black_bishops == 1
-            && d.pawns == 0
-            && d.rooks == 0
-            && d.queens == 0
-            && d.minors == 2
+        if d.white_bishops != 1 || d.black_bishops != 1 {
+            return false;
+        }
+        // White bishop on dark square and black bishop on light, or vice versa
+        self.white_bishop_on_dark != self.black_bishop_on_dark
     }
 }
 
@@ -300,16 +324,12 @@ impl<'a> EvalContext<'a> {
 
         if openness > 60 {
             // Bishops get bonus, knights get penalty
-            score += adjustment_per_piece * self.stats.white_bishops;
             score -= adjustment_per_piece * self.stats.white_knights;
-            score -= adjustment_per_piece * self.stats.black_bishops;
             score += adjustment_per_piece * self.stats.black_knights;
         } else {
             // Knights get bonus, bishops get penalty
             score += adjustment_per_piece * self.stats.white_knights;
-            score -= adjustment_per_piece * self.stats.white_bishops;
             score -= adjustment_per_piece * self.stats.black_knights;
-            score += adjustment_per_piece * self.stats.black_bishops;
         }
 
         // Scale by phase (more important in middlegame)
@@ -366,13 +386,6 @@ impl<'a> EvalContext<'a> {
             }
         }
         score
-    }
-
-    fn evaluate_mobility(&self) -> i32 {
-        // Mobility is now handled by individual piece evaluators (evaluate_knights, etc.)
-        // which compute safe mobility (squares not attacked by enemy pawns).
-        // This avoids duplicate computation and provides more accurate evaluation.
-        0
     }
 
     fn evaluate_holes(&self) -> i32 {
@@ -468,119 +481,138 @@ impl<'a> EvalContext<'a> {
     fn evaluate_global_features(&self) -> i32 {
         let mut score = 0;
 
-        // Pawn islands penalty
-        let w_islands = crate::board::evaluators::evaluate_pawns::evaluate_pawn_islands(
-            &self.pawn_counts, Color::White, self.phase()
-        );
-        let b_islands = crate::board::evaluators::evaluate_pawns::evaluate_pawn_islands(
-            &self.pawn_counts, Color::Black, self.phase()
-        );
-        score += w_islands - b_islands;
+        // Pawn structure evaluation
+        if is_enabled(EvalFlags::PAWN_STRUCTURE) {
+            // Pawn islands penalty
+            let w_islands = crate::board::evaluators::evaluate_pawns::evaluate_pawn_islands(
+                &self.pawn_counts, Color::White, self.phase()
+            );
+            let b_islands = crate::board::evaluators::evaluate_pawns::evaluate_pawn_islands(
+                &self.pawn_counts, Color::Black, self.phase()
+            );
+            score += w_islands - b_islands;
 
-        // Pawn chains evaluation
-        let w_chains = crate::board::evaluators::evaluate_pawns::evaluate_pawn_chains(
-            self.board, Color::White, self.phase()
-        );
-        let b_chains = crate::board::evaluators::evaluate_pawns::evaluate_pawn_chains(
-            self.board, Color::Black, self.phase()
-        );
-        score += w_chains - b_chains;
+            // Pawn chains evaluation
+            let w_chains = crate::board::evaluators::evaluate_pawns::evaluate_pawn_chains(
+                self.board, Color::White, self.phase()
+            );
+            let b_chains = crate::board::evaluators::evaluate_pawns::evaluate_pawn_chains(
+                self.board, Color::Black, self.phase()
+            );
+            score += w_chains - b_chains;
 
-        // Pawn tension evaluation
-        let w_tension = crate::board::evaluators::evaluate_pawns::evaluate_pawn_tension(
-            self.board, Color::White, self.phase()
-        );
-        let b_tension = crate::board::evaluators::evaluate_pawns::evaluate_pawn_tension(
-            self.board, Color::Black, self.phase()
-        );
-        score += w_tension - b_tension;
+            // Pawn tension evaluation
+            let w_tension = crate::board::evaluators::evaluate_pawns::evaluate_pawn_tension(
+                self.board, Color::White, self.phase()
+            );
+            let b_tension = crate::board::evaluators::evaluate_pawns::evaluate_pawn_tension(
+                self.board, Color::Black, self.phase()
+            );
+            score += w_tension - b_tension;
 
-        // Pawn storm evaluation
-        let w_storm = crate::board::evaluators::evaluate_pawns::evaluate_pawn_storm(
-            self.board, Color::White, self.phase(), self.king_b, self.king_w
-        );
-        let b_storm = crate::board::evaluators::evaluate_pawns::evaluate_pawn_storm(
-            self.board, Color::Black, self.phase(), self.king_w, self.king_b
-        );
-        score += w_storm - b_storm;
+            // Pawn storm evaluation
+            let w_storm = crate::board::evaluators::evaluate_pawns::evaluate_pawn_storm(
+                self.board, Color::White, self.phase(), self.king_b, self.king_w
+            );
+            let b_storm = crate::board::evaluators::evaluate_pawns::evaluate_pawn_storm(
+                self.board, Color::Black, self.phase(), self.king_w, self.king_b
+            );
+            score += w_storm - b_storm;
 
-        // Pawn majority bonus
-        let w_majority = crate::board::evaluators::evaluate_pawns::pawn_majority_bonus(
-            &self.pawn_counts, Color::White, self.phase()
-        );
-        let b_majority = crate::board::evaluators::evaluate_pawns::pawn_majority_bonus(
-            &self.pawn_counts, Color::Black, self.phase()
-        );
-        score += w_majority - b_majority;
-
-        // Bishop pair
-        if self.stats.drawish_material.white_bishops >= 2 {
-            score += self.taper(36, 24);
-        }
-        if self.stats.drawish_material.black_bishops >= 2 {
-            score -= self.taper(36, 24);
+            // Pawn majority bonus
+            let w_majority = crate::board::evaluators::evaluate_pawns::pawn_majority_bonus(
+                &self.pawn_counts, Color::White, self.phase()
+            );
+            let b_majority = crate::board::evaluators::evaluate_pawns::pawn_majority_bonus(
+                &self.pawn_counts, Color::Black, self.phase()
+            );
+            score += w_majority - b_majority;
         }
 
-        // Rook/Queen activity - evaluate for both colors
-        for &color in &[Color::White, Color::Black] {
-            let rook_act = crate::board::evaluators::evaluate_rooks::rook_file_activity(
-                self.board, color, &self.pawn_counts
-            );
-            let doubled_bonus = crate::board::evaluators::evaluate_rooks::doubled_rooks_bonus(
-                self.board, color, &self.pawn_counts
-            );
-            let king_file_bonus = crate::board::evaluators::evaluate_rooks::rook_on_enemy_king_file_bonus(
-                self.board, color
-            );
-            let alignment_bonus = crate::board::evaluators::evaluate_rooks::rook_queen_alignment_bonus(
-                self.board, color, &self.pawn_counts
-            );
-            let queen_bonus = crate::board::evaluators::evaluate_queens::queen_on_semi_open_file_bonus(
-                self.board, color, &self.pawn_counts
-            );
+        // Bishop pair (part of piece interactions) - scaled by position openness
+        if is_enabled(EvalFlags::INTERACTIONS) {
+            let openness = self.openness();
+            // Scale: 80% in closed positions (openness=0) to 120% in open positions (openness=100)
+            let scale = 80 + (openness * 40) / 100;
+            let mg_scaled = (36 * scale) / 100;
+            let eg_scaled = (24 * scale) / 100;
 
-            let rook_queen_score = (rook_act + doubled_bonus + king_file_bonus + alignment_bonus + queen_bonus)
-                * self.phase() / 24;
-            score += apply_color_score(rook_queen_score, color);
-        }
-
-        // King safety and activity
-        for &color in &[Color::White, Color::Black] {
-            let king_pos = match color {
-                Color::White => self.king_w,
-                Color::Black => self.king_b,
-            };
-            let safety = crate::board::evaluators::evaluate_king::king_safety(
-                self.board, color, self.phase(), king_pos, &self.pawn_counts
-            );
-            let ring_pressure = crate::board::evaluators::evaluate_king::king_ring_pressure(
-                self.board, color, self.phase(), king_pos, &self.att_w, &self.att_b
-            );
-            let activity = crate::board::evaluators::evaluate_king::king_activity_endgame(king_pos);
-            let shelter = crate::board::evaluators::evaluate_king::evaluate_king_shelter_patterns(
-                self.board, color, self.phase(), king_pos
-            );
-
-            score += apply_color_score((safety * self.phase()) / 24, color);
-            score += apply_color_score(ring_pressure, color);
-            score += apply_color_score((activity * self.eg) / 24, color);
-            score += apply_color_score(shelter, color);
-
-            // Development penalty
-            if self.phase() > 12 {
-                let dev_pen = crate::board::evaluators::evaluate_king::development_penalty_on_backrank(
-                    self.board, color, self.phase()
-                );
-                score += apply_color_score(dev_pen * (self.phase() - 12) / 12, color);
+            if self.stats.drawish_material.white_bishops >= 2 {
+                score += self.taper(mg_scaled, eg_scaled);
+            }
+            if self.stats.drawish_material.black_bishops >= 2 {
+                score -= self.taper(mg_scaled, eg_scaled);
             }
         }
 
-        // Early queen penalty
-        for &color in &[Color::White, Color::Black] {
-            let pen = crate::board::evaluators::evaluate_queens::early_queen_penalty(
-                self.board, color, &self.pawn_counts
-            );
-            score += apply_color_score(-(pen * self.phase()) / 24, color);
+        // Rook/Queen activity
+        if is_enabled(EvalFlags::ROOK_ACTIVITY) {
+            for &color in &[Color::White, Color::Black] {
+                let rook_act = crate::board::evaluators::evaluate_rooks::rook_file_activity(
+                    self.board, color, &self.pawn_counts
+                );
+                let doubled_bonus = crate::board::evaluators::evaluate_rooks::doubled_rooks_bonus(
+                    self.board, color, &self.pawn_counts
+                );
+                let king_file_bonus = crate::board::evaluators::evaluate_rooks::rook_on_enemy_king_file_bonus(
+                    self.board, color
+                );
+                let alignment_bonus = crate::board::evaluators::evaluate_rooks::rook_queen_alignment_bonus(
+                    self.board, color, &self.pawn_counts
+                );
+                let queen_bonus = crate::board::evaluators::evaluate_queens::queen_on_semi_open_file_bonus(
+                    self.board, color, &self.pawn_counts
+                );
+
+                let rook_queen_score = (rook_act + doubled_bonus + king_file_bonus + alignment_bonus + queen_bonus)
+                    * self.phase() / 24;
+                score += apply_color_score(rook_queen_score, color);
+            }
+        }
+
+        // King safety and activity
+        if is_enabled(EvalFlags::KING_SAFETY) {
+            for &color in &[Color::White, Color::Black] {
+                let king_pos = match color {
+                    Color::White => self.king_w,
+                    Color::Black => self.king_b,
+                };
+                let safety = crate::board::evaluators::evaluate_king::king_safety(
+                    self.board, color, self.phase(), king_pos, &self.pawn_counts
+                );
+                let ring_pressure = crate::board::evaluators::evaluate_king::king_ring_pressure(
+                    self.board, color, self.phase(), king_pos, &self.att_w, &self.att_b
+                );
+                let virtual_mobility = crate::board::evaluators::evaluate_king::king_virtual_mobility(
+                    self.board, color, self.phase(), king_pos, &self.att_w, &self.att_b
+                );
+                let activity = crate::board::evaluators::evaluate_king::king_activity_endgame(king_pos);
+                let shelter = crate::board::evaluators::evaluate_king::evaluate_king_shelter_patterns(
+                    self.board, color, self.phase(), king_pos
+                );
+
+                score += apply_color_score((safety * self.phase()) / 24, color);
+                score += apply_color_score(ring_pressure, color);
+                score += apply_color_score(virtual_mobility, color);
+                score += apply_color_score((activity * self.eg) / 24, color);
+                score += apply_color_score(shelter, color);
+
+                // Development penalty
+                if self.phase() > 12 {
+                    let dev_pen = crate::board::evaluators::evaluate_king::development_penalty_on_backrank(
+                        self.board, color, self.phase()
+                    );
+                    score += apply_color_score(dev_pen * (self.phase() - 12) / 12, color);
+                }
+            }
+
+            // Early queen penalty (part of king safety / development)
+            for &color in &[Color::White, Color::Black] {
+                let pen = crate::board::evaluators::evaluate_queens::early_queen_penalty(
+                    self.board, color, &self.pawn_counts
+                );
+                score += apply_color_score(-(pen * self.phase()) / 24, color);
+            }
         }
 
         score
@@ -702,26 +734,49 @@ impl<'a> EvalContext<'a> {
 
     fn evaluate_threats(&self) -> i32 {
         let mut score = 0;
+        let mut white_threat_count = 0;
+        let mut black_threat_count = 0;
+
         for r in 0..8 {
             for c in 0..8 {
                 if let Some(p) = self.board.get(r, c) {
-                    let bonus = self.threat_bonus_for_piece(r, c, p.get_color(), p.get_type());
+                    let (bonus, has_threat) = self.threat_bonus_for_piece_with_count(r, c, p.get_color(), p.get_type());
                     score += apply_color_score(bonus, p.get_color());
+
+                    if has_threat {
+                        match p.get_color() {
+                            Color::White => white_threat_count += 1,
+                            Color::Black => black_threat_count += 1,
+                        }
+                    }
                 }
             }
         }
+
+        // Multiple threats bonus: synergy bonus for 2+ threats
+        if white_threat_count >= 2 {
+            let multi_bonus = (white_threat_count - 1) * MULTI_THREAT_BONUS * self.phase() / 24;
+            score += multi_bonus;
+        }
+        if black_threat_count >= 2 {
+            let multi_bonus = (black_threat_count - 1) * MULTI_THREAT_BONUS * self.phase() / 24;
+            score -= multi_bonus;
+        }
+
         score
     }
 
-    fn threat_bonus_for_piece(&self, r: usize, c: usize, color: Color, pt: PieceType) -> i32 {
+    /// Returns (bonus, has_threat) - whether this piece is making a significant threat
+    fn threat_bonus_for_piece_with_count(&self, r: usize, c: usize, color: Color, pt: PieceType) -> (i32, bool) {
         if pt == PieceType::King {
-            return 0;
+            return (0, false);
         }
         if !self.is_attacker_safe(r, c, color) {
-            return 0;
+            return (0, false);
         }
 
         let attacker_value = piece_value_cp(pt);
+        let is_pawn_attacker = pt == PieceType::Pawn;
         let mut best = 0i32;
 
         match pt {
@@ -730,7 +785,7 @@ impl<'a> EvalContext<'a> {
                 for dc in [-1i32, 1] {
                     let tr = r as i32 + dir;
                     let tc = c as i32 + dc;
-                    if let Some(bonus) = self.threat_bonus_from_target(color, attacker_value, tr, tc) {
+                    if let Some(bonus) = self.threat_bonus_from_target_with_pawn(color, attacker_value, tr, tc, is_pawn_attacker) {
                         best = best.max(bonus);
                     }
                 }
@@ -739,7 +794,7 @@ impl<'a> EvalContext<'a> {
                 for (dr, dc) in [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)] {
                     let tr = r as i32 + dr;
                     let tc = c as i32 + dc;
-                    if let Some(bonus) = self.threat_bonus_from_target(color, attacker_value, tr, tc) {
+                    if let Some(bonus) = self.threat_bonus_from_target_with_pawn(color, attacker_value, tr, tc, is_pawn_attacker) {
                         best = best.max(bonus);
                     }
                 }
@@ -759,7 +814,8 @@ impl<'a> EvalContext<'a> {
             PieceType::King => {}
         }
 
-        (best * self.phase()) / 24
+        let scaled_bonus = (best * self.phase()) / 24;
+        (scaled_bonus, best > 0)
     }
 
     fn threat_bonus_from_slider(
@@ -795,6 +851,17 @@ impl<'a> EvalContext<'a> {
         tr: i32,
         tc: i32,
     ) -> Option<i32> {
+        self.threat_bonus_from_target_with_pawn(color, attacker_value, tr, tc, false)
+    }
+
+    fn threat_bonus_from_target_with_pawn(
+        &self,
+        color: Color,
+        attacker_value: i32,
+        tr: i32,
+        tc: i32,
+        is_pawn_attacker: bool,
+    ) -> Option<i32> {
         if !(0..8).contains(&tr) || !(0..8).contains(&tc) {
             return None;
         }
@@ -822,7 +889,13 @@ impl<'a> EvalContext<'a> {
             return None;
         }
 
-        let bonus = (THREAT_BASE_BONUS + gain / THREAT_VALUE_DIV).min(THREAT_MAX_BONUS);
+        let mut bonus = (THREAT_BASE_BONUS + gain / THREAT_VALUE_DIV).min(THREAT_MAX_BONUS);
+
+        // Extra bonus for pawn threats against non-pawn pieces
+        if is_pawn_attacker && target.get_type() != PieceType::Pawn {
+            bonus += THREAT_BY_PAWN_BONUS;
+        }
+
         Some(bonus)
     }
 
@@ -898,14 +971,31 @@ fn apply_drawish_tweaks(stats: &BoardStats, mut score: i32) -> i32 {
         return 0;
     }
 
-    // Opposite-colored bishops
-    if stats.is_opposite_bishops_only() {
-        let w_is_dark = stats.white_bishop_on_dark;
-        let b_is_dark = stats.black_bishop_on_dark;
-        if w_is_dark != b_is_dark {
-            // Pull score toward zero (¾ factor)
-            score = score - score / 4;
+    // Opposite-colored bishops - enhanced drawishness scaling
+    if stats.has_opposite_colored_bishops() {
+        let d = &stats.drawish_material;
+        let pawn_count = d.pawns;
+
+        // Base draw factor: 25%
+        let mut draw_factor = 25;
+
+        // Fewer pawns = more drawish
+        if pawn_count <= 2 {
+            draw_factor = 40;
+        } else if pawn_count <= 4 {
+            draw_factor = 30;
         }
+
+        // No heavy pieces = more drawish
+        if d.rooks == 0 && d.queens == 0 {
+            draw_factor += 10;
+        }
+
+        // Cap at 50% reduction
+        draw_factor = draw_factor.min(50);
+
+        // Pull score toward zero by draw_factor percent
+        score = score - (score * draw_factor) / 100;
     }
 
     score

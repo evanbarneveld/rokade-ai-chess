@@ -13,3 +13,4 @@ mod opening_preference_tests;
 mod repetition_tests;
 mod promotion_tests;
 mod utils;
+mod test_mate_in_n;

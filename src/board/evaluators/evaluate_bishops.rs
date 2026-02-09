@@ -1,5 +1,5 @@
 use crate::board::Board;
-use crate::board::evaluation_helpers::{count_bishop_mobility, taper_general};
+use crate::board::evaluation_helpers::{count_bishop_mobility, is_piece, opponent, taper_general};
 use crate::piece::pieces::{Color, PieceType};
 
 const BISHOP_DEV_BONUS: i32 = 6;
@@ -44,7 +44,94 @@ pub fn evaluate_bishop(board: &Board, row: usize, col: usize, color: Color, phas
             val -= (penalty * phase) / 24;
         }
     }
+
+    // Bishop outpost bonus (smaller than knight's +22/+8)
+    if is_bishop_outpost(board, row, col, color) {
+        val += taper_general(14, 6, phase);
+    }
+
     val
+}
+
+/// Check if a bishop is on an outpost square.
+/// Similar to knight outposts but with slightly less value since bishops can retreat more easily.
+/// Requirements:
+/// - On ranks 4-6 (White) / 2-4 (Black)
+/// - Protected by a friendly pawn
+/// - Cannot be attacked by enemy pawns on adjacent files ahead
+pub fn is_bishop_outpost(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    // Check rank range for outpost (ranks 4-6 for white = rows 3-5, ranks 5-3 for black = rows 4-2)
+    let (min_r, max_r) = match color {
+        Color::White => (3, 5), // ranks 4-6
+        Color::Black => (2, 4), // ranks 3-5
+    };
+    if row < min_r || row > max_r {
+        return false;
+    }
+
+    // Check if protected by a friendly pawn
+    let behind_row = match color {
+        Color::White => row.checked_sub(1),
+        Color::Black => if row < 7 { Some(row + 1) } else { None },
+    };
+
+    let mut protected = false;
+    if let Some(br) = behind_row {
+        for dc in [-1i32, 1] {
+            let nc = col as i32 + dc;
+            if (0..=7).contains(&nc) && is_piece(board, br, nc as usize, color, PieceType::Pawn) {
+                protected = true;
+                break;
+            }
+        }
+    }
+
+    if !protected {
+        return false;
+    }
+
+    // Check that no enemy pawns can attack this square from adjacent files ahead
+    let enemy = opponent(color);
+    if col > 0 {
+        match enemy {
+            Color::White => {
+                // Enemy white pawns advance upward (lower rows attack higher rows)
+                for r in 0..row {
+                    if is_piece(board, r, col - 1, enemy, PieceType::Pawn) {
+                        return false;
+                    }
+                }
+            }
+            Color::Black => {
+                // Enemy black pawns advance downward (higher rows attack lower rows)
+                for r in (row + 1)..8 {
+                    if is_piece(board, r, col - 1, enemy, PieceType::Pawn) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    if col < 7 {
+        match enemy {
+            Color::White => {
+                for r in 0..row {
+                    if is_piece(board, r, col + 1, enemy, PieceType::Pawn) {
+                        return false;
+                    }
+                }
+            }
+            Color::Black => {
+                for r in (row + 1)..8 {
+                    if is_piece(board, r, col + 1, enemy, PieceType::Pawn) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    true
 }
 
 fn count_same_color_pawns(board: &Board, color: Color, dark_square: bool) -> i32 {

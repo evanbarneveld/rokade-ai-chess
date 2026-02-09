@@ -161,8 +161,8 @@ pub fn pawn_attacked_minor_penalty(
     crate::search::management::see::pawn_attacked_minor_penalty(post_after, side, to, moved_pt)
 }
 
-pub fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32) -> (i32, i32) {
-    crate::search::management::aspiration::aspiration_bounds_for_depth(depth_now, last_score, window)
+pub fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32, in_check: bool) -> (i32, i32) {
+    crate::search::management::aspiration::aspiration_bounds_for_depth(depth_now, last_score, window, in_check)
 }
 
 pub fn aspiration_window_init() -> i32 {

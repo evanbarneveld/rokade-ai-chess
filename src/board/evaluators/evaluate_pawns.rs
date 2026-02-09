@@ -293,10 +293,71 @@ pub fn evaluate_passed_pawn(
             let block_pen = (14 - 2 * ek_d).max(0);
             score -= (block_pen * eg) / 48;
         }
+ 
+        // King distance ratio: bonus when own king is closer, penalty when enemy king is closer
+        let dist_diff = ek_d - fk_d; // Positive = friendly king closer
+        let ratio_bonus = (dist_diff * 3).clamp(-15, 15);
+        score += (ratio_bonus * eg) / 24;
     }
+
+    // Tarrasch rule: rook behind passed pawn is powerful
+    score += tarrasch_rule_bonus(board, row, col, color, eg);
 
     let cap: i32 = 90;
     if score > cap { cap } else { score }
+}
+
+/// Tarrasch rule: Rook behind a passed pawn (either color) is powerful.
+/// - Own rook behind: +12cp (endgame scaled)
+/// - Enemy rook behind: -12cp
+/// - Enemy rook in front (blocking on the file): -8cp
+fn tarrasch_rule_bonus(board: &Board, row: usize, col: usize, color: Color, eg: i32) -> i32 {
+    const ROOK_BEHIND_BONUS: i32 = 12;
+    const ENEMY_ROOK_BEHIND_PENALTY: i32 = 12;
+    const ENEMY_ROOK_FRONT_PENALTY: i32 = 8;
+
+    let mut bonus = 0;
+
+    // Determine direction "behind" the pawn (towards starting rank)
+    let behind_range: Box<dyn Iterator<Item = usize>> = match color {
+        Color::White => Box::new((0..row).rev()),  // Behind white pawn is lower rows
+        Color::Black => Box::new((row + 1)..8),    // Behind black pawn is higher rows
+    };
+
+    // Check for rooks behind the pawn on the same file
+    for r in behind_range {
+        if let Some(p) = board.get(r, col) {
+            if p.get_type() == PieceType::Rook {
+                if p.get_color() == color {
+                    // Own rook behind: good
+                    bonus += (ROOK_BEHIND_BONUS * eg) / 24;
+                } else {
+                    // Enemy rook behind: bad
+                    bonus -= (ENEMY_ROOK_BEHIND_PENALTY * eg) / 24;
+                }
+            }
+            break; // Stop at first piece on the file behind
+        }
+    }
+
+    // Check for enemy rook in front (blocking)
+    let front_range: Box<dyn Iterator<Item = usize>> = match color {
+        Color::White => Box::new((row + 1)..8),    // In front of white pawn is higher rows
+        Color::Black => Box::new((0..row).rev()),  // In front of black pawn is lower rows
+    };
+
+    let enemy = opponent(color);
+    for r in front_range {
+        if let Some(p) = board.get(r, col) {
+            if p.get_type() == PieceType::Rook && p.get_color() == enemy {
+                // Enemy rook blocking from in front
+                bonus -= (ENEMY_ROOK_FRONT_PENALTY * eg) / 24;
+            }
+            break; // Stop at first piece on the file in front
+        }
+    }
+
+    bonus
 }
 
 fn connected_passed_pawn_bonus(

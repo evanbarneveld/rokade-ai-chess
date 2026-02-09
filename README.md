@@ -1,12 +1,12 @@
 Rokade-AI Chess — UCI Chess Engine (+/- 1400 ELO)
 
-This repository contains a chess engine written in Rust, with the help of Junie, Claude, and Codex. 
+This repository contains a chess engine written in Rust, with the help of Junie, Claude, and Codex.
 
 Disclaimer: the code in this project does not reflect what I consider 'clean' code but it isn't bad either.
 
 <img src="https://github.com/evanbarneveld/rokade-ai-chess/blob/main/rokade-ai-chess.png?raw=true" alt="Rokade-Ai Chess" style="width:30%; height:auto;">
 
-This engine is a single executable and has a command line interface. 
+This engine is a single executable and has a command line interface.
 Start the engine 'rokade-ai-chess' and try the 'help' command for a list of commands.
 
 (When used as an UCI engine by a chess GUI, the GUI will send the 'uci' command to the engine)

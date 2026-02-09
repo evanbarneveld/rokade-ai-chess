@@ -4,6 +4,7 @@ pub(crate) mod checks;
 pub mod san_move;
 
 pub mod evaluator;
+pub mod eval_config;
 pub(crate) mod evaluation_helpers;
 pub mod pst;
 pub(crate) mod attack_maps;

@@ -5,6 +5,7 @@ use chess::board::test_support::{
     is_king_in_front_of_pawn,
     king_ring_pressure,
     king_safety,
+    king_virtual_mobility,
     pawn_file_counts,
     build_attack_maps,
 };
@@ -145,4 +146,61 @@ fn king_ring_pressure_rewards_non_king_defenders() {
     );
 
     assert!(defended_score > unsafe_score);
+}
+
+#[test]
+fn king_virtual_mobility_penalizes_trapped_king() {
+    // King in corner with all escape squares attacked
+    let mut trapped = Board::empty();
+    trapped.set(0, 0, Some(Piece::new(PieceType::King, Color::White)));
+    trapped.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    trapped.set(7, 1, Some(Piece::new(PieceType::Rook, Color::Black)));  // Controls b-file
+    trapped.set(1, 7, Some(Piece::new(PieceType::Rook, Color::Black)));  // Controls rank 2
+    trapped.find_and_set_location_of_kings();
+
+    let (att_w, att_b) = build_attack_maps(&trapped);
+    let trapped_score = king_virtual_mobility(&trapped, Color::White, 24, Some((0, 0)), &att_w, &att_b);
+
+    // Score should be negative (penalty for trapped king)
+    assert!(trapped_score < 0);
+}
+
+#[test]
+fn king_virtual_mobility_no_penalty_with_escape_squares() {
+    // King in center with many escape options
+    let mut free = Board::empty();
+    free.set(3, 3, Some(Piece::new(PieceType::King, Color::White)));
+    free.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    free.find_and_set_location_of_kings();
+
+    let (att_w, att_b) = build_attack_maps(&free);
+    let free_score = king_virtual_mobility(&free, Color::White, 24, Some((3, 3)), &att_w, &att_b);
+
+    // Score should be 0 (no penalty with ample escape squares)
+    assert_eq!(free_score, 0);
+}
+
+#[test]
+fn king_virtual_mobility_compares_trapped_vs_free() {
+    // Trapped king should have lower score than free king
+    let mut trapped = Board::empty();
+    trapped.set(0, 0, Some(Piece::new(PieceType::King, Color::White)));
+    trapped.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    trapped.set(1, 1, Some(Piece::new(PieceType::Pawn, Color::White)));   // Own piece blocking b2
+    trapped.set(1, 0, Some(Piece::new(PieceType::Pawn, Color::White)));   // Own piece blocking a2
+    trapped.set(0, 1, Some(Piece::new(PieceType::Rook, Color::White)));   // Own piece blocking b1
+    trapped.find_and_set_location_of_kings();
+
+    let (att_w_t, att_b_t) = build_attack_maps(&trapped);
+    let trapped_score = king_virtual_mobility(&trapped, Color::White, 24, Some((0, 0)), &att_w_t, &att_b_t);
+
+    let mut free = Board::empty();
+    free.set(3, 3, Some(Piece::new(PieceType::King, Color::White)));
+    free.set(7, 4, Some(Piece::new(PieceType::King, Color::Black)));
+    free.find_and_set_location_of_kings();
+
+    let (att_w_f, att_b_f) = build_attack_maps(&free);
+    let free_score = king_virtual_mobility(&free, Color::White, 24, Some((3, 3)), &att_w_f, &att_b_f);
+
+    assert!(trapped_score < free_score);
 }

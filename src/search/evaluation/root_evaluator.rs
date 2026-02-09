@@ -14,10 +14,10 @@ use rayon::prelude::*;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
 use crate::search::core::advanced_search::{QUIESCENCE_ENABLED, SEARCH_ABORTED};
 
-// Root parallelization settings
-const ROOT_PARALLEL_MIN_DEPTH: usize = 6;
-const ROOT_PARALLEL_MIN_MOVES: usize = 4;
-const ROOT_PARALLEL_MIN_TIME_MS: usize = 200;
+// Root parallelization settings (lowered for better parallel utilization)
+const ROOT_PARALLEL_MIN_DEPTH: usize = 4;
+const ROOT_PARALLEL_MIN_MOVES: usize = 3;
+const ROOT_PARALLEL_MIN_TIME_MS: usize = 50;
 const ROOT_PRUNE_MIN_DEPTH: usize = 6;
 const ROOT_PRUNE_START_INDEX: usize = 4;
 const ROOT_PRUNE_MARGIN: i32 = 300;
@@ -463,7 +463,11 @@ pub(crate) fn root_move_order_bias(board: &Board, side: Color, from: (usize, usi
     bias
 }
 
-#[inline]
+/// Threshold for "clearly winning" position where we should be more careful about pruning.
+/// When the best score indicates a decisive advantage, there might be a forced mate
+/// that static evaluation can't see, so we disable root pruning to search all moves.
+const ROOT_PRUNE_WINNING_THRESHOLD: i32 = 500;
+
 fn should_prune_root_move(
     game_state: &mut GameState,
     from: (usize, usize),
@@ -478,7 +482,13 @@ fn should_prune_root_move(
     if !has_best || depth_now < ROOT_PRUNE_MIN_DEPTH || move_index < ROOT_PRUNE_START_INDEX {
         return false;
     }
+    // Don't prune if we already found a mate
     if best_score_raw.abs() >= MATE_VALUE - 100 {
+        return false;
+    }
+    // Don't prune if position is clearly winning - there might be a forced mate
+    // that static evaluation can't see. We want to search all moves to find it.
+    if best_score_raw.abs() > ROOT_PRUNE_WINNING_THRESHOLD {
         return false;
     }
 

@@ -310,13 +310,25 @@ pub fn evaluate_after_root_move(
         let mut rep_stack = history.get_rep_stack();
         let gives_check = game_state.mutable_board().is_side_in_check(opposite_color(side));
         let ext = if gives_check { 2 } else { 0 };
+ 
+        // For checking moves, use full-width bounds instead of aspiration bounds.
+        // This prevents brilliant sacrifices from failing low due to narrow windows.
+        // The opponent must respond to check, so the resulting position may be
+        // completely different from what the aspiration window expects.
+        let (search_a, search_b) = if gives_check {
+            (crate::search::advanced_search::MIN_EVAL_VALUE + 1,
+             crate::search::advanced_search::MAX_EVAL_VALUE - 1)
+        } else {
+            (a, b)
+        };
+
         alphabeta(
             ctx,
             heuristics,
             game_state,
             depth_now - 1 + ext,
-            a,
-            b,
+            search_a,
+            search_b,
             1,
             tt,
             &mut rep_stack,
@@ -367,27 +379,47 @@ pub fn adjusted_root_eval_for_move(
         return score_raw;
     }
 
-    // Safety: don't let heuristics turn a losing move into a winning one
-    // EXCEPT for critical tactical penalties like ignoring promotion threats
-    // Only allow bypassing clamps for large NEGATIVE adjustments (penalties), not positive ones
-    let is_critical_penalty = heuristic_delta < -1000; // Promotion threat penalty is -1200
+    // Safety: don't let heuristics flip the evaluation direction.
+    // The search has already evaluated the full tactical consequences.
+    // Heuristics are for tie-breaking, not for overruling search results.
 
-    if !is_critical_penalty {
-        if score_raw < 0 {
-            if side == Color::White {
-                adj = adj.min(score_raw);
-            } else {
-                adj = adj.max(score_raw);
-            }
-        } else if score_raw == 0 {
-            // Clamp adjustments for both colors when raw score is 0
-            // This prevents heuristics from making blunder moves look artificially good
-            if side == Color::White {
-                // Don't drag draw scores down too much for White
-                adj = adj.max(-500);
-            } else {
-                // Don't drag draw scores up too much for Black (symmetric to White's clamping)
-                adj = adj.min(500);
+    // Threshold for "clearly winning" - about 5 pawns advantage
+    const WINNING_THRESHOLD: i32 = 500;
+
+    // Check if we have a strongly winning position where search should be trusted
+    let is_winning_for_white = score_raw > WINNING_THRESHOLD;
+    let is_winning_for_black = score_raw < -WINNING_THRESHOLD;
+
+    // For clearly winning positions, use raw score directly.
+    // The search has evaluated the full tactical consequences including sacrifices.
+    // Heuristics are for tie-breaking similar positions, not for overruling search results.
+    // Using raw scores ensures moves that search found to be strongest remain on top.
+    if is_winning_for_white && side == Color::White {
+        // White is clearly winning - trust the search completely
+        return score_raw;
+    } else if is_winning_for_black && side == Color::Black {
+        // Black is clearly winning - trust the search completely
+        return score_raw;
+    } else {
+        // For non-winning positions, apply normal safety clamping
+        // EXCEPT for critical tactical penalties like ignoring promotion threats
+        let is_critical_penalty = heuristic_delta < -1000;
+
+        if !is_critical_penalty {
+            if score_raw < 0 {
+                // Don't let heuristics make a losing position look better
+                if side == Color::White {
+                    adj = adj.min(score_raw);
+                } else {
+                    adj = adj.max(score_raw);
+                }
+            } else if score_raw == 0 {
+                // Clamp adjustments for both colors when raw score is 0
+                if side == Color::White {
+                    adj = adj.max(-500);
+                } else {
+                    adj = adj.min(500);
+                }
             }
         }
     }

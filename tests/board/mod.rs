@@ -1,5 +1,6 @@
 mod attack_maps_tests;
 mod board_tests;
+mod eval_config_tests;
 mod evaluator_tests;
 mod pst_tests;
 mod san_move_tests;

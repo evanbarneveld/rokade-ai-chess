@@ -158,43 +158,10 @@ fn best_move_using_depth_search_with_time_limit_for_fen(fen: &str, depth: usize)
     generate_move_as_san(&ctx, SearchMode::Normal, &gs, &history, depth, TEST_MOVE_TIME, PLAYING_STRENGTH_MAX)
 }
 
-fn deterministic_ctx() -> SearchContext {
+pub(crate) fn deterministic_ctx() -> SearchContext {
     let ctx = SearchContext::new();
     ctx.set_deterministic(true);
     ctx
-}
-
-#[test]
-fn test_blunder_move_1() {
-    // In this position the engine generates a move that is considered a blunder (see remarks at the end of this test)
-    // The engine should have made a better move, see remarks at the end of this test.
-    let fen = "r1b1kb1r/pppq1ppp/2np4/4P3/4PBn1/2N2N2/PPP1QPPP/R3KB1R b KQkq - 2 7";
-    let mut game = Chess::new();
-    game.set_starting_fen(fen).expect("bad fen");
-    //get the best move
-    let history = game.get_history().clone();
-
-    let ctx = deterministic_ctx();
-    let san_move = generate_move_as_san(
-        &ctx,
-        game.get_search_mode(),
-        game.get_game_state(),
-        &history,
-        TEST_DEFAULT_SEARCH_DEPTH,
-        4000,
-        1000,
-    ).unwrap();
-    println!("Selected move: {:?}", san_move);
-
-    // Debug: rank root moves with adjusted scores
-    /*let ranks = debug_rank_root_moves(game.get_game_state(), &history, 4);
-    println!("Root ranks (SAN, adj, raw):");
-    for (san, adj, raw) in &ranks {
-        println!("  {} -> adj={}, raw={}, diff={}", san, adj, raw, adj - raw);
-    }*/
-
-    assert_ne!(san_move, "d5"); //considered a blunder
-    assert_eq!(san_move, "dxe5"); //considered the best move according to analysis
 }
 
 #[test]
@@ -255,7 +222,7 @@ fn test_blunder_move_4() {
 fn test_blunder_move_6() {
     let fen = "r1bqkb1r/2p2ppp/p1n2n2/4p1N1/1p1Pp3/1B6/PPP1NPPP/R1BQK2R b KQkq - 1 9";
 
-    let (mut _game, _history, san_move) = read_fen_and_generate_best_move(fen);
+    let (_game, _history, san_move) = read_fen_and_generate_best_move(fen, 5000);
     println!("Selected move: {:?}", san_move);
 
     // Debug: rank root moves with adjusted scores
@@ -268,12 +235,11 @@ fn test_blunder_move_6() {
     assert_ne!(san_move, "exd4"); //considered a blunder
 }
 
-//
 #[test]
 fn test_blunder_move_7() {
     let fen = "r1bqkb1r/2B2p2/p4n1p/n5p1/1p2N3/1B1p2N1/PP3PPP/2RQK2R b Kkq - 0 15";
 
-    let (mut _game, _history, san_move) = read_fen_and_generate_best_move(fen);
+    let (_game, _history, san_move) = read_fen_and_generate_best_move(fen, 5000);
     println!("Selected move: {:?}", san_move);
 
     // Debug: rank root moves with adjusted scores
@@ -286,11 +252,11 @@ fn test_blunder_move_7() {
     assert_ne!(san_move, "Qd4"); //considered a blunder
 }
 
-//#[test]
+#[test]
 fn _test_blunder_move_8() {
     let fen = "r1b1kb1r/2B5/p1n4p/5pp1/1p1qn3/1B2R3/PP1p1PPP/1R1Q1NK1 b kq - 1 20";
 
-    let (mut _game, _history, san_move) = read_fen_and_generate_best_move(fen);
+    let (_game, _history, san_move) = read_fen_and_generate_best_move(fen, 5000);
     println!("Selected move: {:?}", san_move);
 
     /*

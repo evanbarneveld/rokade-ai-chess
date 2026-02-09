@@ -16,20 +16,28 @@ use chess::state::fen::reader::reset_from_fen;
 
 #[test]
 fn aspiration_bounds_shallow_depth_returns_full_window() {
-    let (a, b) = aspiration_bounds_for_depth(3, 120, 25);
+    let (a, b) = aspiration_bounds_for_depth(3, 120, 25, false);
     assert_eq!(a, MIN_EVAL_VALUE + 1);
     assert_eq!(b, MAX_EVAL_VALUE - 1);
 }
 
 #[test]
 fn aspiration_bounds_clamps_near_edges() {
-    let (a_high, b_high) = aspiration_bounds_for_depth(4, MAX_EVAL_VALUE - 5, 30);
+    let (a_high, b_high) = aspiration_bounds_for_depth(4, MAX_EVAL_VALUE - 5, 30, false);
     assert_eq!(a_high, MAX_EVAL_VALUE - 35);
     assert_eq!(b_high, MAX_EVAL_VALUE - 1);
 
-    let (a_low, b_low) = aspiration_bounds_for_depth(4, MIN_EVAL_VALUE + 5, 30);
+    let (a_low, b_low) = aspiration_bounds_for_depth(4, MIN_EVAL_VALUE + 5, 30, false);
     assert_eq!(a_low, MIN_EVAL_VALUE + 1);
     assert_eq!(b_low, MIN_EVAL_VALUE + 35);
+}
+
+#[test]
+fn aspiration_bounds_in_check_returns_full_window() {
+    // When in check, always use full-width bounds regardless of depth
+    let (a, b) = aspiration_bounds_for_depth(6, 500, 30, true);
+    assert_eq!(a, MIN_EVAL_VALUE + 1);
+    assert_eq!(b, MAX_EVAL_VALUE - 1);
 }
 
 #[test]

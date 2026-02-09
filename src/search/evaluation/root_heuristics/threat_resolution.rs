@@ -12,6 +12,8 @@ use super::utils::{
 };
 use super::knight_evacuation::knight_safe_squares;
 
+const KNIGHT_EVACUATION_CENTER_BONUS: i32 = 80;
+
 /// Calculate knight-specific evacuation bonus
 #[inline]
 fn knight_evacuation_bonus(
@@ -23,11 +25,12 @@ fn knight_evacuation_bonus(
 
     // Center bonus
     let mut cb = center_score(to);
+
     if to == (3, 3) {
-        cb += 80;
+        cb += KNIGHT_EVACUATION_CENTER_BONUS;
     }
     if !knight_safe.is_empty() && knight_safe.contains(&to) {
-        cb += 80;
+        cb += KNIGHT_EVACUATION_CENTER_BONUS;
     }
     bonus += cb.max(0);
 
@@ -38,6 +41,8 @@ fn knight_evacuation_bonus(
 
     bonus
 }
+
+const PENALTY_ALLOWING_OPPONENT_PROMOTION: i32 = 1200;
 
 /// Detects if opponent has a pawn one move away from promotion.
 /// Returns a massive penalty if we don't address this threat.
@@ -121,8 +126,8 @@ fn detect_opponent_promotion_threat(
                     // - For White: penalty makes score more negative (worse)
                     // - For Black: penalty makes score more positive (worse for Black since Black wants negative)
                     let penalty_value = match side {
-                        Color::White => -1200, // White wants positive scores, so -1200 is bad
-                        Color::Black => 1200,  // Black wants negative scores, so +1200 is bad
+                        Color::White => -PENALTY_ALLOWING_OPPONENT_PROMOTION, // White wants positive scores, so -1200 is bad
+                        Color::Black => PENALTY_ALLOWING_OPPONENT_PROMOTION,  // Black wants negative scores, so +1200 is bad
                     };
                     threat_penalty += penalty_value;
                 }
@@ -131,6 +136,18 @@ fn detect_opponent_promotion_threat(
 
     threat_penalty
 }
+
+const QUEEN_EVACUATION_BONUS: i32 = 800;
+const ROOK_EVACUATION_BONUS: i32 = 600;
+const KNIGHT_EVACUATION_BONUS: i32 = 500;
+const PAWN_EVACUATION_BONUS: i32 = 300;
+const KING_EVACUATION_BONUS: i32 = 1000;
+const PENALTY_FOR_LEAVING_MINOR_PIECE_HANGING: i32 = 200;
+const PENALTY_FOR_LEAVING_ROOK_HANGING: i32 = 120;
+const PENALTY_FOR_LEAVING_QUEEN_HANGING: i32 = 80;
+const PENALTY_FOR_LEAVING_PAWN_HANGING: i32 = 40;
+const PENALTY_FOR_LEAVING_KING_EXPOSED: i32 = 400;
+const EXTRA_PENALTY_WHEN_ATTACKED_BY_PAWN: i32 = 400;
 
 /// Handle threat resolution and piece evacuation heuristics.
 #[inline]
@@ -220,11 +237,11 @@ pub fn threat_resolution_and_evacuation(
 
             // Base evacuation bonus - scale by piece value
             let base_evac = match pt {
-                PieceType::Queen => 800,
-                PieceType::Rook => 600,
-                PieceType::Bishop | PieceType::Knight => 500,
-                PieceType::Pawn => 300,
-                PieceType::King => 1000,
+                PieceType::Queen => QUEEN_EVACUATION_BONUS,
+                PieceType::Rook => ROOK_EVACUATION_BONUS,
+                PieceType::Bishop | PieceType::Knight => KNIGHT_EVACUATION_BONUS,
+                PieceType::Pawn => PAWN_EVACUATION_BONUS,
+                PieceType::King => KING_EVACUATION_BONUS,
             };
 
             // If not a genuine threat (attacker is more valuable), reduce bonus significantly
@@ -266,13 +283,13 @@ pub fn threat_resolution_and_evacuation(
             } else {
                 // General penalty for leaving pieces hanging
                 let pen = match pt {
-                    PieceType::Knight | PieceType::Bishop => 200,
-                    PieceType::Rook => 120,
-                    PieceType::Queen => 80,
-                    PieceType::Pawn => 40,
-                    PieceType::King => 400,
+                    PieceType::Knight | PieceType::Bishop => PENALTY_FOR_LEAVING_MINOR_PIECE_HANGING,
+                    PieceType::Rook => PENALTY_FOR_LEAVING_ROOK_HANGING,
+                    PieceType::Queen => PENALTY_FOR_LEAVING_QUEEN_HANGING,
+                    PieceType::Pawn => PENALTY_FOR_LEAVING_PAWN_HANGING,
+                    PieceType::King => PENALTY_FOR_LEAVING_KING_EXPOSED,
                 };
-                let val = if by_pawn { pen + 400 } else { pen };
+                let val = if by_pawn { pen + EXTRA_PENALTY_WHEN_ATTACKED_BY_PAWN } else { pen };
                 delta -= apply_for_side(val, side);
             }
         }

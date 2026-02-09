@@ -36,9 +36,10 @@ pub(crate) fn should_verify_aspiration(depth_now: usize, window: i32, best_raw: 
 }
 
 #[inline]
-pub(crate) fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32) -> (i32, i32) {
-    // Use full window for very shallow depths where last_score is unreliable
-    if depth_now <= 3 {
+pub(crate) fn aspiration_bounds_for_depth(depth_now: usize, last_score: i32, window: i32, in_check: bool) -> (i32, i32) {
+    // Use full window for very shallow depths where last_score is unreliable,
+    // or when the side to move is in check (forced moves can have wildly different scores)
+    if depth_now <= 3 || in_check {
         (MIN_EVAL_VALUE + 1, MAX_EVAL_VALUE - 1)
     } else {
         (
@@ -64,7 +65,10 @@ pub(crate) fn probe_with_aspiration(
     collect_all_scores: Option<&mut Vec<(((usize, usize), (usize, usize), Option<char>), i32, i32)>>,
 ) -> (((usize, usize), (usize, usize), Option<char>), i32, i32) {
 
-    let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window);
+    // Check if the side to move is in check - if so, use full-width bounds
+    // because forced moves can have wildly different scores than expected
+    let in_check = game_state.mutable_board().is_side_in_check(active_color);
+    let (mut a, mut b) = aspiration_bounds_for_depth(depth_now, last_score, *window, in_check);
 
     #[cfg(feature = "debug-search")] {
         eprintln!("[ASP] depth={} last_score={} window=±{} bounds=[{}, {}]",
@@ -104,7 +108,7 @@ pub(crate) fn probe_with_aspiration(
                 eprintln!("[ASP] FAIL-LOW: score {} <= α {}, widening window", best_raw, a);
             }
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
-            let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
+            let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window, in_check);
             a = bounds.0;
             if tried < 3 { continue; }
             // After 3 tries still failing low, fall back to full-width search
@@ -117,7 +121,7 @@ pub(crate) fn probe_with_aspiration(
                 eprintln!("[ASP] FAIL-HIGH: score {} >= β {}, widening window", best_raw, b);
             }
             *window = (*window * 2).min(ASP_WINDOW_MAX_CP);
-            let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window);
+            let bounds = aspiration_bounds_for_depth(depth_now, last_score, *window, in_check);
             b = bounds.1;
             if tried < 3 { continue; }
             // After 3 tries still failing high, fall back to full-width search

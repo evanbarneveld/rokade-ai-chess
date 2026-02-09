@@ -2,8 +2,6 @@ use crate::history::history::History;
 use crate::piece::pieces::{opposite_color, Color, Piece, PieceType};
 use crate::search::management::aspiration::{next_aspiration_window, probe_with_aspiration, ASP_WINDOW_INIT_CP};
 use crate::search::integration::playing_strength::select_move_based_using_strength_promo;
-
-// Re-export find_all_valid_moves for backward compatibility
 pub use crate::search::management::move_generator::find_all_valid_moves;
 use crate::search::evaluation::root_evaluator::evaluate_root_for_bounds;
 use crate::search::management::root_moves::{
@@ -12,14 +10,21 @@ use crate::search::management::root_moves::{
 use crate::search::integration::threading::init_rayon_pool_if_needed;
 use crate::state::game_state::GameState;
 pub(crate) use crate::board::evaluator::{MAX_EVAL_VALUE, MIN_EVAL_VALUE};
-
-pub const SEARCH_ABORTED: i32 = MAX_EVAL_VALUE + 50000;
-pub(crate) use crate::book::book::book_pick;
+use crate::book::book::book_pick;
 use crate::search::Search;
 use crate::board::san_move::convert_move_to_san;
 use crate::search::context::SearchContext;
 use crate::search::evaluation::heuristics::SearchHeuristics;
 
+const MAX_PLY_FOR_SEARCH_HEURISTICS_ALLOCATION: usize = 128;
+const OPENING_BOOK_CUTOFF: u32 = 8;
+const SORTING_PRIORITY_BONUS_FOR_CHECKING_MOVES: i32 = 10000;
+const SORTING_PRIORITY_BONUS_FOR_QUEEN_PROMOTIONS: i32 = 900;
+const DIVISOR_FOR_PERCENTAGE_CALCULATION: usize = 100;
+const HALF_OF_TIME_BUDGET: usize = 2;
+const TIME_EXTENSION_IN_MS: usize = 500;
+const FULL_PLAYING_STRENGTH_VALUE: usize = 1000;
+pub const SEARCH_ABORTED: i32 = MAX_EVAL_VALUE + 50000;
 pub const DEFAULT_SEARCH_DEPTH: usize = 15;
 pub const MAX_SEARCH_DEPTH: usize = 20;
 
@@ -44,7 +49,7 @@ pub const MAX_PLAYING_STRENGTH: usize = 1000;
 pub const DEFAULT_MOVE_TIME_FOR_STRENGTH_MODE_PLAY: usize = 3000usize;
 const PV_CHANGE_MAX_EXTRA_PCT_TIME: usize = 75;
 
-pub const MAX_MOVE_TIME_MS: usize = 240_000;
+pub const MAX_MOVE_TIME_MS: usize = 900_000; //15 minutes
 
 // Re-export move generator types for backward compatibility
 pub use crate::search::management::move_generator::{find_all_valid_moves_into_perft, PerftMove, _dump_all_valid_moves};
@@ -144,7 +149,7 @@ fn find_best_move_internal(
 ) -> Option<((usize, usize), (usize, usize), Option<char>, i32, usize)> {
     init_rayon_pool_if_needed();
 
-    let mut heuristics = SearchHeuristics::new(128);
+    let mut heuristics = SearchHeuristics::new(MAX_PLY_FOR_SEARCH_HEURISTICS_ALLOCATION);
 
     let mut gs = *game_state;
     let tt = ctx.tt();
@@ -162,7 +167,7 @@ fn find_best_move_internal(
 
     // Opening book: if we have a book move in early game, play it immediately.
     if ctx.get_order_book_enabled()
-        && gs.full_move_number() <= 8
+        && gs.full_move_number() <= OPENING_BOOK_CUTOFF
             && let Some((bf, bt)) = book_pick(&gs, ctx.is_deterministic()) {
                 return Some((bf, bt, None, 0, 0));
             }
@@ -211,11 +216,11 @@ fn find_best_move_internal(
             let check1 = if p1.is_some() { b1.is_side_in_check(opposite_color(active_color)) } else { false };
             let check2 = if p2.is_some() { b2.is_side_in_check(opposite_color(active_color)) } else { false };
 
-            let mut key1 = (check1 as i32) * 10000 + cap1.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
-            let mut key2 = (check2 as i32) * 10000 + cap2.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
+            let mut key1 = (check1 as i32) * SORTING_PRIORITY_BONUS_FOR_CHECKING_MOVES + cap1.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
+            let mut key2 = (check2 as i32) * SORTING_PRIORITY_BONUS_FOR_CHECKING_MOVES + cap2.map(|pc| piece_value_cp(pc.get_type())).unwrap_or(0);
 
-            if let Some(_promo) = p1_promo { key1 += 900; }
-            if let Some(_promo) = p2_promo { key2 += 900; }
+            if let Some(_promo) = p1_promo { key1 += SORTING_PRIORITY_BONUS_FOR_QUEEN_PROMOTIONS; }
+            if let Some(_promo) = p2_promo { key2 += SORTING_PRIORITY_BONUS_FOR_QUEEN_PROMOTIONS; }
 
             key2.cmp(&key1) // descending
         });
@@ -229,7 +234,7 @@ fn find_best_move_internal(
 
     if ID_ITERATIONS_ENABLED {
         let base_budget_ms = ctx.time_budget_ms();
-        let max_extra_ms = base_budget_ms.saturating_mul(PV_CHANGE_MAX_EXTRA_PCT_TIME) / 100;
+        let max_extra_ms = base_budget_ms.saturating_mul(PV_CHANGE_MAX_EXTRA_PCT_TIME) / DIVISOR_FOR_PERCENTAGE_CALCULATION;
         let mut extra_used_ms: usize = 0;
         let mut last_best_move: Option<((usize, usize), (usize, usize), Option<char>)> = None;
         for depth_now in 1..=effective_depth {
@@ -297,8 +302,8 @@ fn find_best_move_internal(
                     if (lf, lt, lp) != (bf, bt, bpromo)
                         && base_budget_ms > 0
                         && extra_used_ms < max_extra_ms {
-                        let mut extend_ms = base_budget_ms / 2;
-                        if extend_ms > 500 { extend_ms = 500; }
+                        let mut extend_ms = base_budget_ms / HALF_OF_TIME_BUDGET;
+                        if extend_ms > TIME_EXTENSION_IN_MS { extend_ms = TIME_EXTENSION_IN_MS; }
                         let remaining_extra = max_extra_ms.saturating_sub(extra_used_ms);
                         if extend_ms > remaining_extra { extend_ms = remaining_extra; }
                         if extend_ms > 0 {
@@ -386,7 +391,7 @@ fn find_best_move_internal(
             // Apply evaluation noise if not in deterministic mode
             use crate::search::integration::playing_strength::strength_noise_sigma;
             use rand::{rng, Rng};
-            let apply_noise = !ctx.is_deterministic() && playing_strength < 1000;
+            let apply_noise = !ctx.is_deterministic() && playing_strength < FULL_PLAYING_STRENGTH_VALUE;
             let sigma = if apply_noise { strength_noise_sigma(playing_strength) } else { 0 };
 
             for &(from, to, promo) in &root_moves {

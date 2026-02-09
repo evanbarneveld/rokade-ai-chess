@@ -33,7 +33,7 @@ fn test_queen_save() {
     let ctx = game.search_context_arc();
     //get the best move
     let history = game.get_history().clone();
-    let san_move = generate_move_as_san(ctx.as_ref(), game.get_search_mode(), game.get_game_state(), &history, 3, TEST_MOVE_TIME, 1000).unwrap();
+    let san_move = generate_move_as_san(ctx.as_ref(), game.get_search_mode(), game.get_game_state(), &history, 3, 2000, 1000).unwrap();
     println!("Selected move: {:?}", san_move);
 
     /*

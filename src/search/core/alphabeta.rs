@@ -3,6 +3,7 @@ use crate::piece::pieces::{Color, Piece, PieceType, piece_value_cp};
 use crate::search::evaluation::heuristics::SearchHeuristics;
 use crate::search::management::prune_null_moves::prune_null_moves;
 use crate::search::management::see::see_dest_estimate;
+use crate::search::management::move_picker::MovePicker;
 use crate::search::core::qsearch::qsearch;
 use crate::search::core::advanced_search::{find_all_valid_moves, MAX_EVAL_VALUE, MIN_EVAL_VALUE, SEARCH_ABORTED};
 use crate::state::game_state::GameState;
@@ -10,13 +11,8 @@ use crate::search::state::tt::{decode_move, encode_move, from_tt_score, to_tt_sc
 use crate::search::state::rep_stack::RepetitionStack;
 use crate::search::context::SearchContext;
 
-const HUNDRED_HALF_MOVES: u32 = 100;
+pub const HUNDRED_HALF_MOVES: u32 = 100;
 const FRONTIER_FUTILITY_MARGIN: i32 = 200; // Margin for futility pruning at depth=1
-const MOVE_ORDER_COUNTER_BONUS: i32 = 220_000;
-const MOVE_ORDER_CONTINUATION_DIV: i32 = 16;
-const MOVE_ORDER_CONTINUATION_CAP: i32 = 150_000;
-const MOVE_ORDER_SEE_SCALE: i32 = 4;
-const MOVE_ORDER_SEE_CAP: i32 = 2_000;
 const RAZORING_MAX_DEPTH: usize = 1;
 const RFP_MAX_DEPTH: usize = 2;
 const LMP_MAX_DEPTH: usize = 2;
@@ -33,6 +29,10 @@ const RAZOR_MARGIN_DEPTH_2: i32 = 420;
 const RFP_MARGIN_DEPTH_2: i32 = 160;
 const RFP_MARGIN_DEPTH_3: i32 = 260;
 
+const MATE_SCORE_PROXIMITY: i32 = 100; //avoid singular extension near mate
+
+const GOOD_CONTINUATION_HISTORY_THRESHOLD: i32 = 8_000;
+const GOOD_HISTORY_THRESHOLD: i32 = 10_000;
 
 // ============================================================
 // MAIN ALPHA-BETA FUNCTION
@@ -131,7 +131,7 @@ pub fn alphabeta(
             return None;
         }
         let score = from_tt_score(entry.score, ply);
-        if score.abs() >= MATE_VALUE - 100 {
+        if score.abs() >= MATE_VALUE - MATE_SCORE_PROXIMITY {
             return None;
         }
         Some(SingularInfo {
@@ -147,7 +147,16 @@ pub fn alphabeta(
 
             // Don't trust cached 0 scores near the root - they may be stale or imprecise
             // Force re-evaluation to get more accurate scores for move ordering
-            let use_cached = !(tt_score == 0 && ply <= 3 && depth >= 3);
+            let mut use_cached = !(tt_score == 0 && ply <= 3 && depth >= 3);
+
+            // For full-width searches (checking moves from root), don't trust TT entries
+            // that might have been stored from narrower aspiration windows. This ensures
+            // we find brilliant sacrifices that were previously misevaluated.
+            // The mate line needs to be explored without TT interference.
+            // Extend to ply <= 10 to cover typical mate-in-N lines.
+            if ply <= 10 && alpha < MIN_EVAL_VALUE + 1000 && beta > MAX_EVAL_VALUE - 1000 {
+                use_cached = false;
+            }
 
             if use_cached {
                 match entry.bound {
@@ -211,6 +220,8 @@ pub fn alphabeta(
     }
 
     // Reverse futility pruning and razoring at shallow depths (skip in check)
+    // Note: We don't check for checking moves here as it's too expensive.
+    // The quiescence search will handle tactical complications.
     let ply_u = if ply < 0 { 0 } else { ply as usize };
     if (depth <= RFP_MAX_DEPTH || depth <= RAZORING_MAX_DEPTH)
         && ply >= 2
@@ -218,12 +229,9 @@ pub fn alphabeta(
         let in_check = game_state.mutable_board().is_side_in_check(to_move);
         if !in_check {
             let is_pv = beta.saturating_sub(alpha) > 1;
-            if is_pv {
-                // Skip shallow pruning in PV nodes to avoid missing tactical lines.
-            } else {
-                if !has_checking_move(game_state, to_move) {
-                    let static_eval = evaluate_position(game_state.board(), to_move);
-                    let maximizing = to_move == Color::White;
+            if !is_pv {
+                let static_eval = evaluate_position(game_state.board(), to_move);
+                let maximizing = to_move == Color::White;
 
                 if depth >= 2 && depth <= RFP_MAX_DEPTH {
                     let margin = rfp_margin(depth);
@@ -240,7 +248,7 @@ pub fn alphabeta(
                     }
                 }
 
-                    if depth <= RAZORING_MAX_DEPTH {
+                if depth <= RAZORING_MAX_DEPTH {
                     let margin = razor_margin(depth);
                     let razor_cut = if maximizing {
                         static_eval + margin <= alpha
@@ -267,7 +275,6 @@ pub fn alphabeta(
                             return score;
                         }
                     }
-                    }
                 }
             }
         }
@@ -275,6 +282,40 @@ pub fn alphabeta(
 
     // Generate and order moves
     let moves = find_all_valid_moves(game_state);
+
+    // Debug: trace specific lines for brilliant sacrifice detection
+    #[cfg(feature = "debug-search")] {
+        // Check if this is the position after Kxb7 (where White should find a8=Q#)
+        // King on b7 (row 6, col 1), pawn on a7 (row 6, col 0)
+        if ply == 2 && to_move == Color::White {
+            let board = game_state.board();
+            if let Some(piece) = board.get(6, 1) {
+                if piece.get_type() == crate::piece::pieces::PieceType::King
+                   && piece.get_color() == Color::Black {
+                    if let Some(pawn) = board.get(6, 0) {
+                        if pawn.get_type() == crate::piece::pieces::PieceType::Pawn
+                           && pawn.get_color() == Color::White {
+                            eprintln!("{}[AB] *** DETECTED: Position after Kxb7 - looking for a8=Q# ***", indent);
+                            eprintln!("{}[AB] depth={} moves.len()={} alpha={} beta={}", indent, depth, moves.len(), alpha, beta);
+                            // Find a7a8 promotion moves
+                            let mut found_queen = false;
+                            for (from, to, promo) in &moves {
+                                if *from == (6, 0) && *to == (7, 0) {
+                                    eprintln!("{}[AB] Found a8 promotion: promo={:?}", indent, promo);
+                                    if promo == &Some('q') {
+                                        found_queen = true;
+                                    }
+                                }
+                            }
+                            if !found_queen {
+                                eprintln!("{}[AB] WARNING: a8=Q NOT FOUND in move list!", indent);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // No legal moves: checkmate or stalemate
     if moves.is_empty() {
@@ -295,13 +336,22 @@ pub fn alphabeta(
         };
     }
 
-    let ordered_moves = order_moves(moves, game_state, tt_move_hint, to_move, ply, heuristics, prev_move);
+    // Create staged move picker for efficient move ordering
+    let killers = heuristics.get_killers(ply as usize);
+    let mut move_picker = MovePicker::new(
+        moves,
+        tt_move_hint,
+        killers,
+        to_move,
+        game_state.half_move_clock(),
+        prev_move,
+    );
     let original_alpha = alpha;
     let original_beta = beta;
 
-    // Search all moves
-    let result = search_moves(
-        ordered_moves,
+    // Search all moves using staged picker
+    let result = search_moves_staged(
+        &mut move_picker,
         game_state,
         depth,
         alpha,
@@ -357,6 +407,8 @@ struct MoveSearchResult {
     best_from_to: Option<((usize, usize), (usize, usize))>,
 }
 
+// Singular extension info (currently disabled in staged picker but kept for future use)
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 struct SingularInfo {
     mv: ((usize, usize), (usize, usize)),
@@ -364,9 +416,12 @@ struct SingularInfo {
     depth: usize,
 }
 
-/// Search all moves and update alpha/beta bounds
-fn search_moves(
-    moves: Vec<((usize, usize), (usize, usize), Option<char>)>,
+/// Search moves using staged move picker for better efficiency.
+/// Moves are picked in stages (TT → captures → killers → quiets) to avoid
+/// scoring/sorting moves that are never searched due to early cutoffs.
+#[allow(clippy::too_many_arguments)]
+fn search_moves_staged(
+    move_picker: &mut MovePicker,
     game_state: &mut GameState,
     depth: usize,
     mut alpha: i32,
@@ -378,7 +433,7 @@ fn search_moves(
     prev_move: Option<((usize, usize), (usize, usize))>,
     ctx: &SearchContext,
     heuristics: &mut SearchHeuristics,
-    singular_info: Option<SingularInfo>,
+    _singular_info: Option<SingularInfo>, // Disabled in staged picker but kept for future use
     check_extension_budget: u8,
 ) -> MoveSearchResult {
     let maximizing = to_move == Color::White;
@@ -389,20 +444,9 @@ fn search_moves(
     let history_bonus = (depth as i32) * (depth as i32);
     let in_check = game_state.mutable_board().is_side_in_check(to_move);
     let is_pv = beta.saturating_sub(alpha) > 1;
-    let singular_candidate = if is_pv && !in_check && depth >= SINGULAR_EXTENSION_MIN_DEPTH && moves.len() > 1 {
-        singular_info
-    } else {
-        None
-    };
 
     #[cfg(feature = "debug-search")]
     let indent = "  ".repeat(ply as usize);
-
-    #[cfg(feature = "debug-search")] {
-        if ply <= 3 {
-            eprintln!("{}[AB] searching {} moves at ply={} depth={}", indent, moves.len(), ply, depth);
-        }
-    }
 
     // Frontier futility pruning: compute static eval once if at depth=1
     let static_eval = if depth == 1 {
@@ -411,27 +455,13 @@ fn search_moves(
         None
     };
 
-    for &(from, to, promo) in moves.iter() {
-        let mut singular_extend = false;
-        if let Some(singular) = singular_candidate
-            && singular.mv == (from, to)
-            && singular.depth + 1 >= depth
-            && move_index == 0
-        {
-            singular_extend = is_singular_extension(
-                ctx,
-                game_state,
-                depth,
-                ply,
-                tt,
-                rep_stack,
-                to_move,
-                singular.mv,
-                singular.score,
-                &moves,
-                prev_move,
-            );
-        }
+    // Get board state for move picker
+    let ep_target = game_state.en_passant_target();
+
+    // Pick moves using staged picker
+    while let Some((from, to, promo)) = move_picker.next(game_state.board(), ep_target, heuristics) {
+        // Singular extension is disabled in staged picker (requires all moves upfront)
+        let singular_extend = false;
 
         let u = game_state.make_move_fast(from, to, promo);
 
@@ -487,8 +517,8 @@ fn search_moves(
         }
 
         // Frontier futility pruning: skip quiet moves at depth=1 that can't improve position
-        if let Some(eval) = static_eval
-            && quiet && !gives_check && !is_first_move {
+        if let Some(eval) = static_eval {
+            if quiet && !gives_check && !is_first_move {
                 if maximizing && eval + FRONTIER_FUTILITY_MARGIN <= alpha {
                     game_state.unmake_move_fast(u);
                     move_index += 1;
@@ -499,6 +529,7 @@ fn search_moves(
                     continue;
                 }
             }
+        }
 
         // Calculate LMR reduction
         let reduction = if is_first_move {
@@ -515,15 +546,6 @@ fn search_moves(
             )
         };
         let reduced_depth = child_depth.saturating_sub(reduction);
-
-        // Debug: show LMR reduction
-        #[cfg(feature = "debug-search")]
-        if ply <= 3 && reduction > 0 {
-            let from_sq = crate::piece::as_square_str(from);
-            let to_sq = crate::piece::as_square_str(to);
-            eprintln!("{}  [LMR] {}{}: depth {} → {} (reduction={})",
-                indent, from_sq, to_sq, child_depth, reduced_depth, reduction);
-        }
 
         // Search with appropriate window
         let current_score = if is_first_move {
@@ -546,14 +568,6 @@ fn search_moves(
             // Null-window search (PVS)
             let (nw_alpha, nw_beta) = null_window(alpha, beta, maximizing);
 
-            #[cfg(feature = "debug-search")]
-            if ply <= 2 {
-                let from_sq = crate::piece::as_square_str(from);
-                let to_sq = crate::piece::as_square_str(to);
-                eprintln!("{}  [PVS] {}{}: null-window [{}, {}] depth={}",
-                    indent, from_sq, to_sq, nw_alpha, nw_beta, reduced_depth);
-            }
-
             let mut sc = alphabeta(
                 ctx,
                 heuristics,
@@ -570,26 +584,14 @@ fn search_moves(
             );
 
             // Re-search with full window if needed
-            // For PVS: re-search if score falls within (alpha, beta) after null-window search
-            // This indicates the move might improve the bound and needs precise evaluation
             let needs_research = if maximizing {
-                // White: re-search if score beats alpha but isn't a beta cutoff
                 sc > alpha && sc < beta
             } else {
-                // Black: re-search if score beats beta but isn't an alpha cutoff
                 sc < beta && sc > alpha
             };
-            // Also re-search if we used reduced depth (LMR) and got a promising score
             let lmr_research = reduced_depth < child_depth && is_better(sc, alpha, maximizing);
 
             if needs_research || lmr_research {
-                #[cfg(feature = "debug-search")]
-                if ply <= 2 {
-                    let from_sq = crate::piece::as_square_str(from);
-                    let to_sq = crate::piece::as_square_str(to);
-                    eprintln!("{}  [PVS] {}{}: RE-SEARCH! score {} in window ({}, {})",
-                        indent, from_sq, to_sq, sc, alpha, beta);
-                }
                 sc = alphabeta(
                     ctx,
                     heuristics,
@@ -609,6 +611,35 @@ fn search_moves(
         };
 
         game_state.unmake_move_fast(u);
+
+        // Debug: trace moves at ply 2 in position after Kxb7
+        #[cfg(feature = "debug-search")] {
+            // Check if this is the position after Kxb7
+            let is_kxb7_pos = {
+                let board = game_state.board();
+                if let Some(piece) = board.get(6, 1) {
+                    piece.get_type() == crate::piece::pieces::PieceType::King
+                       && piece.get_color() == Color::Black
+                       && board.get(6, 0).map_or(false, |p|
+                           p.get_type() == crate::piece::pieces::PieceType::Pawn
+                           && p.get_color() == Color::White)
+                } else {
+                    false
+                }
+            };
+
+            if ply == 2 && is_kxb7_pos {
+                let from_sq = crate::piece::as_square_str(from);
+                let to_sq = crate::piece::as_square_str(to);
+                let promo_str = promo.map(|c| c.to_string()).unwrap_or_default();
+                eprintln!("{}[AB] *** KXPB7 POS - move {}{}{}: score={} is_first={} ***",
+                         indent, from_sq, to_sq, promo_str, current_score, is_first_move);
+                if from == (6, 0) && to == (7, 0) && promo == Some('q') && current_score < 25000 {
+                    eprintln!("{}[AB] *** WARNING: a8=Q did NOT return mate score! ***", indent);
+                }
+            }
+        }
+
         if current_score == SEARCH_ABORTED {
             return MoveSearchResult {
                 best_value: SEARCH_ABORTED,
@@ -616,15 +647,6 @@ fn search_moves(
             };
         }
         is_first_move = false;
-
-        #[cfg(feature = "debug-search")]
-        if ply <= 3 {
-            let from_sq = crate::piece::as_square_str(from);
-            let to_sq = crate::piece::as_square_str(to);
-            let promo_str = promo.map(|c| c.to_string()).unwrap_or_default();
-            eprintln!("{}  move {}{}{}: score={} α={} β={} best={}",
-                indent, from_sq, to_sq, promo_str, current_score, alpha, beta, current_value);
-        }
 
         // Track if this move improved the bound before updating
         let old_alpha = alpha;
@@ -638,13 +660,6 @@ fn search_moves(
         // Update bounds and track best move
         if maximizing {
             if current_value > alpha {
-                #[cfg(feature = "debug-search")]
-                if ply <= 3 {
-                    let from_sq = crate::piece::as_square_str(from);
-                    let to_sq = crate::piece::as_square_str(to);
-                    eprintln!("{}  ★ NEW BEST: {}{} score={} (was α={})",
-                        indent, from_sq, to_sq, current_value, alpha);
-                }
                 alpha = current_value;
                 best_from_to = Some((from, to));
                 if quiet {
@@ -654,7 +669,6 @@ fn search_moves(
                     }
                 }
             } else if quiet && current_score <= old_alpha {
-                // Penalize quiet moves that failed to improve alpha
                 let penalty = -history_bonus / 2;
                 heuristics.add_history(to_move, from, to, penalty);
                 if let Some((_, prev_to)) = prev_move {
@@ -662,31 +676,16 @@ fn search_moves(
                 }
             }
             if current_value >= beta {
-                #[cfg(feature = "debug-search")]
-                if ply <= 3 {
-                    let from_sq = crate::piece::as_square_str(from);
-                    let to_sq = crate::piece::as_square_str(to);
-                    eprintln!("{}  ✂ BETA CUTOFF: {}{} score={} ≥ β={}",
-                        indent, from_sq, to_sq, current_value, beta);
-                }
-                // Record killer move on beta cutoff for quiet moves
                 if quiet {
                     heuristics.add_killer(ply as usize, from, to);
                     if let Some((prev_from, prev_to)) = prev_move {
                         heuristics.set_counter_move(to_move, prev_from, prev_to, from, to);
                     }
                 }
-                break; // Beta cutoff
+                break;
             }
         } else {
             if current_value < beta {
-                #[cfg(feature = "debug-search")]
-                if ply <= 3 {
-                    let from_sq = crate::piece::as_square_str(from);
-                    let to_sq = crate::piece::as_square_str(to);
-                    eprintln!("{}  ★ NEW BEST: {}{} score={} (was β={})",
-                        indent, from_sq, to_sq, current_value, beta);
-                }
                 beta = current_value;
                 best_from_to = Some((from, to));
                 if quiet {
@@ -696,7 +695,6 @@ fn search_moves(
                     }
                 }
             } else if quiet && current_score >= old_beta {
-                // Penalize quiet moves that failed to improve beta
                 let penalty = -history_bonus / 2;
                 heuristics.add_history(to_move, from, to, penalty);
                 if let Some((_, prev_to)) = prev_move {
@@ -704,33 +702,17 @@ fn search_moves(
                 }
             }
             if current_value <= alpha {
-                #[cfg(feature = "debug-search")]
-                if ply <= 3 {
-                    let from_sq = crate::piece::as_square_str(from);
-                    let to_sq = crate::piece::as_square_str(to);
-                    eprintln!("{}  ✂ ALPHA CUTOFF: {}{} score={} ≤ α={}",
-                        indent, from_sq, to_sq, current_value, alpha);
-                }
-                // Record killer move on alpha cutoff for quiet moves
                 if quiet {
                     heuristics.add_killer(ply as usize, from, to);
                     if let Some((prev_from, prev_to)) = prev_move {
                         heuristics.set_counter_move(to_move, prev_from, prev_to, from, to);
                     }
                 }
-                break; // Alpha cutoff
+                break;
             }
         }
 
         move_index += 1;
-    }
-
-    #[cfg(feature = "debug-search")]
-    if ply <= 3 {
-        let best_str = best_from_to.map(|(f, t)| {
-            format!("{}{}", crate::piece::as_square_str(f), crate::piece::as_square_str(t))
-        }).unwrap_or_else(|| "none".to_string());
-        eprintln!("{}[AB] search_moves done: best_value={} best_move={}", indent, current_value, best_str);
     }
 
     MoveSearchResult {
@@ -741,13 +723,8 @@ fn search_moves(
 
 
 // ============================================================
-// MOVE ORDERING
+// PRUNING MARGINS
 // ============================================================
-
-struct MoveOrderingContext {
-    half_move_clock: u32,
-    prev_move: Option<((usize, usize), (usize, usize))>,
-}
 
 #[inline]
 fn razor_margin(depth: usize) -> i32 {
@@ -765,194 +742,6 @@ fn rfp_margin(depth: usize) -> i32 {
         3 => RFP_MARGIN_DEPTH_3,
         _ => RFP_MARGIN_DEPTH_3,
     }
-}
-
-#[inline]
-fn capture_see_order_score(
-    board: &crate::board::Board,
-    to_move: Color,
-    from: (usize, usize),
-    to: (usize, usize),
-    promo: Option<char>,
-    is_en_passant: bool,
-) -> i32 {
-    let moved = match board.get(from.0, from.1) {
-        Some(p) => p,
-        None => return 0,
-    };
-    let cap_sq = if is_en_passant { Some((from.0, to.1)) } else { None };
-    let captured = if let Some(sq) = cap_sq {
-        board.get(sq.0, sq.1)
-    } else {
-        board.get(to.0, to.1)
-    };
-    let cap_val = captured.map(|p| piece_value_cp(p.get_type())).unwrap_or(0);
-
-    let mut post = *board;
-    post.set(from.0, from.1, None);
-    if let Some(sq) = cap_sq {
-        post.set(sq.0, sq.1, None);
-    }
-
-    let mut moved_piece = moved;
-    if let Some(pc) = promo {
-        let pt = match pc {
-            'q' | 'Q' => PieceType::Queen,
-            'r' | 'R' => PieceType::Rook,
-            'b' | 'B' => PieceType::Bishop,
-            'n' | 'N' => PieceType::Knight,
-            _ => moved_piece.get_type(),
-        };
-        moved_piece = Piece::new(pt, moved_piece.get_color());
-    }
-    post.set(to.0, to.1, Some(moved_piece));
-    if moved_piece.get_type() == PieceType::King {
-        post.set_king_location(moved_piece.get_color(), to);
-    }
-
-    see_dest_estimate(&post, to_move, to, cap_val)
-}
-
-/// Compute a heuristic score for move ordering
-fn compute_move_order_score(
-    from: (usize, usize),
-    to: (usize, usize),
-    promo: Option<char>,
-    moved_type: Option<PieceType>,
-    is_capture: bool,
-    mvv_lva: i32,
-    see_score: i32,
-    to_move: Color,
-    ply: i32,
-    ctx: &MoveOrderingContext,
-    heuristics: &SearchHeuristics,
-) -> i32 {
-    let mut key = mvv_lva;
-    if is_capture {
-        key += (see_score * MOVE_ORDER_SEE_SCALE).clamp(-MOVE_ORDER_SEE_CAP, MOVE_ORDER_SEE_CAP);
-    }
-
-    // Promotion bonus
-    if let Some(p) = promo {
-        key += match p {
-            'q' => 900,
-            'r' => 500,
-            'b' => 330,
-            'n' => 320,
-            _ => 0,
-        };
-    }
-
-    let is_pawn_moved = moved_type == Some(PieceType::Pawn);
-
-    // Near 50-move rule: prioritize pawn moves and captures
-    if ctx.half_move_clock >= 80 && (is_pawn_moved || is_capture) {
-        key += 100_000;
-    }
-
-    // Quiet moves: check killer and history heuristics
-    if !is_capture && !is_pawn_moved {
-        if let Some((prev_from, prev_to)) = ctx.prev_move {
-            if heuristics.is_counter_move(to_move, prev_from, prev_to, from, to) {
-                key += MOVE_ORDER_COUNTER_BONUS;
-            }
-            let cont = heuristics.continuation_score(to_move, prev_to, from, to);
-            key += (cont / MOVE_ORDER_CONTINUATION_DIV).clamp(-MOVE_ORDER_CONTINUATION_CAP, MOVE_ORDER_CONTINUATION_CAP);
-        }
-        if heuristics.is_killer(ply as usize, from, to) {
-            key += 200_000;
-        }
-        let hist = heuristics.history_score(to_move, from, to);
-        key += (hist / 32).clamp(-200_000, 200_000);
-    }
-
-    key
-}
-
-/// Order moves for better alpha-beta cutoffs
-fn order_moves(
-    moves: Vec<((usize, usize), (usize, usize), Option<char>)>,
-    game_state: &GameState,
-    tt_move_hint: Option<(u8, u8)>,
-    to_move: Color,
-    ply: i32,
-    heuristics: &SearchHeuristics,
-    prev_move: Option<((usize, usize), (usize, usize))>,
-) -> Vec<((usize, usize), (usize, usize), Option<char>)> {
-    if moves.is_empty() {
-        return moves;
-    }
-
-    let mut ordered = moves;
-
-    // Try TT move first (use pre-extracted hint, available even if depth was insufficient)
-    if let Some((best_from, best_to)) = tt_move_hint {
-        let bm = decode_move(best_from, best_to);
-        if let Some(pos) = ordered.iter().position(|(f, t, _)| (*f, *t) == bm) {
-            let first = ordered.remove(pos);
-            ordered.insert(0, first);
-        }
-    }
-
-    if ordered.len() <= 1 {
-        return ordered;
-    }
-
-    let ctx = MoveOrderingContext {
-        half_move_clock: game_state.half_move_clock(),
-        prev_move,
-    };
-
-    // Collect piece info before sorting
-    let piece_info: Vec<_> = {
-        let b = game_state.board();
-        let ep_target = game_state.en_passant_target();
-        ordered
-            .iter()
-            .map(|&(from, to, promo)| {
-                let moved = b.get(from.0, from.1);
-                let moved_type = moved.map(|p| p.get_type());
-                let is_ep = ep_target.is_some()
-                    && ep_target == Some(to)
-                    && moved_type == Some(PieceType::Pawn)
-                    && b.get(to.0, to.1).is_none();
-                let is_capture = b.get(to.0, to.1).is_some() || is_ep;
-                let mvv_lva = if crate::search::core::advanced_search::MVV_LVA_ENABLED {
-                    b.move_score_mvv_lva(from, to)
-                } else {
-                    0
-                };
-                let see_score = if is_capture {
-                    capture_see_order_score(b, to_move, from, to, promo, is_ep)
-                } else {
-                    0
-                };
-                (moved_type, is_capture, mvv_lva, see_score)
-            })
-            .collect()
-    };
-
-    // Score all moves
-    let mut moves_with_scores: Vec<_> = ordered
-        .into_iter()
-        .enumerate()
-        .map(|(i, (from, to, promo))| {
-            let (moved_type, is_capture, mvv_lva, see_score) = piece_info[i];
-            let score = compute_move_order_score(
-                from, to, promo, moved_type, is_capture, mvv_lva,
-                see_score, to_move, ply, &ctx, heuristics,
-            );
-            ((from, to, promo), score)
-        })
-        .collect();
-
-    // Sort everything after the first move (TT move)
-    if moves_with_scores.len() > 1 {
-        let (_, tail) = moves_with_scores.split_at_mut(1);
-        tail.sort_by_key(|&(_, score)| -score);
-    }
-
-    moves_with_scores.into_iter().map(|(m, _)| m).collect()
 }
 
 // ============================================================
@@ -981,8 +770,9 @@ pub(crate) fn calculate_lmr_reduction(
         return 0;
     }
 
-    // Avoid LMR in late endgames where tactics are sharper and depth is sparse.
-    if phase <= 8 {
+    // Avoid LMR in very late endgames (e.g., K+R vs K) where tactics are sharper.
+    // Phase 5 = roughly one rook + one minor, or a queen alone.
+    if phase <= 5 {
         return 0;
     }
 
@@ -1035,15 +825,15 @@ pub(crate) fn calculate_lmr_reduction(
     }
     let is_killer = heuristics.is_killer(ply as usize, from, to);
 
-    if is_killer || is_counter || cont > 8_000 {
+    if is_killer || is_counter || cont > GOOD_CONTINUATION_HISTORY_THRESHOLD {
         r = r.saturating_sub(1);
     }
     if is_good_history(hist) {
         r = r.saturating_sub(1);
-    } else if hist < -10_000 {
+    } else if hist < -GOOD_HISTORY_THRESHOLD {
         r += 1;
     }
-    if cont < -8_000 {
+    if cont < -GOOD_CONTINUATION_HISTORY_THRESHOLD {
         r += 1;
     }
 
@@ -1104,7 +894,7 @@ fn null_window(alpha: i32, beta: i32, maximizing: bool) -> (i32, i32) {
 #[inline]
 fn is_good_history(hist: i32) -> bool {
     // History scores are stored per-side and are always positive for good moves
-    hist > 10_000
+    hist > GOOD_HISTORY_THRESHOLD
 }
 
 #[inline]
@@ -1219,17 +1009,4 @@ pub(crate) fn is_singular_extension(
     checked > 0
 }
 
-#[inline]
-fn has_checking_move(game_state: &mut GameState, side: Color) -> bool {
-    let moves = find_all_valid_moves(game_state);
-    for &(from, to, promo) in moves.iter() {
-        let u = game_state.make_move_fast(from, to, promo);
-        let gives_check = game_state.mutable_board().is_side_in_check(opponent(side));
-        game_state.unmake_move_fast(u);
-        if gives_check {
-            return true;
-        }
-    }
-    false
-}
 

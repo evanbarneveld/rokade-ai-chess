@@ -60,6 +60,10 @@ pub fn is_knight_outpost(board: &Board, row: usize, col: usize, color: Color) ->
     crate::board::evaluators::evaluate_knights::is_knight_outpost(board, row, col, color)
 }
 
+pub fn is_bishop_outpost(board: &Board, row: usize, col: usize, color: Color) -> bool {
+    crate::board::evaluators::evaluate_bishops::is_bishop_outpost(board, row, col, color)
+}
+
 pub fn evaluate_rook(
     board: &Board,
     row: usize,
@@ -145,6 +149,19 @@ pub fn king_ring_pressure(
     att_b: &[[bool; 8]; 8],
 ) -> i32 {
     crate::board::evaluators::evaluate_king::king_ring_pressure(
+        board, color, phase, king_pos, att_w, att_b
+    )
+}
+
+pub fn king_virtual_mobility(
+    board: &Board,
+    color: Color,
+    phase: i32,
+    king_pos: Option<(usize, usize)>,
+    att_w: &[[bool; 8]; 8],
+    att_b: &[[bool; 8]; 8],
+) -> i32 {
+    crate::board::evaluators::evaluate_king::king_virtual_mobility(
         board, color, phase, king_pos, att_w, att_b
     )
 }
