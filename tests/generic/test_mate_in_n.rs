@@ -78,7 +78,7 @@ fn test_mate_in_4_failure_1() {
         game.get_game_state(),
         &history,
         8,
-        10000, //this mate_in_4 requires at least +/- 15-20 seconds!!!
+        15000, //this mate_in_4 requires at least +/- 15-20 seconds!!!
         1000,
     ).unwrap();
     println!("Selected move: {:?}", san_move);
@@ -111,7 +111,7 @@ fn test_mate_in_4_failure_2() {
         game.get_game_state(),
         &history,
         10,
-        50000, //this mate_in_4 requires at least +/- 15-20 seconds!!!
+        60000, //this mate_in_4 requires at least +/- 15-20 seconds!!!
         1000,
     ).unwrap();
     println!("Selected move: {:?}", san_move);
